@@ -7,7 +7,7 @@ from datetime import datetime
 # Remplacement PyPDF2 → pypdf (compatible Streamlit Cloud)
 from pypdf import PdfReader
 
-from pdf_generator import generate_pdf_report
+from pdf_generator import generate_premium_pdf_report
 
 
 # ===============================================================
