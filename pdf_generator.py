@@ -1279,3 +1279,13 @@ if __name__ == "__main__":
         print("✅ Test génération terminé")
     else:
         print("⚠️ Fichier patient_data.json non trouvé")
+        # Alias pour compatibilité avec l'ancien code
+def generate_pdf_report(patient_data=None, json_file=None, dxa_pdf_path=None, 
+                       epigenetic_pdf_path=None, output_path=None, output_filename=None):
+    """Fonction legacy - redirige vers generate_premium_pdf_report"""
+    return generate_premium_pdf_report(
+        patient_data=patient_data,
+        json_file=json_file,
+        output_path=output_path,
+        output_filename=output_filename
+    )
