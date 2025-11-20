@@ -1,11 +1,14 @@
 import streamlit as st
 import re
-import PyPDF2
 import tempfile
 import json
 from datetime import datetime
 
+# Utilisation correcte de pypdf (et non PyPDF2)
+from pypdf import PdfReader, PdfWriter
+
 from pdf_generator import generate_pdf_report
+
 
 
 # ===============================================================
