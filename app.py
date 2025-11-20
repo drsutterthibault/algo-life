@@ -355,19 +355,21 @@ if st.button("🔄 Générer le Rapport", use_container_width=True):
                 st.session_state.dxa_data,
                 st.session_state.patient_info
             )
-
-          pdf_path = generate_premium_pdf_report(  # ✅ Nouveau nom
-                patient_data=json_data,
-                output_filename="rapport_algolife.pdf"
-            )
-
-            st.success("✅ Rapport généré avec succès !")
-
-            with open(pdf_path, "rb") as f:
-                st.download_button(
-                    "📥 Télécharger le PDF",
-                    f.read(),
-                    file_name=f"ALGO-LIFE_{nom}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
+            try:
+                # Génération du PDF
+                pdf_path = generate_premium_pdf_report(
+                    patient_data=json_data,
+                    output_filename="rapport_algolife.pdf"
                 )
+                
+                st.success("✅ PDF généré avec succès!")
+                
+                # Téléchargement
+                with open(pdf_path, "rb") as f:
+                    st.download_button(
+                        label="📥 Télécharger le Rapport PDF",
+                        data=f.read(),
+                        file_name=f"ALGO-LIFE_{nom}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
