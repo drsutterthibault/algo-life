@@ -356,7 +356,7 @@ if st.button("🔄 Générer le Rapport", use_container_width=True):
                 st.session_state.patient_info
             )
 
-            pdf_path = generate_pdf_report(
+          pdf_path = generate_premium_pdf_report(  # ✅ Nouveau nom
                 patient_data=json_data,
                 output_filename="rapport_algolife.pdf"
             )
