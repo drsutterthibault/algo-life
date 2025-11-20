@@ -1,0 +1,6 @@
+streamlit
+pypdf
+reportlab
+matplotlib
+numpy
+Pillow
