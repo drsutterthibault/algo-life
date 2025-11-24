@@ -1,7 +1,7 @@
 """
 ALGO-LIFE - Application Streamlit Complète
 Plateforme d'Analyse Bio-Fonctionnelle avec Rapports Statistiques Avancés
-Version 2.0 - Novembre 2025
+Version 2.1 - Novembre 2025 - BUG FIX DATA STRUCTURE
 
 Auteur: Thibault - Product Manager Functional Biology, Espace Lab SA
 """
@@ -16,6 +16,7 @@ import os
 # Import des modules ALGO-LIFE
 from algolife_statistical_analysis import AlgoLifeStatisticalAnalysis
 from algolife_pdf_generator import generate_algolife_pdf_report
+from algolife_engine import AlgoLifeEngine  # Import du moteur
 
 # ============================================================================
 # CONFIGURATION DE LA PAGE
@@ -84,6 +85,92 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
+# FONCTION DE TRANSFORMATION DES DONNÉES (FIX DU BUG)
+# ============================================================================
+
+def prepare_data_for_engine(patient_data):
+    """
+    Transforme les données de patient_data vers le format attendu par AlgoLifeEngine
+    
+    CRITICAL: Cette fonction résout le bug de structure de données entre App.py et Engine
+    
+    Format App.py: patient_data['biological_markers']['cortisol_reveil']
+    Format Engine: bio_data['hormones_salivaires']['cortisol_reveil']
+    """
+    markers = patient_data.get('biological_markers', {})
+    patient_info = patient_data.get('patient_info', {})
+    
+    # Structure pour AlgoLifeEngine
+    bio_data = {
+        'hormones_salivaires': {
+            'cortisol_reveil': markers.get('cortisol_reveil'),
+            'cortisol_reveil_30': markers.get('cortisol_car_30'),  # Mapping: cortisol_car_30 → cortisol_reveil_30
+            'cortisol_12h': markers.get('cortisol_12h'),
+            'cortisol_18h': markers.get('cortisol_18h'),
+            'cortisol_22h': markers.get('cortisol_22h'),
+            'dhea': markers.get('dhea')
+        },
+        'inflammation': {
+            'crp_us': markers.get('crp')  # Mapping: crp → crp_us
+        },
+        'acides_gras': {
+            # Note: On n'a pas AA/EPA directement, on utilise omega3_index comme proxy
+            # Pour une vraie analyse AA/EPA, il faudrait ajouter ces champs dans la saisie
+            'aa_epa': None  # À compléter si disponible
+        },
+        'metabolisme_glucidique': {
+            'homa': markers.get('homa_index'),
+            'quicki': markers.get('quicki_index'),
+            'glycemie': markers.get('glycemie'),
+            'insuline': markers.get('insuline')
+        },
+        'permeabilite_intestinale': {
+            'zonuline': markers.get('zonuline'),
+            'lbp': markers.get('lbp')
+        },
+        'neurotransmetteurs': {
+            'dopamine': markers.get('dopamine'),
+            'serotonine': markers.get('serotonine'),
+            'noradrenaline': markers.get('noradrenaline'),
+            'adrenaline': markers.get('adrenaline'),
+            'hiaa_5': markers.get('hiaa_5'),
+            'vma': markers.get('vma')
+        },
+        'micronutriments': {
+            'vit_d': markers.get('vit_d'),
+            'selenium': markers.get('selenium'),
+            'zinc': markers.get('zinc'),
+            'ferritine': markers.get('ferritine')
+        },
+        'cardiovasculaire': {
+            'homocysteine': markers.get('homocysteine'),
+            'omega3_index': markers.get('omega3_index')
+        },
+        'microbiote': {
+            'benzoate': markers.get('benzoate'),
+            'hippurate': markers.get('hippurate'),
+            'phenol': markers.get('phenol'),
+            'p_cresol': markers.get('p_cresol'),
+            'indican': markers.get('indican'),
+            'tartarate': markers.get('tartarate'),
+            'd_arabinitol': markers.get('d_arabinitol')
+        }
+    }
+    
+    # Données épigénétiques (si disponibles)
+    epi_data = {
+        'epigenetic_age': {
+            'biological_age': markers.get('biological_age'),  # Pas collecté actuellement
+            'chronological_age': patient_info.get('age')
+        }
+    }
+    
+    # Données DXA (si disponibles)
+    dxa_data = None  # Pas collecté actuellement
+    
+    return dxa_data, bio_data, epi_data
+
+# ============================================================================
 # INITIALISATION SESSION STATE
 # ============================================================================
 
@@ -95,6 +182,9 @@ if 'analysis_results' not in st.session_state:
 
 if 'chart_buffer' not in st.session_state:
     st.session_state.chart_buffer = None
+
+if 'engine_results' not in st.session_state:
+    st.session_state.engine_results = None
 
 # ============================================================================
 # HEADER
@@ -423,28 +513,44 @@ with tab2:
                 with st.spinner("🔄 Analyse en cours... Calcul des indices composites et modèles prédictifs"):
                     
                     try:
-                        # Créer l'instance d'analyse
-                        analyzer = AlgoLifeStatisticalAnalysis(st.session_state.patient_data)
+                        # === FIX DU BUG: Transformer les données pour l'Engine ===
+                        dxa_data, bio_data, epi_data = prepare_data_for_engine(st.session_state.patient_data)
                         
-                        # Calculer tous les indices
+                        # Créer l'instance de l'Engine
+                        engine = AlgoLifeEngine()
+                        
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
+                        # Analyse par l'Engine
+                        status_text.text("Analyse par AlgoLifeEngine...")
+                        progress_bar.progress(15)
+                        engine_results = engine.analyze(dxa_data, bio_data, epi_data)
+                        st.session_state.engine_results = engine_results
+                        
+                        # Créer l'instance d'analyse statistique
                         status_text.text("Calcul des indices composites...")
-                        progress_bar.progress(20)
+                        progress_bar.progress(30)
+                        analyzer = AlgoLifeStatisticalAnalysis(st.session_state.patient_data)
+                        
+                        status_text.text("Calcul des indices statistiques...")
+                        progress_bar.progress(50)
                         indices_results = analyzer.calculate_all_indices()
                         
                         status_text.text("Construction du modèle prédictif...")
-                        progress_bar.progress(50)
+                        progress_bar.progress(65)
                         model_results = analyzer.build_predictive_model()
                         
                         status_text.text("Génération des visualisations...")
-                        progress_bar.progress(75)
+                        progress_bar.progress(80)
                         chart_buffer = analyzer.generate_statistical_visualizations()
                         
                         status_text.text("Compilation du rapport complet...")
-                        progress_bar.progress(90)
+                        progress_bar.progress(95)
                         comprehensive_data = analyzer.generate_comprehensive_report_data()
+                        
+                        # Ajouter les résultats de l'Engine au rapport complet
+                        comprehensive_data['engine_results'] = engine_results
                         
                         progress_bar.progress(100)
                         status_text.text("✅ Analyse terminée!")
@@ -462,11 +568,70 @@ with tab2:
                         st.code(traceback.format_exc())
         
         # Afficher les résultats si disponibles
-        if st.session_state.analysis_results:
+        if st.session_state.analysis_results and st.session_state.engine_results:
+            st.divider()
+            
+            # === NOUVEAU: Résultats de l'Engine ===
+            st.subheader("🧬 Analyse AlgoLifeEngine")
+            
+            engine_res = st.session_state.engine_results
+            
+            col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+            
+            with col_e1:
+                stress_score = engine_res['stress'].get('stress_score')
+                if stress_score:
+                    st.metric("Stress Score", f"{stress_score:.1f}/100")
+                    with st.expander("Détails"):
+                        st.caption(engine_res['stress']['stress_status'])
+                        if 'CAR' in engine_res['stress']:
+                            st.caption(f"CAR: {engine_res['stress']['CAR']} nmol/L")
+            
+            with col_e2:
+                inflam_score = engine_res['inflammation'].get('inflammation_score')
+                if inflam_score:
+                    st.metric("Inflammation", f"{inflam_score:.1f}/100")
+                    with st.expander("Détails"):
+                        st.caption(engine_res['inflammation']['inflammation_status'])
+            
+            with col_e3:
+                glyc_score = engine_res['glycemia'].get('glycemia_score')
+                if glyc_score:
+                    st.metric("Glycémie", f"{glyc_score:.1f}/100")
+                    with st.expander("Détails"):
+                        st.caption(engine_res['glycemia']['glycemia_status'])
+            
+            with col_e4:
+                gut_score = engine_res['gut'].get('gut_score')
+                if gut_score:
+                    st.metric("Intestin", f"{gut_score:.1f}/100")
+                    with st.expander("Détails"):
+                        st.caption(engine_res['gut']['gut_status'])
+            
+            # Score Global de Longévité
+            global_score = engine_res.get('global_score')
+            if global_score:
+                st.divider()
+                col_global1, col_global2, col_global3 = st.columns([1, 2, 1])
+                with col_global2:
+                    st.metric(
+                        "🎯 SCORE GLOBAL DE LONGÉVITÉ",
+                        f"{global_score}/100",
+                        "Santé métabolique globale"
+                    )
+            
+            # Plan d'action
+            action_plan = engine_res.get('action_plan', [])
+            if action_plan:
+                st.divider()
+                st.subheader("📋 Plan d'Action AlgoLifeEngine")
+                for i, action in enumerate(action_plan, 1):
+                    st.markdown(f"**{i}.** {action}")
+            
             st.divider()
             
             # Section 1: Indices Composites
-            st.subheader("📊 Indices Composites")
+            st.subheader("📊 Indices Composites Statistiques")
             
             indices = st.session_state.analysis_results.get('composite_indices', {})
             
@@ -664,11 +829,13 @@ with tab3:
             - Informations patient complètes
             - Résumé exécutif des résultats
             - Score R² du modèle prédictif
+            - Score Global de Longévité (AlgoLifeEngine)
             
             **Page 2 - Indices Composites**
             - Tableau détaillé de tous les indices calculés
             - Interprétations pour chaque indice
             - Analyses mécanistiques approfondies
+            - Résultats AlgoLifeEngine (Stress, Inflammation, Glycémie, Intestin)
             
             **Page 3 - Analyse Statistique**
             - Performance du modèle prédictif (R²)
@@ -684,6 +851,7 @@ with tab3:
             - Plan d'action personnalisé hiérarchisé
             - Interventions spécifiques par priorité
             - Calendrier de suivi recommandé
+            - Plan d'action AlgoLifeEngine
             """)
 
 # ============================================================================
@@ -720,19 +888,19 @@ with tab4:
             st.info("Template chargé! Vous pouvez maintenant modifier les valeurs.")
     
     with example_col2:
-        st.subheader("Cas 2: Santé Osseuse")
+        st.subheader("Cas 2: Burnout & Épuisement")
         st.markdown("""
-        **Patient:** Isabelle F., 46 ans, F
+        **Patient:** Marc D., 42 ans, M
         
         **Résultats clés:**
-        - TBS L1-L4: 1.417 (microarchitecture normale)
-        - DMO total rachis: 0.996 g/cm² (T-score: -0.1)
-        - DMO hanche total: 1.128 g/cm² (T-score: +1.4)
+        - CAR effondré: -12.69 nmol/L (burnout avancé)
+        - Cortisol réveil: 15.73 nmol/L (normal)
+        - Cortisol CAR +30: 3.04 nmol/L (très bas)
         
         **Diagnostic:**
-        Santé osseuse modérée nécessitant surveillance.
+        Épuisement surrénalien avec hypo-réactivité HPA marquée.
         
-        **Indice composite:** 57.0/100
+        **Stress Score:** 12.3/100 (Critique)
         """)
         
         if st.button("Charger cet exemple", key="example2"):
@@ -753,6 +921,7 @@ with tab5:
     - **Construire des modèles prédictifs** par régression linéaire multiple
     - **Générer des rapports statistiques professionnels** au format PDF
     - **Identifier les leviers d'action prioritaires** pour chaque patient
+    - **Utiliser le moteur AlgoLifeEngine** pour des scores de longévité
     
     ---
     
@@ -768,6 +937,7 @@ with tab5:
        - Examiner les indices composites
        - Consulter le modèle prédictif et les corrélations
        - Prendre connaissance des recommandations
+       - Visualiser les scores AlgoLifeEngine
     
     3. **Génération du Rapport** (Tab 3)
        - Générer le rapport PDF professionnel
@@ -778,24 +948,32 @@ with tab5:
     
     ### 🔬 Modules d'Analyse
     
-    #### 1. Axe HPA (Hypothalamo-Hypophyso-Surrénalien)
+    #### 1. AlgoLifeEngine (Nouveau)
+    - **Stress Score**: Basé sur le CAR (Cortisol Awakening Response)
+    - **Inflammation Score**: Basé sur CRP ultra-sensible
+    - **Glycemia Score**: Basé sur HOMA-IR
+    - **Gut Score**: Basé sur zonuline et LBP
+    - **Aging Score**: Basé sur l'âge épigénétique (si disponible)
+    - **Score Global de Longévité**: Moyenne pondérée
+    
+    #### 2. Axe HPA (Hypothalamo-Hypophyso-Surrénalien)
     - **Cortisol CAR**: Indicateur clé du burnout (< 7.5 nmol/L = signature épuisement)
     - **Rythme circadien**: Profil sur 24h pour évaluer l'adaptation au stress
     - **DHEA**: Réserve adaptative surrénalienne
     
-    #### 2. Neurotransmetteurs
+    #### 3. Neurotransmetteurs
     - **Dopamine**: Motivation, plaisir
     - **Sérotonine**: Humeur, bien-être
     - **Noradrénaline**: Vigilance, stress
     - **Analyse des métabolites**: 5-HIAA, VMA, MHPG
     
-    #### 3. Métabolisme
+    #### 4. Métabolisme
     - **HOMA Index**: Résistance insulinique
     - **QUICKI Index**: Sensibilité insulinique
     - **CRP**: Inflammation systémique
     - **Homocystéine**: Risque cardiovasculaire
     
-    #### 4. Microbiote
+    #### 5. Microbiote
     - **Métabolites bactériens**: Benzoate, hippurate, phénol, p-crésol
     - **Métabolites fongiques**: Tartarate, D-arabinitol
     - **Perméabilité intestinale**: LBP, zonuline
@@ -825,6 +1003,7 @@ with tab5:
     - ✅ Les corrélations avec p < 0.05 sont statistiquement significatives
     - ✅ Les recommandations sont hiérarchisées par impact attendu
     - ✅ Le rapport PDF est généré au format médical professionnel
+    - ✅ Le score de longévité AlgoLifeEngine est un indicateur global de santé
     
     ---
     
@@ -832,7 +1011,7 @@ with tab5:
     
     **Développeur:** Thibault - Product Manager Functional Biology  
     **Organisation:** Espace Lab SA, Geneva  
-    **Version:** 2.0 (Novembre 2025)
+    **Version:** 2.1 (Novembre 2025) - BUG FIX DATA STRUCTURE
     
     Pour toute question ou suggestion d'amélioration, n'hésitez pas à nous contacter.
     """)
@@ -854,5 +1033,5 @@ with footer_col2:
     st.caption("Biologie Fonctionnelle")
 
 with footer_col3:
-    st.caption("Version 2.0")
+    st.caption("Version 2.1 - Bug Fix")
     st.caption(f"Dernière mise à jour: {datetime.now().strftime('%d/%m/%Y')}")
