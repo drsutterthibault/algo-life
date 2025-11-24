@@ -176,7 +176,14 @@ class AlgoLifeEngine:
         if "biological_age" not in data or "chronological_age" not in data:
             return {"aging_status": "–", "aging_score": None}
 
-        delta = data["biological_age"] - data["chronological_age"]
+        # Vérifier que les valeurs ne sont pas None
+        biological_age = data["biological_age"]
+        chronological_age = data["chronological_age"]
+        
+        if biological_age is None or chronological_age is None:
+            return {"aging_status": "–", "aging_score": None}
+
+        delta = biological_age - chronological_age
 
         if delta < -2:
             status = "Âge biologique plus jeune"
