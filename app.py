@@ -146,48 +146,61 @@ class PDFExtractor:
         
         # Patterns ULTRA-FLEXIBLES adaptés aux formats LIMS et SYNLAB
         patterns = {
-            # Cortisol - PATTERNS LIMS/SYNLAB
+            # Cortisol - PATTERNS INVERSÉS (valeur AVANT le label)
             'cortisol_reveil': [
+                r'(\d+[.,]?\d*)\s+cortisol\s+r[ée]veil',  # "15.73 Cortisol réveil"
+                r'cortisol\s+r[ée]veil\s+(\d+[.,]?\d*)',  # "Cortisol réveil 15.73"
                 r'cortisol\s+salivaire\s+r[ée]veil\s+(\d+[.,]?\d*)',
-                r'cortisol\s+r[ée]veil\s+(\d+[.,]?\d*)',
             ],
             'cortisol_car_30': [
+                r'(\d+[.,]?\d*)\s+cortisol\s+car\s+\([+]30\s*min\)',  # "3.04 Cortisol CAR (+30min)"
+                r'cortisol\s+car\s+\([+]30\s*min\)\s+(\d+[.,]?\d*)',
                 r'cortisol\s+salivaire\s+r[ée]veil\s*\+\s*30[\'\"′]?\s+(\d+[.,]?\d*)',
-                r'cortisol\s+car\s+(\d+[.,]?\d*)',
             ],
             'cortisol_12h': [
+                r'(\d+[.,]?\d*)\s+cortisol\s+12h',  # "1.93 Cortisol 12h"
+                r'cortisol\s+12h\s+(\d+[.,]?\d*)',
                 r'cortisol\s+salivaire\s+12h\s+(\d+[.,]?\d*)',
             ],
             'cortisol_18h': [
+                r'(\d+[.,]?\d*)\s+cortisol\s+18h',  # "0.55 Cortisol 18h"
+                r'cortisol\s+18h\s+(\d+[.,]?\d*)',
                 r'cortisol\s+salivaire\s+18h\s+(\d+[.,]?\d*)',
             ],
             'cortisol_22h': [
+                r'(\d+[.,]?\d*)\s+cortisol\s+22h',  # "0.28 Cortisol 22h"
+                r'cortisol\s+22h\s+(\d+[.,]?\d*)',
                 r'cortisol\s+salivaire\s+22h\s+(\d+[.,]?\d*)',
             ],
             
-            # DHEA
+            # DHEA - PATTERNS FLEXIBLES
             'dhea': [
-                r'dhea\s+salivaire\s+(\d+[.,]?\d*)',
+                r'dhea\s+salivaire\s+(\d+[.,]?\d*)',  # Rapport labo
+                r'dhea\s+(\d+[.,]?\d*)',  # Rapport synthétique
                 r'dehydro\s+epi\s+androsterone.*?(\d+[.,]?\d*)\s*[µu]mol',
             ],
             
             # Inflammation
             'crp': [
                 r'crp\s+ultra[-\s]sensible\s+(\d+[.,]?\d*)',
+                r'crp[:\s]+(\d+[.,]?\d*)',
             ],
             
             # Glycémie
             'glycemie': [
                 r'gly[cé][ée]mie\s+[àa]\s+jeun\s+(\d+[.,]?\d*)',
+                r'gly[cé][ée]mie\s+(\d+[.,]?\d*)',
             ],
             'insuline': [
                 r'insuline\s+[àa]\s+jeun\s+(\d+[.,]?\d*)',
+                r'insuline\s+(\d+[.,]?\d*)',
             ],
             'homa_index': [
                 r'index\s+homa\s+(\d+[.,]?\d*)',
+                r'homa[:\s]+(\d+[.,]?\d*)',
             ],
             
-            # Neurotransmetteurs
+            # Neurotransmetteurs - PATTERNS FLEXIBLES
             'dopamine': [
                 r'dopamine\s+(\d+[.,]?\d*)',
             ],
@@ -198,7 +211,7 @@ class PDFExtractor:
                 r'noradr[ée]naline\s+(\d+[.,]?\d*)',
             ],
             'adrenaline': [
-                r'adrenaline\s+(\d+[.,]?\d*)',
+                r'adr[ée]naline\s+(\d+[.,]?\d*)',
             ],
             'hiaa_5': [
                 r'5[-\s]?hiaa\s+(\d+[.,]?\d*)',
