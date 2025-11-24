@@ -1,7 +1,7 @@
 """
-ALGO-LIFE - Application Streamlit Complète
-Plateforme d'Analyse Bio-Fonctionnelle avec Rapports Statistiques Avancés
-Version 2.1 - Novembre 2025 - BUG FIX DATA STRUCTURE
+ALGO-LIFE - Application Streamlit avec Import PDF Automatique
+Plateforme d'Analyse Bio-Fonctionnelle avec Extraction PDF
+Version 3.0 - Novembre 2025 - PDF IMPORT FEATURE
 
 Auteur: Thibault - Product Manager Functional Biology, Espace Lab SA
 """
@@ -12,11 +12,22 @@ import numpy as np
 from datetime import datetime
 import sys
 import os
+import re
+from io import BytesIO
+
+# Import PDF extraction
+try:
+    import PyPDF2
+    import pdfplumber
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+    st.warning("⚠️ PyPDF2 ou pdfplumber non disponible. Installation requise pour l'extraction PDF.")
 
 # Import des modules ALGO-LIFE
 from algolife_statistical_analysis import AlgoLifeStatisticalAnalysis
 from algolife_pdf_generator import generate_algolife_pdf_report
-from algolife_engine import AlgoLifeEngine  # Import du moteur
+from algolife_engine import AlgoLifeEngine
 
 # ============================================================================
 # CONFIGURATION DE LA PAGE
@@ -70,6 +81,12 @@ st.markdown("""
         border-radius: 5px;
         border-left: 5px solid #DC3545;
     }
+    .info-box {
+        background-color: #D1ECF1;
+        padding: 1rem;
+        border-radius: 5px;
+        border-left: 5px solid #17A2B8;
+    }
     .stButton>button {
         width: 100%;
         background-color: #3498DB;
@@ -81,42 +98,188 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #2C3E50;
     }
+    .upload-section {
+        background-color: #F0F8FF;
+        padding: 2rem;
+        border-radius: 10px;
+        border: 2px dashed #3498DB;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# FONCTION DE TRANSFORMATION DES DONNÉES (FIX DU BUG)
+# FONCTIONS D'EXTRACTION PDF
+# ============================================================================
+
+class PDFExtractor:
+    """Classe pour extraire les données des PDF médicaux"""
+    
+    @staticmethod
+    def extract_text_from_pdf(pdf_file):
+        """Extrait le texte d'un fichier PDF"""
+        try:
+            if pdfplumber:
+                with pdfplumber.open(pdf_file) as pdf:
+                    text = ""
+                    for page in pdf.pages:
+                        text += page.extract_text() or ""
+                    return text
+        except:
+            pass
+        
+        # Fallback sur PyPDF2
+        try:
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() or ""
+            return text
+        except Exception as e:
+            st.error(f"❌ Erreur extraction PDF: {str(e)}")
+            return ""
+    
+    @staticmethod
+    def extract_biological_data(text):
+        """Extrait les données biologiques du texte PDF"""
+        data = {}
+        
+        # Patterns de recherche pour les biomarqueurs courants
+        patterns = {
+            # Cortisol
+            'cortisol_reveil': r'cortisol.*réveil[:\s]+(\d+\.?\d*)',
+            'cortisol_car_30': r'cortisol.*\+?30[:\s]+(\d+\.?\d*)',
+            'cortisol_12h': r'cortisol.*12h?[:\s]+(\d+\.?\d*)',
+            'cortisol_18h': r'cortisol.*18h?[:\s]+(\d+\.?\d*)',
+            'cortisol_22h': r'cortisol.*22h?[:\s]+(\d+\.?\d*)',
+            
+            # DHEA
+            'dhea': r'dhea[:\s]+(\d+\.?\d*)',
+            
+            # Inflammation
+            'crp': r'crp[:\s]+(\d+\.?\d*)',
+            
+            # Glycémie
+            'glycemie': r'gly[cé]émie[:\s]+(\d+\.?\d*)',
+            'insuline': r'insuline[:\s]+(\d+\.?\d*)',
+            'homa_index': r'homa[:\s]+(\d+\.?\d*)',
+            
+            # Neurotransmetteurs
+            'dopamine': r'dopamine[:\s]+(\d+\.?\d*)',
+            'serotonine': r's[ée]rotonine[:\s]+(\d+\.?\d*)',
+            'noradrenaline': r'noradr[ée]naline[:\s]+(\d+\.?\d*)',
+            
+            # Micronutriments
+            'vit_d': r'vitamine\s*d[:\s]+(\d+\.?\d*)',
+            'zinc': r'zinc[:\s]+(\d+\.?\d*)',
+            'selenium': r's[ée]l[ée]nium[:\s]+(\d+\.?\d*)',
+            'ferritine': r'ferritine[:\s]+(\d+\.?\d*)',
+            
+            # Intestin
+            'zonuline': r'zonuline[:\s]+(\d+\.?\d*)',
+            'lbp': r'lbp[:\s]+(\d+\.?\d*)',
+            
+            # Oméga
+            'omega3_index': r'om[ée]ga[- ]?3.*index[:\s]+(\d+\.?\d*)',
+            
+            # Homocystéine
+            'homocysteine': r'homocyst[ée]ine[:\s]+(\d+\.?\d*)',
+            
+            # Microbiote
+            'benzoate': r'benzoate[:\s]+(\d+\.?\d*)',
+            'hippurate': r'hippurate[:\s]+(\d+\.?\d*)',
+            'phenol': r'ph[ée]nol[:\s]+(\d+\.?\d*)',
+            'p_cresol': r'p[- ]?cr[ée]sol[:\s]+(\d+\.?\d*)',
+            'indican': r'indican[:\s]+(\d+\.?\d*)',
+        }
+        
+        text_lower = text.lower()
+        
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                    data[key] = value
+                except:
+                    pass
+        
+        return data
+    
+    @staticmethod
+    def extract_epigenetic_data(text):
+        """Extrait les données épigénétiques du texte PDF"""
+        data = {}
+        
+        patterns = {
+            'biological_age': r'[âa]ge\s+biologique[:\s]+(\d+\.?\d*)',
+            'telomere_length': r'longueur.*t[ée]lom[èe]re[:\s]+(\d+\.?\d*)',
+            'methylation_score': r'm[ée]thylation.*score[:\s]+(\d+\.?\d*)',
+        }
+        
+        text_lower = text.lower()
+        
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                    data[key] = value
+                except:
+                    pass
+        
+        return data
+    
+    @staticmethod
+    def extract_imaging_data(text):
+        """Extrait les données d'imagerie (DXA, etc.) du texte PDF"""
+        data = {}
+        
+        patterns = {
+            'body_fat_percentage': r'masse\s+grasse[:\s]+(\d+\.?\d*)',
+            'lean_mass': r'masse\s+maigre[:\s]+(\d+\.?\d*)',
+            'bone_density': r'densit[ée].*osseuse[:\s]+(\d+\.?\d*)',
+            'visceral_fat': r'graisse\s+visc[ée]rale[:\s]+(\d+\.?\d*)',
+        }
+        
+        text_lower = text.lower()
+        
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                    data[key] = value
+                except:
+                    pass
+        
+        return data
+
+# ============================================================================
+# FONCTION DE TRANSFORMATION DES DONNÉES
 # ============================================================================
 
 def prepare_data_for_engine(patient_data):
     """
     Transforme les données de patient_data vers le format attendu par AlgoLifeEngine
-    
-    CRITICAL: Cette fonction résout le bug de structure de données entre App.py et Engine
-    
-    Format App.py: patient_data['biological_markers']['cortisol_reveil']
-    Format Engine: bio_data['hormones_salivaires']['cortisol_reveil']
     """
     markers = patient_data.get('biological_markers', {})
     patient_info = patient_data.get('patient_info', {})
     
-    # Structure pour AlgoLifeEngine
     bio_data = {
         'hormones_salivaires': {
             'cortisol_reveil': markers.get('cortisol_reveil'),
-            'cortisol_reveil_30': markers.get('cortisol_car_30'),  # Mapping: cortisol_car_30 → cortisol_reveil_30
+            'cortisol_reveil_30': markers.get('cortisol_car_30'),
             'cortisol_12h': markers.get('cortisol_12h'),
             'cortisol_18h': markers.get('cortisol_18h'),
             'cortisol_22h': markers.get('cortisol_22h'),
             'dhea': markers.get('dhea')
         },
         'inflammation': {
-            'crp_us': markers.get('crp')  # Mapping: crp → crp_us
+            'crp_us': markers.get('crp')
         },
         'acides_gras': {
-            # Note: On n'a pas AA/EPA directement, on utilise omega3_index comme proxy
-            # Pour une vraie analyse AA/EPA, il faudrait ajouter ces champs dans la saisie
-            'aa_epa': None  # À compléter si disponible
+            'aa_epa': markers.get('aa_epa')
         },
         'metabolisme_glucidique': {
             'homa': markers.get('homa_index'),
@@ -157,16 +320,19 @@ def prepare_data_for_engine(patient_data):
         }
     }
     
-    # Données épigénétiques (si disponibles)
     epi_data = {
         'epigenetic_age': {
-            'biological_age': markers.get('biological_age'),  # Pas collecté actuellement
+            'biological_age': markers.get('biological_age'),
             'chronological_age': patient_info.get('age')
         }
     }
     
-    # Données DXA (si disponibles)
-    dxa_data = None  # Pas collecté actuellement
+    dxa_data = {
+        'body_fat_percentage': markers.get('body_fat_percentage'),
+        'lean_mass': markers.get('lean_mass'),
+        'bone_density': markers.get('bone_density'),
+        'visceral_fat': markers.get('visceral_fat')
+    }
     
     return dxa_data, bio_data, epi_data
 
@@ -175,7 +341,12 @@ def prepare_data_for_engine(patient_data):
 # ============================================================================
 
 if 'patient_data' not in st.session_state:
-    st.session_state.patient_data = {}
+    st.session_state.patient_data = {
+        'patient_info': {},
+        'biological_markers': {},
+        'epigenetic_data': {},
+        'imaging_data': {}
+    }
 
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = None
@@ -186,12 +357,19 @@ if 'chart_buffer' not in st.session_state:
 if 'engine_results' not in st.session_state:
     st.session_state.engine_results = None
 
+if 'pdf_extracted_data' not in st.session_state:
+    st.session_state.pdf_extracted_data = {
+        'biological': {},
+        'epigenetic': {},
+        'imaging': {}
+    }
+
 # ============================================================================
 # HEADER
 # ============================================================================
 
 st.markdown('<h1 class="main-header">🧬 ALGO-LIFE</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Plateforme d\'Analyse Bio-Fonctionnelle Multi-Dimensionnelle</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Plateforme d\'Analyse Bio-Fonctionnelle avec Import PDF Automatique</p>', unsafe_allow_html=True)
 
 # ============================================================================
 # SIDEBAR - INFORMATIONS PATIENT
@@ -219,801 +397,612 @@ with st.sidebar:
     
     st.divider()
     
-    # Date du prélèvement
     prelevement_date = st.date_input("Date du prélèvement", value=datetime.now())
     
     st.divider()
     
-    # Statut des données
-    if st.session_state.patient_data:
-        st.success("✅ Données saisies")
-    else:
-        st.warning("⚠️ Aucune donnée")
-    
-    if st.session_state.analysis_results:
-        st.success("✅ Analyse effectuée")
-    else:
-        st.info("ℹ️ En attente d'analyse")
+    # Sauvegarder les infos patient
+    if st.button("💾 Enregistrer Informations Patient", key="save_patient_info"):
+        st.session_state.patient_data['patient_info'] = {
+            'name': patient_name,
+            'age': patient_age,
+            'sexe': patient_sexe,
+            'height': patient_height,
+            'weight': patient_weight,
+            'imc': patient_imc,
+            'prelevement_date': prelevement_date.strftime('%Y-%m-%d')
+        }
+        st.success("✅ Informations patient enregistrées!")
 
 # ============================================================================
 # TABS PRINCIPAUX
 # ============================================================================
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Saisie des Données",
-    "📈 Analyse Statistique",
+    "📤 Import PDF",
+    "📊 Analyse Statistique", 
     "📄 Rapport PDF",
-    "📚 Exemples & Templates",
+    "📚 Exemples",
     "ℹ️ Guide"
 ])
 
 # ============================================================================
-# TAB 1 - SAISIE DES DONNÉES
+# TAB 1 - IMPORT PDF
 # ============================================================================
 
 with tab1:
-    st.header("Saisie des Biomarqueurs")
+    st.header("📤 Import Automatique des Résultats PDF")
     
-    # Créer des sous-tabs pour organiser les données
-    sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs([
-        "🧪 Axe HPA (Stress)",
-        "🧠 Neurotransmetteurs",
-        "🔥 Métabolisme",
-        "🦠 Microbiote"
-    ])
+    st.markdown("""
+    <div class="info-box">
+    <h4>🎯 Instructions d'Import</h4>
+    <p>Téléchargez vos fichiers PDF de résultats médicaux. Le système extraira automatiquement les données biologiques, 
+    épigénétiques et d'imagerie pour les analyser.</p>
+    <ul>
+        <li>✅ Biologie: Hormones, neurotransmetteurs, inflammation, métabolisme</li>
+        <li>✅ Épigénétique: Âge biologique, téloméres, méthylation</li>
+        <li>✅ Imagerie: DXA, composition corporelle, densité osseuse</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # SUB-TAB 1: Axe HPA
-    with sub_tab1:
-        st.subheader("Profil Cortisol Salivaire")
+    st.divider()
+    
+    # Section Upload
+    col_upload1, col_upload2, col_upload3 = st.columns(3)
+    
+    with col_upload1:
+        st.subheader("🧪 PDF Biologie")
+        bio_pdf = st.file_uploader(
+            "Analyses biologiques",
+            type=['pdf'],
+            key='bio_pdf',
+            help="PDF contenant: cortisol, DHEA, neurotransmetteurs, inflammation, etc."
+        )
         
-        col1, col2, col3 = st.columns(3)
+        if bio_pdf:
+            if st.button("🔍 Extraire Données Bio", key="extract_bio"):
+                with st.spinner("Extraction en cours..."):
+                    text = PDFExtractor.extract_text_from_pdf(bio_pdf)
+                    extracted = PDFExtractor.extract_biological_data(text)
+                    
+                    if extracted:
+                        st.session_state.pdf_extracted_data['biological'] = extracted
+                        st.session_state.patient_data['biological_markers'].update(extracted)
+                        st.success(f"✅ {len(extracted)} biomarqueurs extraits!")
+                        
+                        with st.expander("Voir les données extraites"):
+                            st.json(extracted)
+                    else:
+                        st.warning("⚠️ Aucune donnée trouvée. Vérifiez le format du PDF.")
+    
+    with col_upload2:
+        st.subheader("🧬 PDF Épigénétique")
+        epi_pdf = st.file_uploader(
+            "Analyses épigénétiques",
+            type=['pdf'],
+            key='epi_pdf',
+            help="PDF contenant: âge biologique, téloméres, méthylation"
+        )
+        
+        if epi_pdf:
+            if st.button("🔍 Extraire Données Épi", key="extract_epi"):
+                with st.spinner("Extraction en cours..."):
+                    text = PDFExtractor.extract_text_from_pdf(epi_pdf)
+                    extracted = PDFExtractor.extract_epigenetic_data(text)
+                    
+                    if extracted:
+                        st.session_state.pdf_extracted_data['epigenetic'] = extracted
+                        st.session_state.patient_data['biological_markers'].update(extracted)
+                        st.success(f"✅ {len(extracted)} paramètres extraits!")
+                        
+                        with st.expander("Voir les données extraites"):
+                            st.json(extracted)
+                    else:
+                        st.warning("⚠️ Aucune donnée trouvée. Vérifiez le format du PDF.")
+    
+    with col_upload3:
+        st.subheader("🏥 PDF Imagerie")
+        img_pdf = st.file_uploader(
+            "Analyses imagerie (DXA)",
+            type=['pdf'],
+            key='img_pdf',
+            help="PDF contenant: composition corporelle, densité osseuse, masse grasse"
+        )
+        
+        if img_pdf:
+            if st.button("🔍 Extraire Données Img", key="extract_img"):
+                with st.spinner("Extraction en cours..."):
+                    text = PDFExtractor.extract_text_from_pdf(img_pdf)
+                    extracted = PDFExtractor.extract_imaging_data(text)
+                    
+                    if extracted:
+                        st.session_state.pdf_extracted_data['imaging'] = extracted
+                        st.session_state.patient_data['biological_markers'].update(extracted)
+                        st.success(f"✅ {len(extracted)} paramètres extraits!")
+                        
+                        with st.expander("Voir les données extraites"):
+                            st.json(extracted)
+                    else:
+                        st.warning("⚠️ Aucune donnée trouvée. Vérifiez le format du PDF.")
+    
+    st.divider()
+    
+    # Récapitulatif des données extraites
+    st.subheader("📊 Récapitulatif des Données Extraites")
+    
+    total_biological = len(st.session_state.pdf_extracted_data['biological'])
+    total_epigenetic = len(st.session_state.pdf_extracted_data['epigenetic'])
+    total_imaging = len(st.session_state.pdf_extracted_data['imaging'])
+    total_params = total_biological + total_epigenetic + total_imaging
+    
+    col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
+    
+    with col_sum1:
+        st.metric("🧪 Biomarqueurs Bio", total_biological)
+    with col_sum2:
+        st.metric("🧬 Paramètres Épi", total_epigenetic)
+    with col_sum3:
+        st.metric("🏥 Données Imagerie", total_imaging)
+    with col_sum4:
+        st.metric("📈 Total Paramètres", total_params)
+    
+    if total_params > 0:
+        st.success(f"✅ {total_params} paramètres disponibles pour l'analyse!")
+        
+        if st.button("🚀 Lancer l'Analyse Complète", key="launch_analysis", type="primary"):
+            with st.spinner("Analyse en cours..."):
+                try:
+                    # Analyse statistique
+                    analyzer = AlgoLifeStatisticalAnalysis(st.session_state.patient_data)
+                    
+                    stress_result = analyzer.calculate_stress_index()
+                    metabolism_result = analyzer.calculate_metabolism_index()
+                    neuro_result = analyzer.calculate_neurotransmitter_index()
+                    inflam_result = analyzer.calculate_inflammation_index()
+                    microbiome_result = analyzer.calculate_microbiome_index()
+                    
+                    composite_indices = {
+                        'stress': stress_result,
+                        'metabolism': metabolism_result,
+                        'neurotransmitter': neuro_result,
+                        'inflammation': inflam_result,
+                        'microbiome': microbiome_result
+                    }
+                    
+                    model_results = analyzer.build_predictive_model()
+                    correlations = analyzer.calculate_correlations()
+                    recommendations = analyzer.generate_recommendations()
+                    chart_buffer = analyzer.generate_visualizations()
+                    
+                    st.session_state.analysis_results = {
+                        'composite_indices': composite_indices,
+                        'model': model_results,
+                        'correlations': correlations,
+                        'recommendations': recommendations
+                    }
+                    st.session_state.chart_buffer = chart_buffer
+                    
+                    # Analyse AlgoLifeEngine
+                    engine = AlgoLifeEngine()
+                    dxa_data, bio_data, epi_data = prepare_data_for_engine(st.session_state.patient_data)
+                    engine_results = engine.analyze(dxa_data, bio_data, epi_data)
+                    st.session_state.engine_results = engine_results
+                    
+                    st.success("✅ Analyse complète terminée! Consultez l'onglet 'Analyse Statistique'")
+                    st.balloons()
+                    
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de l'analyse: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+    else:
+        st.info("📥 Importez au moins un fichier PDF pour commencer l'analyse.")
+    
+    st.divider()
+    
+    # Section saisie manuelle optionnelle
+    with st.expander("➕ Saisie Manuelle Complémentaire"):
+        st.markdown("""
+        <div class="warning-box">
+        <strong>Note:</strong> Utilisez cette section pour ajouter ou corriger des valeurs non extraites automatiquement.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("Axe HPA - Cortisol & DHEA")
+        col1, col2 = st.columns(2)
         
         with col1:
             cortisol_reveil = st.number_input(
                 "Cortisol réveil (nmol/L)",
-                min_value=0.0, value=15.73, step=0.01,
-                help="Valeurs normales: 5-17.1 nmol/L"
+                min_value=0.0, max_value=100.0, value=0.0, step=0.1,
+                key="manual_cortisol_reveil"
             )
-            cortisol_car = st.number_input(
-                "Cortisol CAR +30min (nmol/L)",
-                min_value=0.0, value=3.04, step=0.01,
-                help="Valeurs normales: 7.5-25.6 nmol/L - CAR < 7.5 = signature burnout"
+            cortisol_car_30 = st.number_input(
+                "Cortisol CAR +30 (nmol/L)",
+                min_value=0.0, max_value=100.0, value=0.0, step=0.1,
+                key="manual_cortisol_car_30"
             )
-        
-        with col2:
             cortisol_12h = st.number_input(
                 "Cortisol 12h (nmol/L)",
-                min_value=0.0, value=1.93, step=0.01,
-                help="Valeurs normales: 1.9-5.2 nmol/L"
+                min_value=0.0, max_value=100.0, value=0.0, step=0.1,
+                key="manual_cortisol_12h"
             )
+        
+        with col2:
             cortisol_18h = st.number_input(
                 "Cortisol 18h (nmol/L)",
-                min_value=0.0, value=0.55, step=0.01,
-                help="Valeurs normales: 0.3-3.0 nmol/L"
+                min_value=0.0, max_value=100.0, value=0.0, step=0.1,
+                key="manual_cortisol_18h"
             )
-        
-        with col3:
             cortisol_22h = st.number_input(
                 "Cortisol 22h (nmol/L)",
-                min_value=0.0, value=0.28, step=0.01,
-                help="Valeurs normales: 0.3-1.4 nmol/L"
+                min_value=0.0, max_value=100.0, value=0.0, step=0.1,
+                key="manual_cortisol_22h"
             )
             dhea = st.number_input(
-                "DHEA (nmol/L)",
-                min_value=0.0, value=2.33, step=0.01,
-                help="Valeurs normales: 0.53-2.44 nmol/L"
-            )
-    
-    # SUB-TAB 2: Neurotransmetteurs
-    with sub_tab2:
-        st.subheader("Neurotransmetteurs Urinaires")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            dopamine = st.number_input(
-                "Dopamine (µmol/mol créat)",
-                min_value=0.0, value=125.46, step=0.01,
-                help="Valeurs normales: 108-244 µmol/mol"
-            )
-            serotonine = st.number_input(
-                "Sérotonine (µmol/mol créat)",
-                min_value=0.0, value=68.26, step=0.01,
-                help="Valeurs normales: 38-89 µmol/mol"
-            )
-            noradrenaline = st.number_input(
-                "Noradrénaline (µmol/mol créat)",
-                min_value=0.0, value=17.15, step=0.01,
-                help="Valeurs normales: 11.1-28.0 µmol/mol"
+                "DHEA (ng/mL)",
+                min_value=0.0, max_value=50.0, value=0.0, step=0.1,
+                key="manual_dhea"
             )
         
-        with col2:
-            adrenaline = st.number_input(
-                "Adrénaline (µmol/mol créat)",
-                min_value=0.0, value=0.79, step=0.01,
-                help="Valeurs normales: 0.76-4.23 µmol/mol"
-            )
-            hiaa_5 = st.number_input(
-                "5-HIAA (mmol/mol créat)",
-                min_value=0.0, value=3.11, step=0.01,
-                help="Métabolite sérotonine - Valeurs: 1.0-3.3 mmol/mol"
-            )
-            vma = st.number_input(
-                "VMA (mmol/mol créat)",
-                min_value=0.0, value=1.35, step=0.01,
-                help="Valeurs normales: 1.04-2.2 mmol/mol"
-            )
-    
-    # SUB-TAB 3: Métabolisme
-    with sub_tab3:
-        st.subheader("Métabolisme Glucidique et Inflammation")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**Glycémie**")
-            glycemie = st.number_input(
-                "Glycémie à jeun (mg/dL)",
-                min_value=0.0, value=87.04, step=0.01,
-                help="Valeurs normales: 60-110 mg/dL"
-            )
-            insuline = st.number_input(
-                "Insuline à jeun (pmol/L)",
-                min_value=0.0, value=90.3, step=0.1,
-                help="Valeurs normales: 19-75 pmol/L"
-            )
-        
-        with col2:
-            st.markdown("**Indices Insulino-Résistance**")
-            homa_index = st.number_input(
-                "HOMA Index",
-                min_value=0.0, value=2.7, step=0.01,
-                help="Valeurs normales: <2.4 - Plus élevé = plus de résistance"
-            )
-            quicki_index = st.number_input(
-                "QUICKI Index",
-                min_value=0.0, value=0.33, step=0.01,
-                help="Valeurs normales: >0.34 - Plus bas = moins de sensibilité"
-            )
-        
-        with col3:
-            st.markdown("**Inflammation & Vitamines**")
-            crp = st.number_input(
-                "CRP ultra-sensible (mg/L)",
-                min_value=0.0, value=2.3, step=0.1,
-                help="Valeurs normales: <1.0 mg/L"
-            )
-            vit_d = st.number_input(
-                "Vitamine D (nmol/L)",
-                min_value=0.0, value=39.5, step=0.1,
-                help="Valeurs optimales: >75 nmol/L"
-            )
-        
-        st.divider()
-        
-        col4, col5 = st.columns(2)
-        
-        with col4:
-            st.markdown("**Oligo-éléments**")
-            selenium = st.number_input("Sélénium (µg/L)", min_value=0.0, value=71.23, step=0.01)
-            zinc = st.number_input("Zinc (µg/dL)", min_value=0.0, value=78.11, step=0.01)
-            ferritine = st.number_input("Ferritine (µg/L)", min_value=0.0, value=22.1, step=0.1)
-        
-        with col5:
-            st.markdown("**Marqueurs Cardiovasculaires**")
-            homocysteine = st.number_input("Homocystéine (µmol/L)", min_value=0.0, value=12.83, step=0.01)
-            omega3_index = st.number_input("Oméga-3 Index (%)", min_value=0.0, value=6.57, step=0.01)
-    
-    # SUB-TAB 4: Microbiote
-    with sub_tab4:
-        st.subheader("Métabolites Organiques Urinaires")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Module Bactérien**")
-            benzoate = st.number_input("Benzoate (mg/g créat)", min_value=0.0, value=18.14, step=0.01)
-            hippurate = st.number_input("Hippurate (mg/g créat)", min_value=0.0, value=589.7, step=0.1)
-            phenol = st.number_input("Phénol (mg/g créat)", min_value=0.0, value=21.20, step=0.01)
-            p_cresol = st.number_input("P-Crésol (mg/g créat)", min_value=0.0, value=59.27, step=0.01)
-            indican = st.number_input("Indican (mg/g créat)", min_value=0.0, value=45.88, step=0.01)
-        
-        with col2:
-            st.markdown("**Perméabilité Intestinale**")
-            lbp = st.number_input(
-                "LBP (ng/mL)",
-                min_value=0.0, value=16.47, step=0.01,
-                help="Endotoxémie - Valeurs normales: 4-13.1 ng/mL"
-            )
-            zonuline = st.number_input(
-                "Zonuline (ng/mL)",
-                min_value=0.0, value=35.12, step=0.01,
-                help="Perméabilité intestinale - Valeurs normales: 17-37 ng/mL"
-            )
-            
-            st.markdown("**Module Fongique**")
-            tartarate = st.number_input("Tartarate (mg/g créat)", min_value=0.0, value=1.56, step=0.01)
-            d_arabinitol = st.number_input("D-Arabinitol (mg/g créat)", min_value=0.0, value=0.34, step=0.01)
-    
-    # Bouton d'enregistrement
-    st.divider()
-    
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-    
-    with col_btn2:
-        if st.button("💾 ENREGISTRER TOUTES LES DONNÉES", type="primary", use_container_width=True):
-            # Compilation de toutes les données
-            st.session_state.patient_data = {
-                'patient_info': {
-                    'nom': patient_name,
-                    'age': patient_age,
-                    'sexe': patient_sexe,
-                    'taille': patient_height,
-                    'poids': patient_weight,
-                    'imc': patient_imc,
-                    'date_prelevement': prelevement_date.strftime('%d/%m/%Y')
-                },
-                'biological_markers': {
-                    'cortisol_reveil': cortisol_reveil,
-                    'cortisol_car_30': cortisol_car,
-                    'cortisol_12h': cortisol_12h,
-                    'cortisol_18h': cortisol_18h,
-                    'cortisol_22h': cortisol_22h,
-                    'dhea': dhea,
-                    'dopamine': dopamine,
-                    'serotonine': serotonine,
-                    'noradrenaline': noradrenaline,
-                    'adrenaline': adrenaline,
-                    'hiaa_5': hiaa_5,
-                    'vma': vma,
-                    'glycemie': glycemie,
-                    'insuline': insuline,
-                    'homa_index': homa_index,
-                    'quicki_index': quicki_index,
-                    'crp': crp,
-                    'vit_d': vit_d,
-                    'selenium': selenium,
-                    'zinc': zinc,
-                    'ferritine': ferritine,
-                    'homocysteine': homocysteine,
-                    'omega3_index': omega3_index,
-                    'benzoate': benzoate,
-                    'hippurate': hippurate,
-                    'phenol': phenol,
-                    'p_cresol': p_cresol,
-                    'indican': indican,
-                    'lbp': lbp,
-                    'zonuline': zonuline,
-                    'tartarate': tartarate,
-                    'd_arabinitol': d_arabinitol
-                }
+        if st.button("💾 Enregistrer Saisie Manuelle"):
+            manual_data = {
+                'cortisol_reveil': cortisol_reveil if cortisol_reveil > 0 else None,
+                'cortisol_car_30': cortisol_car_30 if cortisol_car_30 > 0 else None,
+                'cortisol_12h': cortisol_12h if cortisol_12h > 0 else None,
+                'cortisol_18h': cortisol_18h if cortisol_18h > 0 else None,
+                'cortisol_22h': cortisol_22h if cortisol_22h > 0 else None,
+                'dhea': dhea if dhea > 0 else None,
             }
             
-            st.success("✅ Toutes les données ont été enregistrées avec succès!")
-            st.balloons()
+            # Supprimer les None
+            manual_data = {k: v for k, v in manual_data.items() if v is not None}
             
-            # Afficher un résumé
-            with st.expander("📊 Résumé des données enregistrées"):
-                st.json(st.session_state.patient_data)
+            st.session_state.patient_data['biological_markers'].update(manual_data)
+            st.success(f"✅ {len(manual_data)} valeurs ajoutées/mises à jour!")
 
 # ============================================================================
 # TAB 2 - ANALYSE STATISTIQUE
 # ============================================================================
 
 with tab2:
-    st.header("Analyse Statistique Multi-Dimensionnelle")
+    st.header("📊 Analyse Statistique Multi-Dimensionnelle")
     
-    if not st.session_state.patient_data:
-        st.warning("⚠️ Veuillez d'abord saisir les données dans l'onglet 'Saisie des Données'")
+    if st.session_state.analysis_results is None:
+        st.info("📥 Importez des données PDF et lancez l'analyse depuis l'onglet 'Import PDF'")
     else:
-        col_launch1, col_launch2, col_launch3 = st.columns([1, 2, 1])
+        results = st.session_state.analysis_results
         
-        with col_launch2:
-            if st.button("🔬 LANCER L'ANALYSE COMPLÈTE", type="primary", use_container_width=True):
-                with st.spinner("🔄 Analyse en cours... Calcul des indices composites et modèles prédictifs"):
-                    
-                    try:
-                        # === FIX DU BUG: Transformer les données pour l'Engine ===
-                        dxa_data, bio_data, epi_data = prepare_data_for_engine(st.session_state.patient_data)
-                        
-                        # Créer l'instance de l'Engine
-                        engine = AlgoLifeEngine()
-                        
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        # Analyse par l'Engine
-                        status_text.text("Analyse par AlgoLifeEngine...")
-                        progress_bar.progress(15)
-                        engine_results = engine.analyze(dxa_data, bio_data, epi_data)
-                        st.session_state.engine_results = engine_results
-                        
-                        # Créer l'instance d'analyse statistique
-                        status_text.text("Calcul des indices composites...")
-                        progress_bar.progress(30)
-                        analyzer = AlgoLifeStatisticalAnalysis(st.session_state.patient_data)
-                        
-                        status_text.text("Calcul des indices statistiques...")
-                        progress_bar.progress(50)
-                        indices_results = analyzer.calculate_all_indices()
-                        
-                        status_text.text("Construction du modèle prédictif...")
-                        progress_bar.progress(65)
-                        model_results = analyzer.build_predictive_model()
-                        
-                        status_text.text("Génération des visualisations...")
-                        progress_bar.progress(80)
-                        chart_buffer = analyzer.generate_statistical_visualizations()
-                        
-                        status_text.text("Compilation du rapport complet...")
-                        progress_bar.progress(95)
-                        comprehensive_data = analyzer.generate_comprehensive_report_data()
-                        
-                        # Ajouter les résultats de l'Engine au rapport complet
-                        comprehensive_data['engine_results'] = engine_results
-                        
-                        progress_bar.progress(100)
-                        status_text.text("✅ Analyse terminée!")
-                        
-                        # Stocker les résultats
-                        st.session_state.analysis_results = comprehensive_data
-                        st.session_state.chart_buffer = chart_buffer
-                        
-                        st.success("✅ Analyse statistique terminée avec succès!")
-                        st.balloons()
-                        
-                    except Exception as e:
-                        st.error(f"❌ Erreur lors de l'analyse: {str(e)}")
-                        import traceback
-                        st.code(traceback.format_exc())
+        # Section 1: Indices Composites
+        st.subheader("🎯 Indices Composites")
         
-        # Afficher les résultats si disponibles
-        if st.session_state.analysis_results and st.session_state.engine_results:
-            st.divider()
-            
-            # === NOUVEAU: Résultats de l'Engine ===
-            st.subheader("🧬 Analyse AlgoLifeEngine")
+        indices = results['composite_indices']
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            stress_score = indices['stress']['score']
+            st.metric(
+                "Stress Index",
+                f"{stress_score:.1f}/100",
+                delta=None,
+                help="Basé sur cortisol CAR, rythme circadien, DHEA"
+            )
+        
+        with col2:
+            metab_score = indices['metabolism']['score']
+            st.metric(
+                "Métabolisme",
+                f"{metab_score:.1f}/100",
+                delta=None,
+                help="HOMA, QUICKI, inflammation"
+            )
+        
+        with col3:
+            neuro_score = indices['neurotransmitter']['score']
+            st.metric(
+                "Neurotransmetteurs",
+                f"{neuro_score:.1f}/100",
+                delta=None,
+                help="Dopamine, sérotonine, catécholamines"
+            )
+        
+        with col4:
+            inflam_score = indices['inflammation']['score']
+            st.metric(
+                "Inflammation",
+                f"{inflam_score:.1f}/100",
+                delta=None,
+                help="CRP, homocystéine, oméga-3"
+            )
+        
+        with col5:
+            micro_score = indices['microbiome']['score']
+            st.metric(
+                "Microbiome",
+                f"{micro_score:.1f}/100",
+                delta=None,
+                help="Métabolites bactériens et fongiques"
+            )
+        
+        st.divider()
+        
+        # Section 2: AlgoLifeEngine Results
+        if st.session_state.engine_results:
+            st.subheader("🧬 Scores AlgoLifeEngine")
             
             engine_res = st.session_state.engine_results
             
-            col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+            col_e1, col_e2, col_e3, col_e4, col_e5, col_e6 = st.columns(6)
             
             with col_e1:
-                stress_score = engine_res['stress'].get('stress_score')
-                if stress_score:
-                    st.metric("Stress Score", f"{stress_score:.1f}/100")
-                    with st.expander("Détails"):
-                        st.caption(engine_res['stress']['stress_status'])
-                        if 'CAR' in engine_res['stress']:
-                            st.caption(f"CAR: {engine_res['stress']['CAR']} nmol/L")
+                stress_eng = engine_res['stress'].get('stress_score', 0)
+                st.metric("Stress", f"{stress_eng or 0:.1f}", help=engine_res['stress'].get('stress_status', '—'))
             
             with col_e2:
-                inflam_score = engine_res['inflammation'].get('inflammation_score')
-                if inflam_score:
-                    st.metric("Inflammation", f"{inflam_score:.1f}/100")
-                    with st.expander("Détails"):
-                        st.caption(engine_res['inflammation']['inflammation_status'])
+                inflam_eng = engine_res['inflammation'].get('inflammation_score', 0)
+                st.metric("Inflammation", f"{inflam_eng or 0:.1f}", help=engine_res['inflammation'].get('inflammation_status', '—'))
             
             with col_e3:
-                glyc_score = engine_res['glycemia'].get('glycemia_score')
-                if glyc_score:
-                    st.metric("Glycémie", f"{glyc_score:.1f}/100")
-                    with st.expander("Détails"):
-                        st.caption(engine_res['glycemia']['glycemia_status'])
+                omega_eng = engine_res['omega'].get('omega_score', 0)
+                st.metric("Oméga-3", f"{omega_eng or 0:.1f}", help=engine_res['omega'].get('omega_status', '—'))
             
             with col_e4:
-                gut_score = engine_res['gut'].get('gut_score')
-                if gut_score:
-                    st.metric("Intestin", f"{gut_score:.1f}/100")
-                    with st.expander("Détails"):
-                        st.caption(engine_res['gut']['gut_status'])
+                glyc_eng = engine_res['glycemia'].get('glycemia_score', 0)
+                st.metric("Glycémie", f"{glyc_eng or 0:.1f}", help=engine_res['glycemia'].get('glycemia_status', '—'))
             
-            # Score Global de Longévité
+            with col_e5:
+                gut_eng = engine_res['gut'].get('gut_score', 0)
+                st.metric("Intestin", f"{gut_eng or 0:.1f}", help=engine_res['gut'].get('gut_status', '—'))
+            
+            with col_e6:
+                aging_eng = engine_res['aging'].get('aging_score', 0)
+                st.metric("Vieillissement", f"{aging_eng or 0:.1f}", help=engine_res['aging'].get('aging_status', '—'))
+            
+            # Score global
             global_score = engine_res.get('global_score')
             if global_score:
-                st.divider()
-                col_global1, col_global2, col_global3 = st.columns([1, 2, 1])
-                with col_global2:
-                    st.metric(
-                        "🎯 SCORE GLOBAL DE LONGÉVITÉ",
-                        f"{global_score}/100",
-                        "Santé métabolique globale"
-                    )
+                st.markdown(f"""
+                <div class="success-box" style="text-align: center; margin-top: 1rem;">
+                <h3>Score Global de Longévité: {global_score}/100</h3>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Section 3: Modèle Prédictif
+        st.subheader("🤖 Modèle Prédictif Multi-Variés")
+        
+        model = results['model']
+        
+        col_m1, col_m2 = st.columns(2)
+        
+        with col_m1:
+            st.metric(
+                "R² Score",
+                f"{model['r2_score']:.3f}",
+                help="Capacité prédictive du modèle (0-1)"
+            )
+        
+        with col_m2:
+            st.metric(
+                "Variables",
+                len(model['feature_importance']),
+                help="Nombre de variables dans le modèle"
+            )
+        
+        # Top 5 facteurs
+        st.markdown("**Top 5 Facteurs Impactants:**")
+        
+        top_factors = sorted(
+            model['feature_importance'].items(),
+            key=lambda x: abs(x[1]),
+            reverse=True
+        )[:5]
+        
+        for i, (feature, importance) in enumerate(top_factors, 1):
+            st.write(f"{i}. **{feature}**: {importance:.3f}")
+        
+        st.divider()
+        
+        # Section 4: Corrélations
+        st.subheader("🔗 Corrélations Significatives (p < 0.05)")
+        
+        corr_data = results['correlations']
+        
+        if corr_data['significant_correlations']:
+            df_corr = pd.DataFrame(corr_data['significant_correlations'])
+            st.dataframe(df_corr, use_container_width=True)
+        else:
+            st.info("Aucune corrélation significative détectée.")
+        
+        st.divider()
+        
+        # Section 5: Recommandations
+        st.subheader("💡 Recommandations Personnalisées")
+        
+        recommendations = results['recommendations']
+        
+        for i, rec in enumerate(recommendations, 1):
+            priority = rec.get('priority', 'Moyen')
             
-            # Plan d'action
-            action_plan = engine_res.get('action_plan', [])
-            if action_plan:
-                st.divider()
-                st.subheader("📋 Plan d'Action AlgoLifeEngine")
-                for i, action in enumerate(action_plan, 1):
-                    st.markdown(f"**{i}.** {action}")
+            if priority == 'Urgent':
+                box_class = 'danger-box'
+            elif priority == 'Élevé':
+                box_class = 'warning-box'
+            else:
+                box_class = 'info-box'
             
-            st.divider()
+            st.markdown(f"""
+            <div class="{box_class}">
+            <strong>#{i} - {rec['area']}</strong> ({priority})
+            <br>{rec['recommendation']}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Plan d'action AlgoLifeEngine
+        if st.session_state.engine_results and st.session_state.engine_results.get('action_plan'):
+            st.markdown("### 🎯 Plan d'Action AlgoLifeEngine")
             
-            # Section 1: Indices Composites
-            st.subheader("📊 Indices Composites Statistiques")
-            
-            indices = st.session_state.analysis_results.get('composite_indices', {})
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                if 'stress' in indices:
-                    stress_score = indices['stress']['score']
-                    delta = "↓ Bon" if stress_score < 40 else "⚠️ Attention" if stress_score < 60 else "❗ Critique"
-                    st.metric("Stress Index", f"{stress_score:.0f}/100", delta)
-                    with st.expander("Détails"):
-                        st.caption(indices['stress']['interpretation'])
-                        st.caption(f"**Phase:** {indices['stress'].get('phase', 'N/A')}")
-            
-            with col2:
-                if 'metabolic' in indices:
-                    metab_score = indices['metabolic']['score']
-                    delta = "✅ Bon" if metab_score >= 70 else "⚠️ Attention" if metab_score >= 50 else "❗ Critique"
-                    st.metric("Métabolisme", f"{metab_score:.0f}/100", delta)
-                    with st.expander("Détails"):
-                        st.caption(indices['metabolic']['interpretation'])
-                        st.caption(f"**Risque:** {indices['metabolic'].get('risk_level', 'N/A')}")
-            
-            with col3:
-                if 'neurotransmitters' in indices:
-                    neuro_score = indices['neurotransmitters']['score']
-                    delta = "✅ Bon" if neuro_score >= 60 else "⚠️ Attention" if neuro_score >= 40 else "❗ Critique"
-                    st.metric("Neurotransmetteurs", f"{neuro_score:.0f}/100", delta)
-                    with st.expander("Détails"):
-                        st.caption(indices['neurotransmitters']['interpretation'])
-            
-            with col4:
-                if 'inflammation' in indices:
-                    inflam_score = indices['inflammation']['score']
-                    delta = "✅ Bon" if inflam_score < 30 else "⚠️ Attention" if inflam_score < 60 else "❗ Critique"
-                    st.metric("Inflammation", f"{inflam_score:.0f}/100", delta)
-                    with st.expander("Détails"):
-                        st.caption(indices['inflammation']['interpretation'])
-            
-            st.divider()
-            
-            # Section 2: Modèle Prédictif
-            st.subheader("🤖 Modèle Prédictif (Régression Multiple)")
-            
-            model_results = st.session_state.analysis_results.get('statistical_model', {})
-            
-            if model_results.get('success'):
-                col_m1, col_m2, col_m3 = st.columns(3)
-                
-                with col_m1:
-                    r2 = model_results.get('r2_score', 0)
-                    st.metric(
-                        "R² Score",
-                        f"{r2:.3f}",
-                        f"{r2*100:.1f}% variance expliquée"
-                    )
-                
-                with col_m2:
-                    n_features = model_results.get('n_features', 0)
-                    st.metric(
-                        "Variables analysées",
-                        n_features,
-                        "biomarqueurs"
-                    )
-                
-                with col_m3:
-                    quality = "Excellent" if r2 > 0.7 else "Bon" if r2 > 0.5 else "Modéré"
-                    st.metric(
-                        "Qualité du modèle",
-                        quality,
-                        f"R² = {r2:.3f}"
-                    )
-                
-                st.divider()
-                
-                # Top facteurs
-                st.subheader("🎯 Top 5 Facteurs Impactants")
-                
-                coeffs_df = model_results.get('coefficients')
-                if coeffs_df is not None:
-                    top5 = coeffs_df.head(5)
-                    
-                    for idx, row in top5.iterrows():
-                        factor = row['Feature'].replace('_', ' ').title()
-                        coef = row['Coefficient']
-                        
-                        col_factor, col_impact = st.columns([3, 1])
-                        
-                        with col_factor:
-                            if coef > 0:
-                                st.success(f"✅ **{factor}**")
-                            else:
-                                st.error(f"❌ **{factor}**")
-                        
-                        with col_impact:
-                            st.metric("Coef.", f"{coef:+.3f}")
-            
-            st.divider()
-            
-            # Section 3: Visualisations
+            for action in st.session_state.engine_results['action_plan']:
+                st.markdown(f"- {action}")
+        
+        st.divider()
+        
+        # Section 6: Visualisations
+        if st.session_state.chart_buffer:
             st.subheader("📈 Visualisations Graphiques")
-            
-            if st.session_state.chart_buffer:
-                st.image(st.session_state.chart_buffer, use_container_width=True)
-            
-            st.divider()
-            
-            # Section 4: Recommandations
-            st.subheader("💊 Recommandations Personnalisées")
-            
-            recommendations = st.session_state.analysis_results.get('recommendations', [])
-            
-            if recommendations:
-                for i, rec in enumerate(recommendations[:3], 1):
-                    priority = rec.get('priority', 3)
-                    
-                    if priority == 1:
-                        st.markdown(f"### 🔴 Priorité {i} - {rec.get('category', 'N/A')}")
-                    elif priority == 2:
-                        st.markdown(f"### 🟡 Priorité {i} - {rec.get('category', 'N/A')}")
-                    else:
-                        st.markdown(f"### 🟢 Priorité {i} - {rec.get('category', 'N/A')}")
-                    
-                    col_rec1, col_rec2 = st.columns([2, 1])
-                    
-                    with col_rec1:
-                        st.markdown(f"**Constat:** {rec.get('issue', 'N/A')}")
-                        st.markdown(f"**Objectif:** {rec.get('action', 'N/A')}")
-                        
-                        interventions = rec.get('interventions', [])
-                        if interventions:
-                            st.markdown("**Interventions:**")
-                            for intervention in interventions:
-                                st.markdown(f"• {intervention}")
-                    
-                    with col_rec2:
-                        impact = rec.get('expected_impact', 'Modéré')
-                        st.metric("Impact attendu", impact)
-                    
-                    st.divider()
+            st.image(st.session_state.chart_buffer, use_container_width=True)
 
 # ============================================================================
 # TAB 3 - RAPPORT PDF
 # ============================================================================
 
 with tab3:
-    st.header("Génération du Rapport PDF Professionnel")
+    st.header("📄 Génération du Rapport PDF Professionnel")
     
-    if not st.session_state.analysis_results:
-        st.warning("⚠️ Veuillez d'abord effectuer l'analyse statistique dans l'onglet précédent")
+    if st.session_state.analysis_results is None:
+        st.info("📥 Effectuez d'abord une analyse complète")
     else:
-        st.info("📄 Rapport prêt à être généré avec toutes les analyses statistiques et graphiques")
+        st.markdown("""
+        <div class="success-box">
+        <h4>✅ Rapport Prêt à Générer</h4>
+        <p>Le rapport PDF comprendra toutes les analyses, graphiques et recommandations personnalisées.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        col_pdf1, col_pdf2, col_pdf3 = st.columns([1, 2, 1])
-        
-        with col_pdf2:
-            if st.button("📥 GÉNÉRER LE RAPPORT PDF COMPLET", type="primary", use_container_width=True):
-                with st.spinner("📄 Génération du rapport PDF en cours..."):
-                    try:
-                        # Générer le PDF
-                        pdf_buffer = generate_algolife_pdf_report(
-                            patient_name=st.session_state.patient_data['patient_info']['nom'],
-                            analysis_results=st.session_state.analysis_results,
-                            chart_buffer=st.session_state.chart_buffer
-                        )
-                        
-                        st.success("✅ Rapport PDF généré avec succès!")
-                        
-                        # Bouton de téléchargement
-                        st.download_button(
-                            label="📥 Télécharger le Rapport PDF",
-                            data=pdf_buffer,
-                            file_name=f"ALGO-LIFE_Rapport_{patient_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                        
-                        st.balloons()
-                        
-                    except Exception as e:
-                        st.error(f"❌ Erreur lors de la génération du PDF: {str(e)}")
-                        import traceback
-                        st.code(traceback.format_exc())
-        
-        st.divider()
-        
-        # Aperçu du contenu du rapport
-        st.subheader("📋 Contenu du Rapport")
-        
-        with st.expander("Voir le contenu détaillé du rapport"):
-            st.markdown("""
-            ### Le rapport PDF comprend:
-            
-            **Page 1 - Couverture**
-            - Informations patient complètes
-            - Résumé exécutif des résultats
-            - Score R² du modèle prédictif
-            - Score Global de Longévité (AlgoLifeEngine)
-            
-            **Page 2 - Indices Composites**
-            - Tableau détaillé de tous les indices calculés
-            - Interprétations pour chaque indice
-            - Analyses mécanistiques approfondies
-            - Résultats AlgoLifeEngine (Stress, Inflammation, Glycémie, Intestin)
-            
-            **Page 3 - Analyse Statistique**
-            - Performance du modèle prédictif (R²)
-            - Top 5 des facteurs impactants
-            - Corrélations significatives (p < 0.05)
-            
-            **Page 4 - Visualisations Graphiques**
-            - 6 graphiques professionnels
-            - Profil radar multi-dimensionnel
-            - Courbes de tendance et distributions
-            
-            **Page 5 - Recommandations**
-            - Plan d'action personnalisé hiérarchisé
-            - Interventions spécifiques par priorité
-            - Calendrier de suivi recommandé
-            - Plan d'action AlgoLifeEngine
-            """)
+        if st.button("📥 Générer & Télécharger le Rapport PDF", type="primary"):
+            with st.spinner("Génération du rapport PDF en cours..."):
+                try:
+                    pdf_buffer = generate_algolife_pdf_report(
+                        patient_data=st.session_state.patient_data,
+                        analysis_results=st.session_state.analysis_results,
+                        chart_buffer=st.session_state.chart_buffer,
+                        engine_results=st.session_state.engine_results
+                    )
+                    
+                    st.success("✅ Rapport PDF généré avec succès!")
+                    
+                    st.download_button(
+                        label="📥 Télécharger le Rapport PDF",
+                        data=pdf_buffer,
+                        file_name=f"ALGO-LIFE_{st.session_state.patient_data['patient_info']['name']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf"
+                    )
+                    
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de la génération du PDF: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
 # ============================================================================
-# TAB 4 - EXEMPLES & TEMPLATES
+# TAB 4 - EXEMPLES
 # ============================================================================
 
 with tab4:
-    st.header("📚 Exemples de Rapports & Templates")
+    st.header("📚 Exemples de Profils Patients")
     
     st.markdown("""
-    Cette section présente des exemples de rapports générés par ALGO-LIFE pour différents profils patients.
+    Cette section présente des cas cliniques types analysés avec ALGO-LIFE.
     """)
     
-    # Exemples de cas cliniques
     example_col1, example_col2 = st.columns(2)
     
     with example_col1:
-        st.subheader("Cas 1: Dysbiose Bactérienne")
-        st.markdown("""
-        **Patient:** Olivia L., 26 ans, F
-        
-        **Résultats clés:**
-        - Benzoate élevé (18.14 vs max 4.47)
-        - Hippurate très élevé (589.7 vs max 529.9)
-        - Phénol élevé (21.20 vs max 11.20)
-        
-        **Diagnostic:**
-        Prolifération importante de la flore protéolytique phénylalanine dépendante avec dysbiose de putréfaction.
-        
-        **Score dysbiose:** 38.5/100
-        """)
-        
-        if st.button("Charger cet exemple", key="example1"):
-            st.info("Template chargé! Vous pouvez maintenant modifier les valeurs.")
-    
-    with example_col2:
-        st.subheader("Cas 2: Burnout & Épuisement")
+        st.subheader("Cas 1: Burnout Sévère")
         st.markdown("""
         **Patient:** Marc D., 42 ans, M
         
         **Résultats clés:**
-        - CAR effondré: -12.69 nmol/L (burnout avancé)
-        - Cortisol réveil: 15.73 nmol/L (normal)
-        - Cortisol CAR +30: 3.04 nmol/L (très bas)
+        - CAR effondré: -12.69 nmol/L
+        - Cortisol réveil: 15.73 nmol/L
+        - Cortisol CAR +30: 3.04 nmol/L
         
-        **Diagnostic:**
-        Épuisement surrénalien avec hypo-réactivité HPA marquée.
+        **Diagnostic:** Épuisement surrénalien avancé
         
-        **Stress Score:** 12.3/100 (Critique)
+        **Score Stress:** 12.3/100 (Critique)
         """)
+    
+    with example_col2:
+        st.subheader("Cas 2: Dysbiose Intestinale")
+        st.markdown("""
+        **Patient:** Olivia L., 26 ans, F
         
-        if st.button("Charger cet exemple", key="example2"):
-            st.info("Template chargé! Vous pouvez maintenant modifier les valeurs.")
+        **Résultats clés:**
+        - Benzoate: 18.14 (élevé)
+        - Hippurate: 589.7 (très élevé)
+        - Phénol: 21.20 (élevé)
+        
+        **Diagnostic:** Dysbiose de putréfaction
+        
+        **Score Microbiome:** 38.5/100
+        """)
 
 # ============================================================================
 # TAB 5 - GUIDE
 # ============================================================================
 
 with tab5:
-    st.header("ℹ️ Guide d'Utilisation ALGO-LIFE")
+    st.header("ℹ️ Guide d'Utilisation")
     
     st.markdown("""
-    ### 🎯 Objectif de la Plateforme
+    ### 🎯 Workflow Complet
     
-    ALGO-LIFE est une plateforme d'analyse bio-fonctionnelle multi-dimensionnelle qui permet de:
-    - **Calculer des indices composites** (stress, métabolisme, neurotransmetteurs, inflammation)
-    - **Construire des modèles prédictifs** par régression linéaire multiple
-    - **Générer des rapports statistiques professionnels** au format PDF
-    - **Identifier les leviers d'action prioritaires** pour chaque patient
-    - **Utiliser le moteur AlgoLifeEngine** pour des scores de longévité
+    **1. Import des PDF** (Tab 1)
+    - Téléchargez vos PDF de résultats médicaux
+    - Le système extrait automatiquement les données
+    - Complétez manuellement si nécessaire
+    - Lancez l'analyse complète
     
-    ---
+    **2. Consultation des Résultats** (Tab 2)
+    - Examinez les indices composites
+    - Consultez les scores AlgoLifeEngine
+    - Analysez le modèle prédictif
+    - Prenez connaissance des recommandations
     
-    ### 📝 Workflow Recommandé
-    
-    1. **Saisie des Données** (Tab 1)
-       - Renseigner les informations patient
-       - Saisir tous les biomarqueurs disponibles
-       - Enregistrer les données
-    
-    2. **Analyse Statistique** (Tab 2)
-       - Lancer l'analyse complète
-       - Examiner les indices composites
-       - Consulter le modèle prédictif et les corrélations
-       - Prendre connaissance des recommandations
-       - Visualiser les scores AlgoLifeEngine
-    
-    3. **Génération du Rapport** (Tab 3)
-       - Générer le rapport PDF professionnel
-       - Télécharger pour le dossier patient
-       - Partager avec le patient et/ou autres praticiens
-    
-    ---
+    **3. Génération du Rapport** (Tab 3)
+    - Générez le rapport PDF professionnel
+    - Téléchargez pour archivage
+    - Partagez avec le patient
     
     ### 🔬 Modules d'Analyse
     
-    #### 1. AlgoLifeEngine (Nouveau)
-    - **Stress Score**: Basé sur le CAR (Cortisol Awakening Response)
-    - **Inflammation Score**: Basé sur CRP ultra-sensible
-    - **Glycemia Score**: Basé sur HOMA-IR
-    - **Gut Score**: Basé sur zonuline et LBP
-    - **Aging Score**: Basé sur l'âge épigénétique (si disponible)
-    - **Score Global de Longévité**: Moyenne pondérée
+    #### AlgoLifeEngine
+    - Score de Stress (CAR)
+    - Score d'Inflammation (CRP)
+    - Score Glycémique (HOMA)
+    - Score Intestinal (Zonuline)
+    - Score de Vieillissement
+    - **Score Global de Longévité**
     
-    #### 2. Axe HPA (Hypothalamo-Hypophyso-Surrénalien)
-    - **Cortisol CAR**: Indicateur clé du burnout (< 7.5 nmol/L = signature épuisement)
-    - **Rythme circadien**: Profil sur 24h pour évaluer l'adaptation au stress
-    - **DHEA**: Réserve adaptative surrénalienne
-    
-    #### 3. Neurotransmetteurs
-    - **Dopamine**: Motivation, plaisir
-    - **Sérotonine**: Humeur, bien-être
-    - **Noradrénaline**: Vigilance, stress
-    - **Analyse des métabolites**: 5-HIAA, VMA, MHPG
-    
-    #### 4. Métabolisme
-    - **HOMA Index**: Résistance insulinique
-    - **QUICKI Index**: Sensibilité insulinique
-    - **CRP**: Inflammation systémique
-    - **Homocystéine**: Risque cardiovasculaire
-    
-    #### 5. Microbiote
-    - **Métabolites bactériens**: Benzoate, hippurate, phénol, p-crésol
-    - **Métabolites fongiques**: Tartarate, D-arabinitol
-    - **Perméabilité intestinale**: LBP, zonuline
-    
-    ---
+    #### Analyse Statistique
+    - Indices composites multi-dimensionnels
+    - Modèle prédictif par régression linéaire
+    - Corrélations significatives
+    - Recommandations hiérarchisées
     
     ### 📊 Interprétation des Scores
     
-    **Indices Composites (0-100):**
     - **80-100**: Excellent
     - **60-79**: Bon
-    - **40-59**: Modéré - Surveillance
-    - **20-39**: Faible - Intervention recommandée
-    - **0-19**: Critique - Traitement urgent
+    - **40-59**: Modéré
+    - **20-39**: Faible
+    - **0-19**: Critique
     
-    **R² du Modèle Prédictif:**
-    - **> 0.7**: Excellente capacité prédictive
-    - **0.5-0.7**: Bonne capacité prédictive
-    - **< 0.5**: Capacité modérée
+    ### 💡 Formats PDF Supportés
     
-    ---
+    Le système peut extraire des données de la plupart des PDF médicaux standards.
+    Pour une extraction optimale, assurez-vous que:
+    - Le PDF contient du texte (pas uniquement des images)
+    - Les valeurs numériques sont clairement indiquées
+    - Les unités sont mentionnées
     
-    ### 💡 Conseils d'Utilisation
+    ### 🆘 Support
     
-    - ✅ Saisir un maximum de biomarqueurs pour une analyse optimale
-    - ✅ Le modèle nécessite au moins 4 variables pour fonctionner
-    - ✅ Les corrélations avec p < 0.05 sont statistiquement significatives
-    - ✅ Les recommandations sont hiérarchisées par impact attendu
-    - ✅ Le rapport PDF est généré au format médical professionnel
-    - ✅ Le score de longévité AlgoLifeEngine est un indicateur global de santé
-    
-    ---
-    
-    ### 🆘 Support & Contact
-    
-    **Développeur:** Thibault - Product Manager Functional Biology  
+    **Développeur:** Thibault  
     **Organisation:** Espace Lab SA, Geneva  
-    **Version:** 2.1 (Novembre 2025) - BUG FIX DATA STRUCTURE
-    
-    Pour toute question ou suggestion d'amélioration, n'hésitez pas à nous contacter.
+    **Version:** 3.0 (PDF Import Feature)
     """)
 
 # ============================================================================
@@ -1033,5 +1022,5 @@ with footer_col2:
     st.caption("Biologie Fonctionnelle")
 
 with footer_col3:
-    st.caption("Version 2.1 - Bug Fix")
+    st.caption("Version 3.0 - PDF Import")
     st.caption(f"Dernière mise à jour: {datetime.now().strftime('%d/%m/%Y')}")
