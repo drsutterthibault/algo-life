@@ -114,82 +114,6 @@ class AlgoLifeStatisticalAnalysis:
             return "Phase 3: Épuisement (burnout)"
         else:
             return "Phase intermédiaire"
-
-        def calculate_metabolism_index(self):
-        """
-        Calcule un index métabolique simplifié, compatible avec l'appel dans app.py
-        Retourne un score sur 100 + un statut général.
-        """
-
-        data = self.biological_markers
-
-        # Variables utilisées si présentes
-        variables = {
-            "glycemie": data.get("glycemie"),
-            "insuline": data.get("insuline"),
-            "homa_index": data.get("homa_index"),
-            "triglycerides": data.get("triglycerides"),
-            "cholesterol_ldl": data.get("ldl_c"),
-            "cholesterol_hdl": data.get("hdl_c"),
-            "vit_d": data.get("vit_d")
-        }
-
-        normalized_scores = []
-
-        for var, value in variables.items():
-            if value is None:
-                continue
-
-            try:
-                v = float(value)
-            except:
-                continue
-
-            # Normalisations simples (placeholders)
-            if var == "glycemie":            # 70–140 mg/dL
-                score = max(0, min(1, (140 - v) / 70))
-            elif var == "insuline":          # 10–25 μU/mL
-                score = max(0, min(1, (25 - v) / 15))
-            elif var == "homa_index":        # Optimal 1–2
-                score = max(0, min(1, (3 - v) / 2))
-            elif var == "vit_d":             # 20–50 ng/mL
-                score = max(0, min(1, (v - 20) / 30))
-            else:
-                # Variables non normalisées → neutre
-                score = 0.5
-
-            normalized_scores.append(score)
-
-        if not normalized_scores:
-            return {
-                "score": 0,
-                "status": "Aucune donnée",
-                "raw_data": variables
-            }
-
-        metabolism_score = round(100 * np.mean(normalized_scores), 1)
-
-        # Interprétation clinique rapide
-        if metabolism_score >= 80:
-            status = "Excellent"
-        elif metabolism_score >= 60:
-            status = "Bon"
-        elif metabolism_score >= 40:
-            status = "Modéré"
-        elif metabolism_score >= 20:
-            status = "Faible"
-        else:
-            status = "Critique"
-
-        # Enregistrer l’indice dans les résultats internes
-        self.composite_indices['metabolism_index'] = metabolism_score
-
-        return {
-            "score": metabolism_score,
-            "status": status,
-            "raw_data": variables
-        }
-
     
     def calculate_metabolic_health_score(self):
         """
@@ -877,3 +801,4 @@ class AlgoLifeStatisticalAnalysis:
 
 # Export de la classe
 __all__ = ['AlgoLifeStatisticalAnalysis']
+
