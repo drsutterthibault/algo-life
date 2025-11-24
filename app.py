@@ -140,69 +140,158 @@ class PDFExtractor:
             return ""
     
     @staticmethod
-    def extract_biological_data(text):
-        """Extrait les données biologiques du texte PDF"""
+    def extract_biological_data(text, debug=False):
+        """Extrait les données biologiques du texte PDF - Optimisé pour LIMS et SYNLAB"""
         data = {}
         
-        # Patterns de recherche pour les biomarqueurs courants
+        # Patterns ULTRA-FLEXIBLES adaptés aux formats LIMS et SYNLAB
         patterns = {
-            # Cortisol
-            'cortisol_reveil': r'cortisol.*réveil[:\s]+(\d+\.?\d*)',
-            'cortisol_car_30': r'cortisol.*\+?30[:\s]+(\d+\.?\d*)',
-            'cortisol_12h': r'cortisol.*12h?[:\s]+(\d+\.?\d*)',
-            'cortisol_18h': r'cortisol.*18h?[:\s]+(\d+\.?\d*)',
-            'cortisol_22h': r'cortisol.*22h?[:\s]+(\d+\.?\d*)',
+            # Cortisol - PATTERNS LIMS/SYNLAB
+            'cortisol_reveil': [
+                r'cortisol\s+salivaire\s+r[ée]veil\s+(\d+[.,]?\d*)',
+                r'cortisol\s+r[ée]veil\s+(\d+[.,]?\d*)',
+            ],
+            'cortisol_car_30': [
+                r'cortisol\s+salivaire\s+r[ée]veil\s*\+\s*30[\'\"′]?\s+(\d+[.,]?\d*)',
+                r'cortisol\s+car\s+(\d+[.,]?\d*)',
+            ],
+            'cortisol_12h': [
+                r'cortisol\s+salivaire\s+12h\s+(\d+[.,]?\d*)',
+            ],
+            'cortisol_18h': [
+                r'cortisol\s+salivaire\s+18h\s+(\d+[.,]?\d*)',
+            ],
+            'cortisol_22h': [
+                r'cortisol\s+salivaire\s+22h\s+(\d+[.,]?\d*)',
+            ],
             
             # DHEA
-            'dhea': r'dhea[:\s]+(\d+\.?\d*)',
+            'dhea': [
+                r'dhea\s+salivaire\s+(\d+[.,]?\d*)',
+                r'dehydro\s+epi\s+androsterone.*?(\d+[.,]?\d*)\s*[µu]mol',
+            ],
             
             # Inflammation
-            'crp': r'crp[:\s]+(\d+\.?\d*)',
+            'crp': [
+                r'crp\s+ultra[-\s]sensible\s+(\d+[.,]?\d*)',
+            ],
             
             # Glycémie
-            'glycemie': r'gly[cé]émie[:\s]+(\d+\.?\d*)',
-            'insuline': r'insuline[:\s]+(\d+\.?\d*)',
-            'homa_index': r'homa[:\s]+(\d+\.?\d*)',
+            'glycemie': [
+                r'gly[cé][ée]mie\s+[àa]\s+jeun\s+(\d+[.,]?\d*)',
+            ],
+            'insuline': [
+                r'insuline\s+[àa]\s+jeun\s+(\d+[.,]?\d*)',
+            ],
+            'homa_index': [
+                r'index\s+homa\s+(\d+[.,]?\d*)',
+            ],
             
             # Neurotransmetteurs
-            'dopamine': r'dopamine[:\s]+(\d+\.?\d*)',
-            'serotonine': r's[ée]rotonine[:\s]+(\d+\.?\d*)',
-            'noradrenaline': r'noradr[ée]naline[:\s]+(\d+\.?\d*)',
+            'dopamine': [
+                r'dopamine\s+(\d+[.,]?\d*)',
+            ],
+            'serotonine': [
+                r's[ée]rotonine\s+(\d+[.,]?\d*)',
+            ],
+            'noradrenaline': [
+                r'noradr[ée]naline\s+(\d+[.,]?\d*)',
+            ],
+            'adrenaline': [
+                r'adrenaline\s+(\d+[.,]?\d*)',
+            ],
+            'hiaa_5': [
+                r'5[-\s]?hiaa\s+(\d+[.,]?\d*)',
+            ],
+            'vma': [
+                r'vma\s+(\d+[.,]?\d*)',
+            ],
             
             # Micronutriments
-            'vit_d': r'vitamine\s*d[:\s]+(\d+\.?\d*)',
-            'zinc': r'zinc[:\s]+(\d+\.?\d*)',
-            'selenium': r's[ée]l[ée]nium[:\s]+(\d+\.?\d*)',
-            'ferritine': r'ferritine[:\s]+(\d+\.?\d*)',
+            'vit_d': [
+                r'25[-\s]?oh[-\s]?vitamine\s+d.*?(\d+[.,]?\d*)',
+            ],
+            'zinc': [
+                r'zinc\s+(\d+[.,]?\d*)',
+            ],
+            'selenium': [
+                r's[ée]l[ée]nium\s+(\d+[.,]?\d*)',
+            ],
+            'ferritine': [
+                r'ferritine\s+(\d+[.,]?\d*)',
+            ],
             
-            # Intestin
-            'zonuline': r'zonuline[:\s]+(\d+\.?\d*)',
-            'lbp': r'lbp[:\s]+(\d+\.?\d*)',
+            # Perméabilité intestinale
+            'zonuline': [
+                r'zonuline\s+(\d+[.,]?\d*)',
+            ],
+            'lbp': [
+                r'lbp\s+\(lipopolysaccharides?\s+binding.*?\)\s+(\d+[.,]?\d*)',
+            ],
             
             # Oméga
-            'omega3_index': r'om[ée]ga[- ]?3.*index[:\s]+(\d+\.?\d*)',
+            'aa_epa': [
+                r'rapport\s+aa[/]epa\s+(\d+[.,]?\d*)',
+            ],
+            'omega3_index': [
+                r'index\s+w3\s+(\d+[.,]?\d*)',
+            ],
             
             # Homocystéine
-            'homocysteine': r'homocyst[ée]ine[:\s]+(\d+\.?\d*)',
+            'homocysteine': [
+                r'homocyst[ée]ine\s+(\d+[.,]?\d*)',
+            ],
             
             # Microbiote
-            'benzoate': r'benzoate[:\s]+(\d+\.?\d*)',
-            'hippurate': r'hippurate[:\s]+(\d+\.?\d*)',
-            'phenol': r'ph[ée]nol[:\s]+(\d+\.?\d*)',
-            'p_cresol': r'p[- ]?cr[ée]sol[:\s]+(\d+\.?\d*)',
-            'indican': r'indican[:\s]+(\d+\.?\d*)',
+            'benzoate': [
+                r'benzoate\s+(\d+[.,]?\d*)',
+            ],
+            'hippurate': [
+                r'hippurate\s+(\d+[.,]?\d*)',
+            ],
+            'phenol': [
+                r'phenols?\s+(\d+[.,]?\d*)',
+            ],
+            'p_cresol': [
+                r'p[- ]?cr[ée]sol\s+(\d+[.,]?\d*)',
+            ],
+            'indican': [
+                r'indican\s+(\d+[.,]?\d*)',
+            ],
+            'd_arabinitol': [
+                r'arabinitol\s+(\d+[.,]?\d*)',
+            ],
+            'tartarate': [
+                r'tartarate\s+(\d+[.,]?\d*)',
+            ],
         }
         
         text_lower = text.lower()
         
-        for key, pattern in patterns.items():
-            match = re.search(pattern, text_lower, re.IGNORECASE)
-            if match:
-                try:
-                    value = float(match.group(1))
-                    data[key] = value
-                except:
-                    pass
+        # Mode debug
+        if debug:
+            st.write("📄 **Texte extrait du PDF (premiers 3000 caractères):**")
+            st.code(text[:3000])
+            st.write("---")
+            st.write("🔍 **Recherche en cours...**")
+        
+        # Essayer tous les patterns pour chaque biomarqueur
+        for key, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                match = re.search(pattern, text_lower, re.IGNORECASE)
+                if match:
+                    try:
+                        value_str = match.group(1).replace(',', '.')
+                        value = float(value_str)
+                        data[key] = value
+                        if debug:
+                            st.success(f"✅ {key}: {value}")
+                        break
+                    except:
+                        pass
+        
+        if debug and not data:
+            st.warning("⚠️ Aucune donnée extraite avec les patterns actuels.")
         
         return data
     
@@ -461,10 +550,12 @@ with tab1:
         )
         
         if bio_pdf:
+            debug_mode = st.checkbox("🐛 Mode Debug (voir le texte extrait)", key="debug_bio")
+            
             if st.button("🔍 Extraire Données Bio", key="extract_bio"):
                 with st.spinner("Extraction en cours..."):
                     text = PDFExtractor.extract_text_from_pdf(bio_pdf)
-                    extracted = PDFExtractor.extract_biological_data(text)
+                    extracted = PDFExtractor.extract_biological_data(text, debug=debug_mode)
                     
                     if extracted:
                         st.session_state.pdf_extracted_data['biological'] = extracted
@@ -474,7 +565,7 @@ with tab1:
                         with st.expander("Voir les données extraites"):
                             st.json(extracted)
                     else:
-                        st.warning("⚠️ Aucune donnée trouvée. Vérifiez le format du PDF.")
+                        st.warning("⚠️ Aucune donnée trouvée. Activez le mode Debug pour voir le texte extrait.")
     
     with col_upload2:
         st.subheader("🧬 PDF Épigénétique")
