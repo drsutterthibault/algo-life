@@ -283,3 +283,93 @@ class AlgoLifeEngine:
             "global_score": global_score,
             "action_plan": action_plan
         }
+
+
+# ============================================================
+#  CLASSE STATISTIQUE ALGO-LIFE
+# ============================================================
+
+class AlgoLifeStatisticalAnalysis:
+    
+    def __init__(self):
+        pass
+    
+    def calculate_metabolism_index(self, bio_data):
+        """
+        Calcule un indice métabolique composite basé sur plusieurs biomarqueurs.
+        """
+        if not bio_data:
+            return None
+        
+        indices = []
+        
+        # HOMA-IR (insulino-résistance)
+        if "metabolisme_glucidique" in bio_data:
+            homa = bio_data["metabolisme_glucidique"].get("homa")
+            if homa is not None:
+                # Score inversé : plus bas = meilleur
+                homa_score = max(0, 100 - (homa / 4.0) * 100)
+                indices.append(homa_score)
+        
+        # Triglycérides
+        if "lipides" in bio_data:
+            tg = bio_data["lipides"].get("triglycerides")
+            if tg is not None:
+                # Optimal < 150 mg/dL
+                tg_score = max(0, 100 - (tg / 200.0) * 100)
+                indices.append(tg_score)
+        
+        # HDL Cholesterol
+        if "lipides" in bio_data:
+            hdl = bio_data["lipides"].get("hdl")
+            if hdl is not None:
+                # Optimal > 60 mg/dL
+                hdl_score = min(100, (hdl / 80.0) * 100)
+                indices.append(hdl_score)
+        
+        # Calculer la moyenne si des indices sont disponibles
+        if indices:
+            return round(sum(indices) / len(indices), 1)
+        
+        return None
+    
+    def calculate_inflammatory_index(self, bio_data):
+        """
+        Calcule un indice inflammatoire composite.
+        """
+        if not bio_data:
+            return None
+        
+        indices = []
+        
+        # CRP ultrasensible
+        if "inflammation" in bio_data:
+            crp = bio_data["inflammation"].get("crp_us")
+            if crp is not None:
+                crp_score = max(0, 100 - (crp / 5.0) * 100)
+                indices.append(crp_score)
+        
+        # Ratio AA/EPA
+        if "acides_gras" in bio_data:
+            aa_epa = bio_data["acides_gras"].get("aa_epa")
+            if aa_epa is not None:
+                aa_epa_score = max(0, 100 - (aa_epa / 20.0) * 100)
+                indices.append(aa_epa_score)
+        
+        if indices:
+            return round(sum(indices) / len(indices), 1)
+        
+        return None
+    
+    def get_percentile_rank(self, value, reference_values):
+        """
+        Calcule le percentile d'une valeur par rapport à une distribution de référence.
+        """
+        if value is None or not reference_values:
+            return None
+        
+        reference_values = sorted(reference_values)
+        position = sum(1 for x in reference_values if x < value)
+        percentile = (position / len(reference_values)) * 100
+        
+        return round(percentile, 1)
