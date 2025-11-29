@@ -411,6 +411,10 @@ def prepare_data_for_engine(patient_data):
             'homocysteine': markers.get('homocysteine'),
             'omega3_index': markers.get('omega3_index')
         },
+        'lipides': {
+            'triglycerides': markers.get('triglycerides'),
+            'hdl': markers.get('hdl')
+        },
         'microbiote': {
             'benzoate': markers.get('benzoate'),
             'hippurate': markers.get('hippurate'),
@@ -660,8 +664,11 @@ with tab1:
                     # Analyse statistique
                     analyzer = AlgoLifeStatisticalAnalysis(st.session_state.patient_data)
                     
+                    # Préparer bio_data pour les méthodes qui en ont besoin
+                    dxa_data, bio_data, epi_data = prepare_data_for_engine(st.session_state.patient_data)
+                    
                     stress_result = analyzer.calculate_stress_index()
-                    metabolism_result = analyzer.calculate_metabolism_index()
+                    metabolism_result = analyzer.calculate_metabolism_index(bio_data)
                     neuro_result = analyzer.calculate_neurotransmitter_index()
                     inflam_result = analyzer.calculate_inflammation_index()
                     microbiome_result = analyzer.calculate_microbiome_index()
@@ -689,7 +696,6 @@ with tab1:
                     
                     # Analyse AlgoLifeEngine
                     engine = AlgoLifeEngine()
-                    dxa_data, bio_data, epi_data = prepare_data_for_engine(st.session_state.patient_data)
                     engine_results = engine.analyze(dxa_data, bio_data, epi_data)
                     st.session_state.engine_results = engine_results
                     
