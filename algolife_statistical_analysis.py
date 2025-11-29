@@ -48,6 +48,127 @@ class AlgoLifeStatisticalAnalysis:
         self.statistical_model = None
         self.predictions = {}
         self.correlations = {}
+    
+    def calculate_metabolism_index(self, bio_data):
+        """
+        Calcule un indice métabolique composite basé sur plusieurs biomarqueurs.
+        
+        Args:
+            bio_data (dict): Données biologiques structurées par catégories
+        
+        Returns:
+            dict: Score métabolique et détails
+        """
+        if not bio_data:
+            return {'score': 0, 'interpretation': 'Données insuffisantes', 'details': {}}
+        
+        indices = []
+        details = {}
+        
+        # HOMA-IR (insulino-résistance)
+        if "metabolisme_glucidique" in bio_data:
+            homa = bio_data["metabolisme_glucidique"].get("homa")
+            if homa is not None:
+                # Score inversé : plus bas = meilleur (optimal < 2.0)
+                homa_score = max(0, 100 - (homa / 4.0) * 100)
+                indices.append(homa_score)
+                details['homa'] = {
+                    'value': homa,
+                    'score': homa_score,
+                    'status': 'Optimal' if homa < 2.0 else 'Résistance insulinique'
+                }
+        
+        # Triglycérides
+        if "lipides" in bio_data:
+            tg = bio_data["lipides"].get("triglycerides")
+            if tg is not None:
+                # Optimal < 150 mg/dL
+                tg_score = max(0, 100 - (tg / 200.0) * 100)
+                indices.append(tg_score)
+                details['triglycerides'] = {
+                    'value': tg,
+                    'score': tg_score,
+                    'status': 'Optimal' if tg < 150 else 'Élevé'
+                }
+        
+        # HDL Cholesterol
+        if "lipides" in bio_data:
+            hdl = bio_data["lipides"].get("hdl")
+            if hdl is not None:
+                # Optimal > 60 mg/dL pour homme, > 50 pour femme
+                hdl_score = min(100, (hdl / 80.0) * 100)
+                indices.append(hdl_score)
+                details['hdl'] = {
+                    'value': hdl,
+                    'score': hdl_score,
+                    'status': 'Optimal' if hdl > 50 else 'Bas'
+                }
+        
+        # Glycémie à jeun
+        if "metabolisme_glucidique" in bio_data:
+            glycemie = bio_data["metabolisme_glucidique"].get("glycemie")
+            if glycemie is not None:
+                # Optimal < 100 mg/dL
+                glycemie_score = max(0, 100 - ((glycemie - 70) / 50) * 100)
+                indices.append(glycemie_score)
+                details['glycemie'] = {
+                    'value': glycemie,
+                    'score': glycemie_score,
+                    'status': 'Optimal' if glycemie < 100 else 'Élevée'
+                }
+        
+        # Insuline à jeun
+        if "metabolisme_glucidique" in bio_data:
+            insuline = bio_data["metabolisme_glucidique"].get("insuline")
+            if insuline is not None:
+                # Optimal < 10 µU/mL
+                insuline_score = max(0, 100 - (insuline / 20.0) * 100)
+                indices.append(insuline_score)
+                details['insuline'] = {
+                    'value': insuline,
+                    'score': insuline_score,
+                    'status': 'Optimal' if insuline < 10 else 'Élevée'
+                }
+        
+        # Calculer la moyenne si des indices sont disponibles
+        if indices:
+            metabolism_score = round(sum(indices) / len(indices), 1)
+        else:
+            return {'score': 0, 'interpretation': 'Données insuffisantes', 'details': {}}
+        
+        # Stocker dans composite_indices
+        self.composite_indices['metabolism_index'] = metabolism_score
+        
+        return {
+            'score': metabolism_score,
+            'interpretation': self._interpret_metabolism(metabolism_score),
+            'details': details,
+            'risk_level': self._get_metabolic_risk(metabolism_score)
+        }
+    
+    def _interpret_metabolism(self, score):
+        """Interprète le score métabolique"""
+        if score >= 80:
+            return "Métabolisme optimal"
+        elif score >= 60:
+            return "Métabolisme correct"
+        elif score >= 40:
+            return "Dysrégulation métabolique modérée"
+        elif score >= 20:
+            return "Dysrégulation métabolique importante"
+        else:
+            return "Syndrome métabolique"
+    
+    def _get_metabolic_risk(self, score):
+        """Évalue le risque métabolique"""
+        if score >= 70:
+            return "Faible"
+        elif score >= 50:
+            return "Modéré"
+        elif score >= 30:
+            return "Élevé"
+        else:
+            return "Très élevé"
         
     def calculate_stress_index(self):
         """
@@ -188,17 +309,6 @@ class AlgoLifeStatisticalAnalysis:
         else:
             return "Syndrome métabolique établi"
     
-    def _get_metabolic_risk(self, score):
-        """Évalue le risque métabolique"""
-        if score >= 70:
-            return "Faible"
-        elif score >= 50:
-            return "Modéré"
-        elif score >= 30:
-            return "Élevé"
-        else:
-            return "Très élevé"
-    
     def calculate_neurotransmitter_balance(self):
         """
         Calcule l'équilibre des neurotransmetteurs
@@ -288,6 +398,10 @@ class AlgoLifeStatisticalAnalysis:
         
         return ' | '.join(recommendations) if recommendations else "Équilibre optimal maintenu"
     
+    def calculate_neurotransmitter_index(self):
+        """Alias pour calculate_neurotransmitter_balance"""
+        return self.calculate_neurotransmitter_balance()
+    
     def calculate_inflammation_index(self):
         """
         Calcule l'indice inflammatoire composite
@@ -358,6 +472,66 @@ class AlgoLifeStatisticalAnalysis:
         else:
             return "Intervention urgente"
     
+    def calculate_microbiome_index(self):
+        """
+        Calcule l'indice microbiome basé sur les métabolites bactériens
+        """
+        try:
+            benzoate = self.biological_markers.get('benzoate', 0)
+            hippurate = self.biological_markers.get('hippurate', 0)
+            phenol = self.biological_markers.get('phenol', 0)
+            p_cresol = self.biological_markers.get('p_cresol', 0)
+            indican = self.biological_markers.get('indican', 0)
+            
+            score = 100
+            issues = []
+            
+            # Métabolites de putréfaction (bas = bon)
+            if phenol > 10:
+                score -= min(20, (phenol - 10) * 2)
+                issues.append(f"Phénol élevé: {phenol:.1f}")
+            
+            if p_cresol > 5:
+                score -= min(20, (p_cresol - 5) * 3)
+                issues.append(f"P-crésol élevé: {p_cresol:.1f}")
+            
+            if indican > 20:
+                score -= min(15, (indican - 20))
+                issues.append(f"Indican élevé: {indican:.1f}")
+            
+            # Métabolites bénéfiques (élevé = bon)
+            if hippurate > 0 and hippurate < 200:
+                score -= 15
+                issues.append(f"Hippurate bas: {hippurate:.1f}")
+            
+            if benzoate > 0 and benzoate < 5:
+                score -= 10
+                issues.append(f"Benzoate bas: {benzoate:.1f}")
+            
+            score = max(0, score)
+            
+            self.composite_indices['microbiome_index'] = score
+            
+            return {
+                'score': score,
+                'interpretation': self._interpret_microbiome(score),
+                'issues': issues
+            }
+        except Exception as e:
+            print(f"Erreur calcul microbiome index: {e}")
+            return {'score': 0, 'interpretation': 'Données insuffisantes', 'issues': []}
+    
+    def _interpret_microbiome(self, score):
+        """Interprète le score microbiome"""
+        if score >= 80:
+            return "Microbiome équilibré"
+        elif score >= 60:
+            return "Microbiome correct"
+        elif score >= 40:
+            return "Dysbiose modérée"
+        else:
+            return "Dysbiose importante"
+    
     def calculate_all_indices(self):
         """
         Calcule tous les indices composites
@@ -366,7 +540,8 @@ class AlgoLifeStatisticalAnalysis:
             'stress': self.calculate_stress_index(),
             'metabolic': self.calculate_metabolic_health_score(),
             'neurotransmitters': self.calculate_neurotransmitter_balance(),
-            'inflammation': self.calculate_inflammation_index()
+            'inflammation': self.calculate_inflammation_index(),
+            'microbiome': self.calculate_microbiome_index()
         }
         
         return results
@@ -405,7 +580,10 @@ class AlgoLifeStatisticalAnalysis:
             if len(features) < 4:
                 return {
                     'success': False,
-                    'message': 'Données insuffisantes pour construire le modèle (minimum 4 variables)'
+                    'message': 'Données insuffisantes pour construire le modèle (minimum 4 variables)',
+                    'r2_score': 0,
+                    'feature_importance': {},
+                    'correlations': {}
                 }
             
             # Créer population synthétique
@@ -492,10 +670,14 @@ class AlgoLifeStatisticalAnalysis:
                 'confidence': r2_score
             }
             
+            # Préparer feature_importance comme dict pour compatibilité
+            feature_importance = dict(zip(coefficients['Feature'], coefficients['Coefficient']))
+            
             return {
                 'success': True,
                 'r2_score': r2_score,
                 'coefficients': coefficients,
+                'feature_importance': feature_importance,
                 'prediction': prediction,
                 'correlations': correlations,
                 'n_features': len(features)
@@ -507,8 +689,76 @@ class AlgoLifeStatisticalAnalysis:
             traceback.print_exc()
             return {
                 'success': False,
-                'message': f'Erreur: {str(e)}'
+                'message': f'Erreur: {str(e)}',
+                'r2_score': 0,
+                'feature_importance': {},
+                'correlations': {}
             }
+    
+    def calculate_correlations(self):
+        """
+        Calcule les corrélations entre biomarqueurs
+        """
+        if self.statistical_model and 'correlations' in self.statistical_model:
+            corr_data = self.statistical_model['correlations']
+            
+            # Extraire corrélations significatives
+            significant_corr = []
+            for feature, data in corr_data.items():
+                if data['significant']:
+                    significant_corr.append({
+                        'Feature': feature,
+                        'Correlation': data['correlation'],
+                        'P-value': data['p_value']
+                    })
+            
+            return {
+                'significant_correlations': significant_corr,
+                'all_correlations': corr_data
+            }
+        else:
+            return {
+                'significant_correlations': [],
+                'all_correlations': {}
+            }
+    
+    def generate_recommendations(self):
+        """
+        Génère des recommandations personnalisées
+        """
+        recommendations = []
+        
+        # Basé sur les indices composites
+        for key, value in self.composite_indices.items():
+            if 'stress' in key and value > 60:
+                recommendations.append({
+                    'area': 'Gestion du stress',
+                    'priority': 'Élevé',
+                    'recommendation': 'Protocole de réduction du stress recommandé'
+                })
+            elif 'inflammation' in key and value > 40:
+                recommendations.append({
+                    'area': 'Inflammation',
+                    'priority': 'Élevé',
+                    'recommendation': 'Protocole anti-inflammatoire recommandé'
+                })
+            elif 'metabolic' in key or 'metabolism' in key:
+                if value < 60:
+                    recommendations.append({
+                        'area': 'Métabolisme',
+                        'priority': 'Élevé',
+                        'recommendation': 'Optimisation métabolique nécessaire'
+                    })
+        
+        return recommendations if recommendations else [
+            {'area': 'Général', 'priority': 'Moyen', 'recommendation': 'Maintenir les bonnes pratiques actuelles'}
+        ]
+    
+    def generate_visualizations(self):
+        """
+        Génère les visualisations statistiques
+        """
+        return self.generate_statistical_visualizations()
     
     def generate_statistical_visualizations(self):
         """
@@ -801,4 +1051,3 @@ class AlgoLifeStatisticalAnalysis:
 
 # Export de la classe
 __all__ = ['AlgoLifeStatisticalAnalysis']
-
