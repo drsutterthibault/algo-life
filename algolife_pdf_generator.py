@@ -615,19 +615,32 @@ class AlgoLifePDFGenerator:
         return elements
 
 
-# Fonction d'aide pour Streamlit
-def generate_algolife_pdf_report(patient_name, analysis_results, chart_buffer=None):
+# Fonction d'aide pour Streamlit - MODIFIÉE
+def generate_algolife_pdf_report(patient_data, biomarker_results, engine_results, chart_buffer=None):
     """
     Fonction helper pour générer un rapport PDF depuis Streamlit
     
     Args:
-        patient_name: Nom du patient
-        analysis_results: Résultats de AlgoLifeStatisticalAnalysis.generate_comprehensive_report_data()
-        chart_buffer: Buffer des graphiques (BytesIO) de generate_statistical_visualizations()
+        patient_data: Dictionnaire avec les données du patient (doit contenir 'nom')
+        biomarker_results: Résultats des biomarqueurs
+        engine_results: Résultats du moteur d'analyse (doit contenir 'composite_indices', 'statistical_model', 'recommendations')
+        chart_buffer: Buffer des graphiques (BytesIO) optionnel
     
     Returns:
         BytesIO: Buffer contenant le PDF
     """
+    # Extraire le nom du patient
+    patient_name = patient_data.get('nom', 'Patient Inconnu')
+    
+    # Construire analysis_results à partir des données fournies
+    analysis_results = {
+        'patient_info': patient_data,
+        'composite_indices': engine_results.get('composite_indices', {}),
+        'statistical_model': engine_results.get('statistical_model', {}),
+        'recommendations': engine_results.get('recommendations', [])
+    }
+    
+    # Créer et retourner le PDF
     generator = AlgoLifePDFGenerator(patient_name, analysis_results, chart_buffer)
     return generator.generate_pdf()
 
