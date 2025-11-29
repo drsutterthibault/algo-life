@@ -510,7 +510,7 @@ with st.sidebar:
     # Sauvegarder les infos patient
     if st.button("💾 Enregistrer Informations Patient", key="save_patient_info"):
         st.session_state.patient_data['patient_info'] = {
-            'name': patient_name,
+            'nom': patient_name,
             'age': patient_age,
             'sexe': patient_sexe,
             'height': patient_height,
@@ -985,11 +985,12 @@ with tab3:
         if st.button("📥 Générer & Télécharger le Rapport PDF", type="primary"):
             with st.spinner("Génération du rapport PDF en cours..."):
                 try:
+                    # MODIFICATION ICI - Enlever analysis_results et utiliser les bons paramètres
                     pdf_buffer = generate_algolife_pdf_report(
                         patient_data=st.session_state.patient_data,
-                        analysis_results=st.session_state.analysis_results,
-                        chart_buffer=st.session_state.chart_buffer,
-                        engine_results=st.session_state.engine_results
+                        biomarker_results=st.session_state.patient_data.get('biological_markers', {}),
+                        engine_results=st.session_state.engine_results,
+                        chart_buffer=st.session_state.chart_buffer
                     )
                     
                     st.success("✅ Rapport PDF généré avec succès!")
@@ -997,7 +998,7 @@ with tab3:
                     st.download_button(
                         label="📥 Télécharger le Rapport PDF",
                         data=pdf_buffer,
-                        file_name=f"ALGO-LIFE_{st.session_state.patient_data['patient_info']['name']}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        file_name=f"ALGO-LIFE_{st.session_state.patient_data['patient_info'].get('nom', 'Patient')}_{datetime.now().strftime('%Y%m%d')}.pdf",
                         mime="application/pdf"
                     )
                     
