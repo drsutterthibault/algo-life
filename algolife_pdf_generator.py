@@ -1,6 +1,6 @@
 """
-ALGO-LIFE - Générateur de Rapports PDF Avancés
-Module intégré pour Streamlit
+ALGO-LIFE - Générateur de Rapports PDF CORRIGÉ
+Version avec gestion robuste des données manquantes
 """
 
 from reportlab.lib.pagesizes import A4
@@ -15,9 +15,10 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 
 
-class AlgoLifePDFGenerator:
+class AlgoLifePDFGeneratorCorrected:
     """
     Générateur de rapports PDF professionnels avec analyses statistiques
+    VERSION CORRIGÉE avec validation des données
     """
     
     # Couleurs du thème
@@ -36,12 +37,48 @@ class AlgoLifePDFGenerator:
             analysis_results: Dictionnaire avec tous les résultats d'analyse
             chart_buffer: Buffer contenant les graphiques (BytesIO)
         """
-        self.patient_name = patient_name
-        self.analysis_results = analysis_results
+        self.patient_name = patient_name or "Patient Inconnu"
+        self.analysis_results = analysis_results or {}
         self.chart_buffer = chart_buffer
         self.buffer = BytesIO()
         self.styles = self._create_styles()
         
+        # ✅ VALIDATION DES DONNÉES
+        self._validate_data()
+        
+    def _validate_data(self):
+        """Valide et complète les données si nécessaire"""
+        print(f"\n🔍 Validation des données pour {self.patient_name}...")
+        
+        # Vérifier composite_indices
+        if not self.analysis_results.get('composite_indices'):
+            print("⚠️  Aucun indice composite trouvé!")
+            self.analysis_results['composite_indices'] = {}
+        else:
+            n_indices = len(self.analysis_results['composite_indices'])
+            print(f"✅ {n_indices} indices composites trouvés")
+        
+        # Vérifier statistical_model
+        if not self.analysis_results.get('statistical_model'):
+            print("⚠️  Aucun modèle statistique trouvé!")
+            self.analysis_results['statistical_model'] = {'success': False}
+        else:
+            success = self.analysis_results['statistical_model'].get('success', False)
+            print(f"{'✅' if success else '⚠️ '} Modèle statistique: {success}")
+        
+        # Vérifier recommendations
+        if not self.analysis_results.get('recommendations'):
+            print("⚠️  Aucune recommandation trouvée!")
+            self.analysis_results['recommendations'] = []
+        else:
+            n_recs = len(self.analysis_results['recommendations'])
+            print(f"✅ {n_recs} recommandations trouvées")
+        
+        # Vérifier patient_info
+        if not self.analysis_results.get('patient_info'):
+            self.analysis_results['patient_info'] = {}
+            print("⚠️  Aucune info patient trouvée - utilisation de données par défaut")
+    
     def _create_styles(self):
         """Crée les styles personnalisés"""
         styles = getSampleStyleSheet()
@@ -213,7 +250,7 @@ class AlgoLifePDFGenerator:
         # Ajouter R² si disponible
         model_results = self.analysis_results.get('statistical_model', {})
         if model_results.get('success'):
-            info_data.append(['Score prédictif (R²):', f"{model_results['r2_score']:.3f}"])
+            info_data.append(['Score prédictif (R²):', f"{model_results.get('r2_score', 0):.3f}"])
             info_data.append(['Variables analysées:', str(model_results.get('n_features', 'N/A'))])
         
         info_table = Table(info_data, colWidths=[7*cm, 8*cm])
@@ -235,7 +272,13 @@ class AlgoLifePDFGenerator:
         elements.append(Paragraph("RÉSUMÉ EXÉCUTIF", self.styles['CustomHeading1']))
         
         summary_text = self._generate_executive_summary()
-        elements.append(Paragraph(summary_text, self.styles['CustomBody']))
+        if summary_text:
+            elements.append(Paragraph(summary_text, self.styles['CustomBody']))
+        else:
+            elements.append(Paragraph(
+                "<i>Analyse en cours - Résumé sera disponible après traitement complet des biomarqueurs</i>",
+                self.styles['CustomBody']
+            ))
         
         return elements
     
@@ -243,43 +286,54 @@ class AlgoLifePDFGenerator:
         """Génère le résumé exécutif"""
         indices = self.analysis_results.get('composite_indices', {})
         
+        if not indices:
+            return ""
+        
         summary_parts = []
         
         # Stress
         if 'stress' in indices:
-            stress_score = indices['stress']['score']
+            stress_score = indices['stress'].get('score', 0)
+            stress_interp = indices['stress'].get('interpretation', 'Non disponible')
             summary_parts.append(
-                f"<b>Stress:</b> Score {stress_score:.0f}/100 - {indices['stress']['interpretation']}"
+                f"<b>Stress:</b> Score {stress_score:.0f}/100 - {stress_interp}"
             )
         
         # Métabolisme
         if 'metabolic' in indices:
-            metab_score = indices['metabolic']['score']
+            metab_score = indices['metabolic'].get('score', 0)
+            metab_interp = indices['metabolic'].get('interpretation', 'Non disponible')
             summary_parts.append(
-                f"<b>Métabolisme:</b> Score {metab_score:.0f}/100 - {indices['metabolic']['interpretation']}"
+                f"<b>Métabolisme:</b> Score {metab_score:.0f}/100 - {metab_interp}"
             )
         
         # Inflammation
         if 'inflammation' in indices:
-            inflam_score = indices['inflammation']['score']
+            inflam_score = indices['inflammation'].get('score', 0)
+            inflam_interp = indices['inflammation'].get('interpretation', 'Non disponible')
             summary_parts.append(
-                f"<b>Inflammation:</b> Score {inflam_score:.0f}/100 - {indices['inflammation']['interpretation']}"
+                f"<b>Inflammation:</b> Score {inflam_score:.0f}/100 - {inflam_interp}"
             )
         
         # Neurotransmetteurs
         if 'neurotransmitters' in indices:
-            neuro_score = indices['neurotransmitters']['score']
+            neuro_score = indices['neurotransmitters'].get('score', 0)
+            neuro_interp = indices['neurotransmitters'].get('interpretation', 'Non disponible')
             summary_parts.append(
-                f"<b>Neurotransmetteurs:</b> Score {neuro_score:.0f}/100 - {indices['neurotransmitters']['interpretation']}"
+                f"<b>Neurotransmetteurs:</b> Score {neuro_score:.0f}/100 - {neuro_interp}"
             )
+        
+        if not summary_parts:
+            return ""
         
         summary = "<br/><br/>".join(summary_parts)
         
         # Ajouter conclusion statistique
         model_results = self.analysis_results.get('statistical_model', {})
         if model_results.get('success'):
-            summary += f"<br/><br/><b>Modèle prédictif:</b> R² = {model_results['r2_score']:.3f}, "
-            summary += f"expliquant {model_results['r2_score']*100:.1f}% de la variance observée."
+            r2 = model_results.get('r2_score', 0)
+            summary += f"<br/><br/><b>Modèle prédictif:</b> R² = {r2:.3f}, "
+            summary += f"expliquant {r2*100:.1f}% de la variance observée."
         
         return summary
     
@@ -292,36 +346,37 @@ class AlgoLifePDFGenerator:
         
         indices = self.analysis_results.get('composite_indices', {})
         
+        if not indices:
+            elements.append(Paragraph(
+                "<i>Aucun indice composite calculé. Veuillez vérifier que les biomarqueurs ont été correctement analysés.</i>",
+                self.styles['CustomBody']
+            ))
+            return elements
+        
         # Table des indices
         table_data = [['Indice', 'Score', 'Interprétation', 'Statut']]
         
         for key, result in indices.items():
             index_name = key.replace('_', ' ').title()
-            score = result['score']
-            interpretation = result['interpretation']
+            score = result.get('score', 0)
+            interpretation = result.get('interpretation', 'Non disponible')
             
             # Déterminer le statut
             if 'stress' in key or 'inflammation' in key:
                 # Inverser pour ces indices (plus bas = mieux)
                 if score < 30:
                     status = "✓ Optimal"
-                    status_color = self.SUCCESS_COLOR
                 elif score < 60:
                     status = "⚠ Surveillance"
-                    status_color = colors.orange
                 else:
                     status = "✗ Action requise"
-                    status_color = self.ACCENT_COLOR
             else:
                 if score >= 70:
                     status = "✓ Optimal"
-                    status_color = self.SUCCESS_COLOR
                 elif score >= 50:
                     status = "⚠ Surveillance"
-                    status_color = colors.orange
                 else:
                     status = "✗ Action requise"
-                    status_color = self.ACCENT_COLOR
             
             table_data.append([
                 index_name,
@@ -358,14 +413,19 @@ class AlgoLifePDFGenerator:
             details_text = ""
             
             if 'stress' in key:
-                details_text = f"<b>Phase identifiée:</b> {result.get('phase', 'N/A')}<br/>"
-                details_text += f"<b>Score:</b> {result['score']:.0f}/100<br/>"
-                details_text += f"<b>Interprétation:</b> {result['interpretation']}"
+                phase = result.get('phase', 'N/A')
+                score = result.get('score', 0)
+                interpretation = result.get('interpretation', 'N/A')
+                details_text = f"<b>Phase identifiée:</b> {phase}<br/>"
+                details_text += f"<b>Score:</b> {score:.0f}/100<br/>"
+                details_text += f"<b>Interprétation:</b> {interpretation}"
             
             elif 'metabolic' in key:
                 issues = result.get('issues', [])
-                details_text = f"<b>Score santé métabolique:</b> {result['score']:.0f}/100<br/>"
-                details_text += f"<b>Niveau de risque:</b> {result.get('risk_level', 'N/A')}<br/>"
+                score = result.get('score', 0)
+                risk_level = result.get('risk_level', 'N/A')
+                details_text = f"<b>Score santé métabolique:</b> {score:.0f}/100<br/>"
+                details_text += f"<b>Niveau de risque:</b> {risk_level}<br/>"
                 if issues:
                     details_text += "<b>Points d'attention:</b><br/>"
                     for issue in issues:
@@ -373,16 +433,20 @@ class AlgoLifePDFGenerator:
             
             elif 'inflammation' in key:
                 sources = result.get('sources', [])
-                details_text = f"<b>Score inflammation:</b> {result['score']:.0f}/100<br/>"
-                details_text += f"<b>Priorité:</b> {result.get('priority', 'N/A')}<br/>"
+                score = result.get('score', 0)
+                priority = result.get('priority', 'N/A')
+                details_text = f"<b>Score inflammation:</b> {score:.0f}/100<br/>"
+                details_text += f"<b>Priorité:</b> {priority}<br/>"
                 if sources:
                     details_text += "<b>Sources d'inflammation:</b><br/>"
                     for source in sources:
                         details_text += f"• {source}<br/>"
             
             elif 'neurotransmitters' in key:
-                details_text = f"<b>Score équilibre:</b> {result['score']:.0f}/100<br/>"
-                details_text += f"<b>Recommandation:</b> {result.get('recommendation', 'N/A')}"
+                score = result.get('score', 0)
+                recommendation = result.get('recommendation', 'N/A')
+                details_text = f"<b>Score équilibre:</b> {score:.0f}/100<br/>"
+                details_text += f"<b>Recommandation:</b> {recommendation}"
             
             if details_text:
                 elements.append(Paragraph(details_text, self.styles['CustomBody']))
@@ -410,12 +474,16 @@ class AlgoLifePDFGenerator:
         # Métriques du modèle
         elements.append(Paragraph("Performance du Modèle Prédictif", self.styles['CustomHeading1']))
         
+        r2 = model_results.get('r2_score', 0)
+        n_features = model_results.get('n_features', 'N/A')
+        
+        quality = 'excellente' if r2 > 0.7 else 'bonne' if r2 > 0.5 else 'modérée'
+        
         metrics_text = f"""
-        <b>R² (Coefficient de détermination):</b> {model_results['r2_score']:.3f}<br/>
-        <b>Interprétation:</b> Le modèle explique {model_results['r2_score']*100:.1f}% de la variance,
-        démontrant une {'excellente' if model_results['r2_score'] > 0.7 else 'bonne' if model_results['r2_score'] > 0.5 else 'modérée'} 
-        capacité prédictive.<br/>
-        <b>Variables analysées:</b> {model_results.get('n_features', 'N/A')} paramètres biologiques
+        <b>R² (Coefficient de détermination):</b> {r2:.3f}<br/>
+        <b>Interprétation:</b> Le modèle explique {r2*100:.1f}% de la variance,
+        démontrant une {quality} capacité prédictive.<br/>
+        <b>Variables analysées:</b> {n_features} paramètres biologiques
         """
         elements.append(Paragraph(metrics_text, self.styles['CustomBody']))
         
@@ -425,14 +493,14 @@ class AlgoLifePDFGenerator:
         elements.append(Paragraph("Facteurs Principaux (par ordre d'impact)", self.styles['CustomHeading1']))
         
         coefficients = model_results.get('coefficients')
-        if coefficients is not None:
+        if coefficients is not None and hasattr(coefficients, 'head'):
             top_factors = coefficients.head(5)
             
             factors_data = [['Rang', 'Facteur', 'Coefficient', 'Impact', 'Interprétation']]
             
             for i, (idx, row) in enumerate(top_factors.iterrows(), 1):
-                factor_name = row['Feature'].replace('_', ' ').title()
-                coef = row['Coefficient']
+                factor_name = row.get('Feature', str(idx)).replace('_', ' ').title()
+                coef = row.get('Coefficient', 0)
                 
                 if coef > 0:
                     impact = "Protecteur"
@@ -463,33 +531,11 @@ class AlgoLifePDFGenerator:
             ]))
             
             elements.append(factors_table)
-        
-        elements.append(Spacer(1, 0.8*cm))
-        
-        # Corrélations significatives
-        elements.append(Paragraph("Corrélations Significatives", self.styles['CustomHeading2']))
-        
-        correlations = model_results.get('correlations', {})
-        if correlations:
-            significant_corrs = {k: v for k, v in correlations.items() 
-                               if v.get('significant', False)}
-            
-            if significant_corrs:
-                corr_text = "<b>Facteurs statistiquement significatifs (p < 0.05):</b><br/><br/>"
-                
-                for factor, corr_data in list(significant_corrs.items())[:5]:
-                    factor_name = factor.replace('_', ' ').title()
-                    corr_val = corr_data['correlation']
-                    p_val = corr_data['p_value']
-                    
-                    corr_text += f"• <b>{factor_name}:</b> r = {corr_val:.3f} (p = {p_val:.4f})<br/>"
-                
-                elements.append(Paragraph(corr_text, self.styles['CustomBody']))
-            else:
-                elements.append(Paragraph(
-                    "Aucune corrélation significative identifiée (p > 0.05)",
-                    self.styles['CustomBody']
-                ))
+        else:
+            elements.append(Paragraph(
+                "<i>Détail des coefficients non disponible</i>",
+                self.styles['CustomBody']
+            ))
         
         return elements
     
@@ -567,8 +613,8 @@ class AlgoLifePDFGenerator:
         for i, rec in enumerate(recommendations[:5], 1):  # Top 5
             priority = rec.get('priority', 3)
             category = rec.get('category', 'Général')
-            issue = rec.get('issue', '')
-            action = rec.get('action', '')
+            issue = rec.get('issue', 'Non spécifié')
+            action = rec.get('action', 'Non spécifié')
             interventions = rec.get('interventions', [])
             impact = rec.get('expected_impact', 'Modéré')
             
@@ -615,22 +661,41 @@ class AlgoLifePDFGenerator:
         return elements
 
 
-# Fonction d'aide pour Streamlit - MODIFIÉE
-def generate_algolife_pdf_report(patient_data, biomarker_results, engine_results, chart_buffer=None):
+# ✅ FONCTION HELPER CORRIGÉE
+def generate_algolife_pdf_report_corrected(patient_data, biomarker_results, engine_results, chart_buffer=None):
     """
-    Fonction helper pour générer un rapport PDF depuis Streamlit
+    Fonction helper CORRIGÉE pour générer un rapport PDF depuis Streamlit
     
     Args:
         patient_data: Dictionnaire avec les données du patient (doit contenir 'nom')
-        biomarker_results: Résultats des biomarqueurs
+        biomarker_results: Résultats des biomarqueurs (dict ou DataFrame)
         engine_results: Résultats du moteur d'analyse (doit contenir 'composite_indices', 'statistical_model', 'recommendations')
         chart_buffer: Buffer des graphiques (BytesIO) optionnel
     
     Returns:
         BytesIO: Buffer contenant le PDF
     """
-    # Extraire le nom du patient
+    
+    # ✅ VALIDATION STRICTE DES DONNÉES
+    print("\n" + "="*80)
+    print("GÉNÉRATION PDF ALGO-LIFE - VALIDATION DES DONNÉES")
+    print("="*80)
+    
+    # Validation patient_data
+    if not isinstance(patient_data, dict):
+        print("❌ ERREUR: patient_data n'est pas un dictionnaire!")
+        patient_data = {}
+    
     patient_name = patient_data.get('nom', 'Patient Inconnu')
+    print(f"✅ Patient: {patient_name}")
+    
+    # Validation engine_results
+    if not isinstance(engine_results, dict):
+        print("❌ ERREUR: engine_results n'est pas un dictionnaire!")
+        engine_results = {}
+    
+    if not engine_results:
+        print("⚠️  WARNING: engine_results est VIDE - Le rapport sera incomplet!")
     
     # Construire analysis_results à partir des données fournies
     analysis_results = {
@@ -640,9 +705,17 @@ def generate_algolife_pdf_report(patient_data, biomarker_results, engine_results
         'recommendations': engine_results.get('recommendations', [])
     }
     
+    # Afficher résumé
+    print(f"\nDonnées pour le PDF:")
+    print(f"  - composite_indices: {len(analysis_results['composite_indices'])} indices")
+    print(f"  - statistical_model success: {analysis_results['statistical_model'].get('success', False)}")
+    print(f"  - recommendations: {len(analysis_results['recommendations'])} recommandations")
+    print(f"  - chart_buffer: {'Présent' if chart_buffer else 'Absent'}")
+    print("="*80 + "\n")
+    
     # Créer et retourner le PDF
-    generator = AlgoLifePDFGenerator(patient_name, analysis_results, chart_buffer)
+    generator = AlgoLifePDFGeneratorCorrected(patient_name, analysis_results, chart_buffer)
     return generator.generate_pdf()
 
 
-__all__ = ['AlgoLifePDFGenerator', 'generate_algolife_pdf_report']
+__all__ = ['AlgoLifePDFGeneratorCorrected', 'generate_algolife_pdf_report_corrected']
