@@ -2117,10 +2117,20 @@ with tab3:
                     
                     # Générer le PDF
                     pdf_buffer = generate_algolife_pdf_report(
-                        patient_data=st.session_state.patient_data,
-                        biomarker_results=st.session_state.patient_data['biological_markers'],
-                        engine_results=st.session_state.engine_results,
-                        chart_buffer=None  # À implémenter si besoin
+    patient_data=st.session_state.patient_data,
+    biomarker_results=st.session_state.patient_data["biological_markers"],
+
+    # ✅ AJOUTS OBLIGATOIRES POUR LE TEMPLATE v4.1
+    health_score=st.session_state.health_score,
+    biological_age=st.session_state.biological_age,
+    nutritional_needs=st.session_state.nutritional_needs,
+    recommendations=st.session_state.recommendations,
+
+    # ✅ OPTIONNEL
+    engine_results=st.session_state.engine_results,
+    chart_buffer=None
+)
+ # À implémenter si besoin
                     )
                     
                     st.success("✅ Rapport PDF généré avec succès!")
