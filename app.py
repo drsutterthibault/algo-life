@@ -2132,7 +2132,7 @@ pdf_buffer = generate_algolife_pdf_report(
 )
 
  # À implémenter si besoin
-                    )
+
                     
                     st.success("✅ Rapport PDF généré avec succès!")
                     
