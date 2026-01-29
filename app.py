@@ -2080,6 +2080,7 @@ with tab2:
 # TAB 3 - RAPPORT PDF
 # ============================================================================
 
+
 with tab3:
     st.header("📄 Génération du Rapport Professionnel")
     
@@ -2104,7 +2105,7 @@ with tab3:
         if st.button("📥 GÉNÉRER LE RAPPORT PDF", type="primary", use_container_width=True, key="generate_pdf_btn"):
             with st.spinner("📄 Génération du rapport en cours... Cela peut prendre quelques secondes."):
                 try:
-                    # Préparer toutes les données
+                    # Préparer toutes les données (optionnel, mais tu peux le garder)
                     report_data = {
                         'patient_info': st.session_state.patient_data['patient_info'],
                         'biomarkers': st.session_state.patient_data['biological_markers'],
@@ -2114,26 +2115,23 @@ with tab3:
                         'recommendations': st.session_state.recommendations,
                         'engine_results': st.session_state.engine_results
                     }
-                    
-           # Générer le PDF
-pdf_buffer = generate_algolife_pdf_report(
-    patient_data=st.session_state.patient_data,
-    biomarker_results=st.session_state.patient_data["biological_markers"],
 
-    # ✅ AJOUTS OBLIGATOIRES POUR LE TEMPLATE v4.1
-    health_score=st.session_state.health_score,
-    biological_age=st.session_state.biological_age,
-    nutritional_needs=st.session_state.nutritional_needs,
-    recommendations=st.session_state.recommendations,
+                    # ✅ Générer le PDF (TEMPLATE v4.1)
+                    pdf_buffer = generate_algolife_pdf_report(
+                        patient_data=st.session_state.patient_data,
+                        biomarker_results=st.session_state.patient_data["biological_markers"],
 
-    # ✅ OPTIONNEL
-    engine_results=st.session_state.engine_results,
-    chart_buffer=None
-)
+                        # ✅ AJOUTS OBLIGATOIRES POUR LE TEMPLATE v4.1
+                        health_score=st.session_state.health_score,
+                        biological_age=st.session_state.biological_age,
+                        nutritional_needs=st.session_state.nutritional_needs,
+                        recommendations=st.session_state.recommendations,
 
- # À implémenter si besoin
+                        # ✅ OPTIONNEL
+                        engine_results=st.session_state.engine_results,
+                        chart_buffer=None
+                    )
 
-                    
                     st.success("✅ Rapport PDF généré avec succès!")
                     
                     # Nom du fichier
@@ -2143,7 +2141,7 @@ pdf_buffer = generate_algolife_pdf_report(
                     # Bouton de téléchargement
                     st.download_button(
                         label="📥 TÉLÉCHARGER LE RAPPORT PDF",
-                        data=pdf_buffer,
+                        data=pdf_buffer.getvalue(),
                         file_name=filename,
                         mime="application/pdf",
                         type="primary",
