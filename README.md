@@ -1,2 +1,19 @@
-# algo-life
-Algo-Life: clinical-grade functional biology platform integrating biomarkers, metabolism analytics and personalised reports.
+<p align="center">
+  <img src="assets/logo.png" width="400">
+</p>
+
+# ALGO-LIFE  
+Plateforme d’Analyse Multimodale Assistée par l’IA
+
+---
+
+## 🚀 Présentation
+
+ALGO-LIFE est une plateforme d’analyse biofonctionnelle multimodale assistée par intelligence artificielle.
+
+## ✅ Fonctionnalités principales
+
+- Import automatique de bilans PDF
+- Analyse biomarqueurs + imagerie DXA
+- Rapports cliniques individualisés
+- Modules IA et règles statistiques avancées
