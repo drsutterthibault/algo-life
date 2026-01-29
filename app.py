@@ -2115,8 +2115,8 @@ with tab3:
                         'engine_results': st.session_state.engine_results
                     }
                     
-                    # Générer le PDF
-                    pdf_buffer = generate_algolife_pdf_report(
+           # Générer le PDF
+pdf_buffer = generate_algolife_pdf_report(
     patient_data=st.session_state.patient_data,
     biomarker_results=st.session_state.patient_data["biological_markers"],
 
@@ -2130,6 +2130,7 @@ with tab3:
     engine_results=st.session_state.engine_results,
     chart_buffer=None
 )
+
  # À implémenter si besoin
                     )
                     
