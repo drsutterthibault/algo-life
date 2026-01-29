@@ -1,6 +1,7 @@
 <p align="center">
-  <img src="assets/logo.png" width="400">
+  <img src="logo.png" width="400">
 </p>
+
 
 # ALGO-LIFE  
 Plateforme d’Analyse Multimodale Assistée par l’IA
