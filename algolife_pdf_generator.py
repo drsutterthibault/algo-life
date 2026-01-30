@@ -1,6 +1,6 @@
 """
-ALGO-LIFE PDF Generator - Version Complète v5.0
-Tout-en-un avec BiomarkerDatabase intégrée
+ALGO-LIFE PDF Generator - Version Complète v5.0 (PATCHED)
+✅ Fix: jauges affichées (mapping clés + tri statut robuste)
 
 Auteur: Dr Thibault SUTTER
 """
@@ -28,137 +28,58 @@ class BiomarkerDatabase:
     Base de données complète des biomarqueurs avec références
     Classe intégrée pour classification automatique
     """
-    
+
     def get_reference_ranges(self):
         """Retourne toutes les références des biomarqueurs"""
         return {
-            "crp": {
-                "unit": "mg/L",
-                "normal": [0.0, 5.0],
-                "optimal": [0.0, 1.0],
-                "category": "Inflammation"
-            },
-            "insuline": {
-                "unit": "mU/L",
-                "normal": [3.0, 25.0],
-                "optimal": [3.0, 8.0],
-                "category": "Métabolisme"
-            },
-            "homa_index": {
-                "unit": "",
-                "normal": [0.0, 2.5],
-                "optimal": [0.0, 1.0],
-                "category": "Métabolisme"
-            },
-            "quicki_index": {
-                "unit": "",
-                "normal": [0.35, 0.45],
-                "optimal": [0.38, 0.45],
-                "category": "Métabolisme"
-            },
+            "crp": {"unit": "mg/L", "normal": [0.0, 5.0], "optimal": [0.0, 1.0], "category": "Inflammation"},
+            "insuline": {"unit": "mU/L", "normal": [3.0, 25.0], "optimal": [3.0, 8.0], "category": "Métabolisme"},
+            "homa_index": {"unit": "", "normal": [0.0, 2.5], "optimal": [0.0, 1.0], "category": "Métabolisme"},
+            "quicki_index": {"unit": "", "normal": [0.35, 0.45], "optimal": [0.38, 0.45], "category": "Métabolisme"},
             "ferritine": {
                 "unit": "µg/L",
                 "normal_male": [30.0, 400.0],
                 "normal_female": [15.0, 150.0],
                 "optimal_male": [50.0, 150.0],
                 "optimal_female": [30.0, 100.0],
-                "category": "Fer"
+                "category": "Fer",
             },
-            "zinc": {
-                "unit": "µg/dL",
-                "normal": [70.0, 150.0],
-                "optimal": [90.0, 130.0],
-                "category": "Micronutriments"
-            },
-            "selenium": {
-                "unit": "µg/L",
-                "normal": [70.0, 150.0],
-                "optimal": [100.0, 140.0],
-                "category": "Micronutriments"
-            },
-            "magnesium_erythrocytaire": {
-                "unit": "mg/dL",
-                "normal": [4.0, 6.0],
-                "optimal": [5.0, 6.0],
-                "category": "Micronutriments"
-            },
-            "glutathion_total": {
-                "unit": "µmol/L",
-                "normal": [900.0, 1750.0],
-                "optimal": [1200.0, 1750.0],
-                "category": "Antioxydants"
-            },
-            "coenzyme_q10": {
-                "unit": "µg/L",
-                "normal": [500.0, 1500.0],
-                "optimal": [800.0, 1200.0],
-                "category": "Antioxydants"
-            },
-            "gpx": {
-                "unit": "U/g Hb",
-                "normal": [27.5, 73.6],
-                "optimal": [40.0, 65.0],
-                "category": "Antioxydants"
-            },
-            "vitamine_d": {
-                "unit": "ng/mL",
-                "normal": [30.0, 100.0],
-                "optimal": [50.0, 80.0],
-                "category": "Vitamines"
-            },
-            "vitamine_b12": {
-                "unit": "pg/mL",
-                "normal": [200.0, 900.0],
-                "optimal": [400.0, 700.0],
-                "category": "Vitamines"
-            },
-            "homocysteine": {
-                "unit": "µmol/L",
-                "normal": [5.0, 15.0],
-                "optimal": [5.0, 9.0],
-                "category": "Cardiovasculaire"
-            },
-            "cortisol": {
-                "unit": "µg/dL",
-                "normal": [5.0, 25.0],
-                "optimal": [10.0, 18.0],
-                "category": "Hormones"
-            },
+            "zinc": {"unit": "µg/dL", "normal": [70.0, 150.0], "optimal": [90.0, 130.0], "category": "Micronutriments"},
+            "selenium": {"unit": "µg/L", "normal": [70.0, 150.0], "optimal": [100.0, 140.0], "category": "Micronutriments"},
+            "magnesium_erythrocytaire": {"unit": "mg/dL", "normal": [4.0, 6.0], "optimal": [5.0, 6.0], "category": "Micronutriments"},
+            "glutathion_total": {"unit": "µmol/L", "normal": [900.0, 1750.0], "optimal": [1200.0, 1750.0], "category": "Antioxydants"},
+            "coenzyme_q10": {"unit": "µg/L", "normal": [500.0, 1500.0], "optimal": [800.0, 1200.0], "category": "Antioxydants"},
+            "gpx": {"unit": "U/g Hb", "normal": [27.5, 73.6], "optimal": [40.0, 65.0], "category": "Antioxydants"},
+            "vitamine_d": {"unit": "ng/mL", "normal": [30.0, 100.0], "optimal": [50.0, 80.0], "category": "Vitamines"},
+            "vitamine_b12": {"unit": "pg/mL", "normal": [200.0, 900.0], "optimal": [400.0, 700.0], "category": "Vitamines"},
+            "homocysteine": {"unit": "µmol/L", "normal": [5.0, 15.0], "optimal": [5.0, 9.0], "category": "Cardiovasculaire"},
+            "cortisol": {"unit": "µg/dL", "normal": [5.0, 25.0], "optimal": [10.0, 18.0], "category": "Hormones"},
             "testosterone": {
                 "unit": "ng/mL",
                 "normal_male": [3.0, 10.0],
                 "optimal_male": [5.0, 8.0],
                 "normal_female": [0.1, 0.7],
                 "optimal_female": [0.3, 0.5],
-                "category": "Hormones"
-            }
+                "category": "Hormones",
+            },
         }
-    
+
     def classify_biomarker(self, key, value, age=None, sexe=None):
         """
         Classifie un biomarqueur selon sa valeur
-        
-        Args:
-            key: Clé du biomarqueur
-            value: Valeur mesurée
-            age: Âge du patient (optionnel)
-            sexe: "Masculin" ou "Féminin"
-            
-        Returns:
-            dict: {status, interpretation, icon}
+        Returns dict: {status, interpretation, icon}
         """
         refs = self.get_reference_ranges()
-        
+
         if key not in refs:
-            return {
-                "status": "unknown",
-                "interpretation": "Référence non disponible pour ce biomarqueur",
-                "icon": "❓"
-            }
-        
+            return {"status": "unknown", "interpretation": "Référence non disponible pour ce biomarqueur", "icon": "❓"}
+
         ref = refs[key]
-        val = float(value)
-        
+        try:
+            val = float(value)
+        except Exception:
+            return {"status": "unknown", "interpretation": "Valeur non numérique / manquante", "icon": "❓"}
+
         # Déterminer les bornes selon le sexe
         if sexe == "Masculin" and "normal_male" in ref:
             normal = ref["normal_male"]
@@ -169,35 +90,35 @@ class BiomarkerDatabase:
         else:
             normal = ref.get("normal", [0, 100])
             optimal = ref.get("optimal")
-        
+
         # Classification
         if optimal and len(optimal) == 2 and optimal[0] <= val <= optimal[1]:
             return {
                 "status": "optimal",
                 "interpretation": f"Valeur optimale ({val:.2f} {ref['unit']}). Excellent ! Continuez ainsi.",
-                "icon": "✅"
+                "icon": "✅",
             }
         elif normal[0] <= val <= normal[1]:
             return {
                 "status": "normal",
                 "interpretation": f"Valeur dans les normes ({val:.2f} {ref['unit']}), mais optimisation possible.",
-                "icon": "✓"
+                "icon": "✓",
             }
         elif val < normal[0]:
             deficit = normal[0] - val
-            percent = (deficit / normal[0]) * 100
+            percent = (deficit / normal[0]) * 100 if normal[0] else 0
             return {
                 "status": "low",
                 "interpretation": f"Valeur basse ({val:.2f} {ref['unit']}). Déficit de {deficit:.1f} ({percent:.0f}%). Supplémentation recommandée.",
-                "icon": "⚠️"
+                "icon": "⚠️",
             }
         else:
             excess = val - normal[1]
-            percent = (excess / normal[1]) * 100
+            percent = (excess / normal[1]) * 100 if normal[1] else 0
             return {
                 "status": "high",
                 "interpretation": f"Valeur élevée ({val:.2f} {ref['unit']}). Excès de {excess:.1f} ({percent:.0f}%). Investigation recommandée.",
-                "icon": "⚠️"
+                "icon": "⚠️",
             }
 
 
@@ -214,8 +135,14 @@ def normalize_patient(patient_data: dict) -> dict:
 
 
 def normalize_biomarkers(biomarker_results):
+    """
+    Accepte:
+      - dict: {"crp": 1.2, "insuline": 8.3, ...}
+      - list: [{"key": "...", "value": ...}, ...]
+    """
     if isinstance(biomarker_results, dict):
         return "dict", biomarker_results, []
+
     if isinstance(biomarker_results, list):
         cleaned = []
         for it in biomarker_results:
@@ -231,6 +158,7 @@ def normalize_biomarkers(biomarker_results):
                 "category": it.get("category", "—"),
             })
         return "list", {}, cleaned
+
     return "unknown", {}, []
 
 
@@ -241,6 +169,53 @@ def safe_float(x, default=None):
         return float(x)
     except Exception:
         return default
+
+
+# ============================================================
+# KEY MAPPING (PATCH)
+# ============================================================
+
+ALIASES = {
+    # CRP
+    "crp_us": "crp",
+    "hs_crp": "crp",
+    "hs-crp": "crp",
+    "crp-us": "crp",
+    "crp_hs": "crp",
+    "crpus": "crp",
+    # Vit D
+    "vit_d": "vitamine_d",
+    "vitamin_d": "vitamine_d",
+    "25ohd": "vitamine_d",
+    "25-ohd": "vitamine_d",
+    "25(oh)d": "vitamine_d",
+    # B12
+    "b12": "vitamine_b12",
+    "vit_b12": "vitamine_b12",
+    "vitamineb12": "vitamine_b12",
+    # Insuline
+    "insulin": "insuline",
+    "insuline_jeun": "insuline",
+    "insulin_fasting": "insuline",
+    # HOMA
+    "homa": "homa_index",
+    "homa_ir": "homa_index",
+    "homair": "homa_index",
+    "homa-IR": "homa_index",
+    # QUICKI
+    "quicki": "quicki_index",
+    # Ferritine
+    "ferritin": "ferritine",
+    # Zinc / Selenium
+    "zn": "zinc",
+    "se": "selenium",
+}
+
+
+def canonical_key(raw_key: str) -> str:
+    k = (raw_key or "").strip().lower()
+    k = k.replace(" ", "_")
+    return ALIASES.get(k, k)
 
 
 # ============================================================
@@ -258,7 +233,7 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
 
     fig, ax = plt.subplots(figsize=(8, 1.2))
     fig.patch.set_facecolor('white')
-    
+
     total_range = rmax - rmin
     value_pos = (v - rmin) / total_range if total_range > 0 else 0.5
     value_pos = max(0, min(1, value_pos))
@@ -290,7 +265,7 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
             markeredgecolor='white', markeredgewidth=2, zorder=10)
 
     # Textes
-    ax.text(-0.02, 0, str(biomarker_name), va='center', ha='right', 
+    ax.text(-0.02, 0, str(biomarker_name), va='center', ha='right',
             fontsize=10, fontweight='bold', color='#1f2937')
     ax.text(value_pos, 0.6, f"{v:.2f} {unit}".strip(), ha='center', va='bottom',
             fontsize=9, fontweight='bold', color=marker_color)
@@ -324,52 +299,52 @@ def create_biological_age_visual(biological_age, chronological_age, delta, delta
     """Visualisation âge biologique"""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
     fig.patch.set_facecolor('white')
-    
+
     bio_age = safe_float(biological_age, 50)
     chrono_age = safe_float(chronological_age, 50)
     delta_val = safe_float(delta, 0)
-    
+
     ages = ['Chronologique', 'Biologique']
     values = [chrono_age, bio_age]
     bar_colors = ['#3b82f6', '#10b981' if delta_val <= 0 else '#f59e0b']
-    
-    bars = ax1.bar(ages, values, color=bar_colors, alpha=0.85, 
+
+    bars = ax1.bar(ages, values, color=bar_colors, alpha=0.85,
                    edgecolor='white', linewidth=3, width=0.6)
-    
+
     for bar, val in zip(bars, values):
         height = bar.get_height()
         ax1.text(bar.get_x() + bar.get_width()/2, height + 1,
                 f'{val:.1f}\nans', ha='center', va='bottom',
                 fontsize=13, fontweight='bold', color=bar.get_facecolor())
-    
+
     ax1.set_ylim(0, max(values) * 1.3)
     ax1.set_ylabel('Âge (années)', fontsize=11, fontweight='bold')
     ax1.set_title('Comparaison des Âges', fontsize=12, fontweight='bold', pad=15)
     ax1.spines['top'].set_visible(False)
     ax1.spines['right'].set_visible(False)
     ax1.grid(axis='y', alpha=0.2, linestyle='--')
-    
+
     delta_color = '#10b981' if delta_val <= 0 else '#f59e0b'
     delta_text = 'Rajeunissement' if delta_val < 0 else ('Vieillissement' if delta_val > 0 else 'Équilibre')
-    
+
     ax2.text(0.5, 0.65, f"{delta_val:+.1f}", ha='center', va='center',
             fontsize=48, fontweight='bold', color=delta_color, transform=ax2.transAxes)
     ax2.text(0.5, 0.42, 'ans', ha='center', va='center',
             fontsize=16, color='#6b7280', transform=ax2.transAxes)
-    ax2.text(0.5, 0.25, f"({delta_percent:+.1f}%)", ha='center', va='center',
+    ax2.text(0.5, 0.25, f"({safe_float(delta_percent, 0):+.1f}%)", ha='center', va='center',
             fontsize=18, fontweight='bold', color=delta_color, transform=ax2.transAxes)
     ax2.text(0.5, 0.08, delta_text, ha='center', va='center',
             fontsize=13, fontweight='600', color=delta_color, style='italic', transform=ax2.transAxes)
-    
+
     rect = Rectangle((0.05, 0.05), 0.9, 0.9, linewidth=3,
                      edgecolor=delta_color, facecolor='none', transform=ax2.transAxes, alpha=0.6)
     ax2.add_patch(rect)
-    
+
     ax2.set_xlim(0, 1)
     ax2.set_ylim(0, 1)
     ax2.axis('off')
     ax2.set_title('Delta Biologique', fontsize=12, fontweight='bold', pad=15)
-    
+
     plt.tight_layout()
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
@@ -440,34 +415,49 @@ def generate_algolife_pdf_report(
     max_gauges_watch=None
 ):
     """
-    Génère un rapport PDF ALGO-LIFE complet avec TOUTES les jauges
-    
-    Si biomarker_db n'est pas fourni, une instance par défaut est créée automatiquement
+    Génère un rapport PDF ALGO-LIFE complet avec jauges.
+    PATCH: mapping clés + tri statut cohérent.
     """
-    
-    # Créer BiomarkerDatabase par défaut si non fournie
+
     if biomarker_db is None:
         biomarker_db = BiomarkerDatabase()
-    
+
     engine_results = engine_results or {}
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=15*mm, bottomMargin=15*mm,
-                           leftMargin=20*mm, rightMargin=20*mm)
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        topMargin=15*mm, bottomMargin=15*mm,
+        leftMargin=20*mm, rightMargin=20*mm
+    )
     story = []
     styles = getSampleStyleSheet()
 
     # Styles
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=32,
-        textColor=colors.HexColor('#667eea'), spaceAfter=5, alignment=TA_CENTER, fontName='Helvetica-Bold')
-    subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontSize=13,
-        textColor=colors.HexColor('#4A5568'), spaceAfter=25, alignment=TA_CENTER, fontName='Helvetica')
-    heading2_style = ParagraphStyle('CustomHeading2', parent=styles['Heading2'], fontSize=18,
-        textColor=colors.HexColor('#2C3E50'), spaceAfter=10, spaceBefore=15, fontName='Helvetica-Bold',
-        borderWidth=1, borderColor=colors.HexColor('#667eea'), borderPadding=8, backColor=colors.HexColor('#f8f9fa'))
-    heading3_style = ParagraphStyle('CustomHeading3', parent=styles['Heading3'], fontSize=14,
-        textColor=colors.HexColor('#34495E'), spaceAfter=8, spaceBefore=10, fontName='Helvetica-Bold')
-    interp_style = ParagraphStyle('Interpretation', parent=styles['Normal'], fontSize=9,
-        textColor=colors.HexColor('#6b7280'), leftIndent=10, spaceAfter=10)
+    title_style = ParagraphStyle(
+        'CustomTitle', parent=styles['Heading1'], fontSize=32,
+        textColor=colors.HexColor('#667eea'), spaceAfter=5,
+        alignment=TA_CENTER, fontName='Helvetica-Bold'
+    )
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle', parent=styles['Normal'], fontSize=13,
+        textColor=colors.HexColor('#4A5568'), spaceAfter=25,
+        alignment=TA_CENTER, fontName='Helvetica'
+    )
+    heading2_style = ParagraphStyle(
+        'CustomHeading2', parent=styles['Heading2'], fontSize=18,
+        textColor=colors.HexColor('#2C3E50'), spaceAfter=10, spaceBefore=15,
+        fontName='Helvetica-Bold', borderWidth=1, borderColor=colors.HexColor('#667eea'),
+        borderPadding=8, backColor=colors.HexColor('#f8f9fa')
+    )
+    heading3_style = ParagraphStyle(
+        'CustomHeading3', parent=styles['Heading3'], fontSize=14,
+        textColor=colors.HexColor('#34495E'), spaceAfter=8, spaceBefore=10,
+        fontName='Helvetica-Bold'
+    )
+    interp_style = ParagraphStyle(
+        'Interpretation', parent=styles['Normal'], fontSize=9,
+        textColor=colors.HexColor('#6b7280'), leftIndent=10, spaceAfter=10
+    )
 
     # Normalisation
     patient_info = normalize_patient(patient_data)
@@ -530,16 +520,16 @@ def generate_algolife_pdf_report(
         delta_color = 'green' if delta <= 0 else 'orange'
 
         info_data = [
-            [Paragraph('<b>Âge Biologique</b>', styles['Normal']), 
+            [Paragraph('<b>Âge Biologique</b>', styles['Normal']),
              Paragraph(f"<font size=16 color='#667eea'><b>{biological_age.get('biological_age', '—')} ans</b></font>", styles['Normal'])],
-            [Paragraph('Âge Chronologique', styles['Normal']), 
+            [Paragraph('Âge Chronologique', styles['Normal']),
              Paragraph(f"{biological_age.get('chronological_age', '—')} ans", styles['Normal'])],
-            [Paragraph('Delta', styles['Normal']), 
+            [Paragraph('Delta', styles['Normal']),
              Paragraph(f"<font color='{delta_color}'><b>{delta:+.1f} ans ({delta_percent:+.1f}%)</b></font>", styles['Normal'])],
-            [Paragraph('Status', styles['Normal']), 
+            [Paragraph('Status', styles['Normal']),
              Paragraph(biological_age.get('status', '—'), styles['Normal'])],
             ['', ''],
-            [Paragraph('<b>Interprétation</b>', styles['Normal']), 
+            [Paragraph('<b>Interprétation</b>', styles['Normal']),
              Paragraph(biological_age.get('interpretation', '—'), styles['Normal'])],
         ]
 
@@ -558,14 +548,13 @@ def generate_algolife_pdf_report(
         story.append(info_table)
         story.append(Spacer(1, 15))
 
-        # Score
         score_value = safe_float(health_score.get('global_score', 0), 0)
         score_color = '#10b981' if score_value >= 80 else ('#f59e0b' if score_value >= 60 else '#ef4444')
 
         score_data = [
-            [Paragraph('<b>Score Santé Global</b>', styles['Normal']), 
+            [Paragraph('<b>Score Santé Global</b>', styles['Normal']),
              Paragraph(f"<font size=20 color='{score_color}'><b>{score_value:.1f}/100</b></font>", styles['Normal'])],
-            [Paragraph('<b>Grade</b>', styles['Normal']), 
+            [Paragraph('<b>Grade</b>', styles['Normal']),
              Paragraph(f"<font size=14 color='{score_color}'><b>{health_score.get('grade', '—')}</b></font>", styles['Normal'])],
         ]
 
@@ -589,7 +578,10 @@ def generate_algolife_pdf_report(
     story.append(Spacer(1, 10))
     story.append(PageBreak())
 
+    # ============================================================
     # BIOMARQUEURS AVEC JAUGES
+    # ============================================================
+
     story.append(Paragraph("Résultats Détaillés des Biomarqueurs", heading2_style))
     story.append(Spacer(1, 10))
 
@@ -600,30 +592,43 @@ def generate_algolife_pdf_report(
         refs_db = biomarker_db.get_reference_ranges()
         iterable = list(biomarkers_dict.items()) if mode == "dict" else [(it["key"], it["value"]) for it in biomarkers_list]
 
+        # Debug léger (optionnel)
+        # story.append(Paragraph(f"DEBUG biomarqueurs mode={mode} dict={len(biomarkers_dict)} list={len(biomarkers_list)}", styles["Normal"]))
+
         for biomarker_key, value in iterable:
-            if biomarker_key not in refs_db:
+            if biomarker_key is None:
                 continue
 
-            classification = biomarker_db.classify_biomarker(biomarker_key, value, 
-                patient_info.get('age'), patient_info.get('sexe'))
-            ref_data = refs_db[biomarker_key]
+            key = canonical_key(str(biomarker_key))
+
+            # skip si pas dans la DB
+            if key not in refs_db:
+                continue
+
+            classification = biomarker_db.classify_biomarker(
+                key, value,
+                patient_info.get('age'), patient_info.get('sexe')
+            )
+            ref_data = refs_db[key]
 
             item = {
-                'key': biomarker_key,
-                'name': str(biomarker_key).replace('_', ' ').title(),
-                'value': safe_float(value, value),
+                'key': key,
+                'name': str(key).replace('_', ' ').title(),
+                'value': safe_float(value, None),
                 'unit': ref_data.get('unit', ''),
                 'classification': classification,
                 'ref_data': ref_data
             }
 
             st = (classification.get('status') or '').lower()
-            if st in ('optimal', 'normal', 'ok'):
+
+            # PATCH: tri cohérent avec la DB (optimal/normal/low/high/unknown)
+            if st in ('optimal', 'normal'):
                 normaux.append(item)
-            elif st in ('insufficient', 'low', 'elevated', 'watch', 'surveiller', 'monitor'):
-                a_surveiller.append(item)
-            else:
+            elif st in ('low', 'high'):
                 anormaux.append(item)
+            else:
+                a_surveiller.append(item)
 
     except Exception as e:
         story.append(Paragraph(f"⚠️ Erreur classification: {str(e)}", styles['Normal']))
@@ -654,6 +659,12 @@ def generate_algolife_pdf_report(
     story.append(summary_table)
     story.append(Spacer(1, 15))
 
+    # Option: limites (si tu veux)
+    if isinstance(max_gauges_abnormal, int) and max_gauges_abnormal > 0:
+        anormaux = anormaux[:max_gauges_abnormal]
+    if isinstance(max_gauges_watch, int) and max_gauges_watch > 0:
+        a_surveiller = a_surveiller[:max_gauges_watch]
+
     # TOUTES LES JAUGES ANORMAUX
     if anormaux:
         story.append(Paragraph("⚠️ Biomarqueurs Anormaux - Analyse Détaillée", heading3_style))
@@ -662,7 +673,7 @@ def generate_algolife_pdf_report(
         for item in anormaux:
             ref_data = item['ref_data']
             ref_min, ref_max = 0, 100
-            
+
             if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
                 ref_min, ref_max = ref_data['normal']
             elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('normal_female'), (list, tuple)):
@@ -678,18 +689,23 @@ def generate_algolife_pdf_report(
             elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
                 opt_min, opt_max = ref_data['optimal_male']
 
+            v = safe_float(item['value'], None)
+            if v is None:
+                continue
+
             if ref_min is None:
                 ref_min = 0
             if ref_max is None:
-                v = safe_float(item['value'], 1.0)
                 ref_max = v * 1.5 if v else 1.0
 
-            gauge_buf = create_biomarker_gauge(item['name'], safe_float(item['value'], 0.0),
-                ref_min, ref_max, opt_min, opt_max, item['unit'])
+            gauge_buf = create_biomarker_gauge(
+                item['name'], v, ref_min, ref_max, opt_min, opt_max, item['unit']
+            )
             story.append(Image(gauge_buf, width=150*mm, height=25*mm))
             story.append(Paragraph(
                 f"<i>{item['classification'].get('icon','')} {item['classification'].get('interpretation','')}</i>",
-                interp_style))
+                interp_style
+            ))
 
     # TOUTES LES JAUGES À SURVEILLER
     if a_surveiller:
@@ -700,7 +716,7 @@ def generate_algolife_pdf_report(
         for item in a_surveiller:
             ref_data = item['ref_data']
             ref_min, ref_max = 0, 100
-            
+
             if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
                 ref_min, ref_max = ref_data['normal']
             elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('normal_female'), (list, tuple)):
@@ -716,18 +732,23 @@ def generate_algolife_pdf_report(
             elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
                 opt_min, opt_max = ref_data['optimal_male']
 
+            v = safe_float(item['value'], None)
+            if v is None:
+                continue
+
             if ref_min is None:
                 ref_min = 0
             if ref_max is None:
-                v = safe_float(item['value'], 1.0)
                 ref_max = v * 1.5 if v else 1.0
 
-            gauge_buf = create_biomarker_gauge(item['name'], safe_float(item['value'], 0.0),
-                ref_min, ref_max, opt_min, opt_max, item['unit'])
+            gauge_buf = create_biomarker_gauge(
+                item['name'], v, ref_min, ref_max, opt_min, opt_max, item['unit']
+            )
             story.append(Image(gauge_buf, width=150*mm, height=25*mm))
             story.append(Paragraph(
                 f"<i>{item['classification'].get('icon','')} {item['classification'].get('interpretation','')}</i>",
-                interp_style))
+                interp_style
+            ))
 
     # Tableau normaux
     if normaux:
@@ -856,6 +877,6 @@ def generate_algolife_pdf_report(
 __all__ = ["generate_algolife_pdf_report", "BiomarkerDatabase"]
 
 if __name__ == "__main__":
-    print("✅ ALGO-LIFE PDF Generator v5.0 COMPLET")
+    print("✅ ALGO-LIFE PDF Generator v5.0 PATCHED")
     print("📦 BiomarkerDatabase intégrée")
-    print("🎨 Toutes les jauges automatiques")
+    print("🎨 Jauges: mapping clés + tri statut robustes")
