@@ -1,11 +1,6 @@
 """
-ALGO-LIFE PDF Generator - Version Professionnelle v4.2 (Robuste)
-Design inspiré du rapport Mme X avec jauges et visualisations
-✅ FIX: normalisation patient_data / biomarker_results
-✅ FIX: BiomarkerDatabase optionnel (pas d'import en dur)
-✅ FIX: calculs % robustes + gestion None / bornes
-✅ FIX: perf jauges (limites + cache simple)
-✅ FIX: moins de crash silencieux
+ALGO-LIFE PDF Generator - Version Professionnelle v5.0
+Design haut de gamme avec toutes les jauges visibles
 
 Auteur: Dr Thibault SUTTER
 """
@@ -24,6 +19,7 @@ from datetime import datetime
 import io
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 
 # ============================================================
@@ -56,7 +52,6 @@ def normalize_biomarkers(biomarker_results):
     if isinstance(biomarker_results, dict):
         return "dict", biomarker_results, []
     if isinstance(biomarker_results, list):
-        # on essaye de garantir keys minimales
         cleaned = []
         for it in biomarker_results:
             if not isinstance(it, dict):
@@ -87,25 +82,12 @@ def safe_float(x, default=None):
 # VISUALS (MATPLOTLIB -> PNG BUFFERS)
 # ============================================================
 
-_GAUGE_CACHE = {}  # simple cache in-memory
-
-
 def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
                            optimal_min=None, optimal_max=None, unit=""):
     """
     Jauge horizontale type 'Mme X'
     Retourne: BytesIO PNG
     """
-    # cache key
-    key = (biomarker_name, float(value) if value is not None else None,
-           float(ref_min) if ref_min is not None else None,
-           float(ref_max) if ref_max is not None else None,
-           float(optimal_min) if optimal_min is not None else None,
-           float(optimal_max) if optimal_max is not None else None,
-           unit)
-    if key in _GAUGE_CACHE:
-        return _GAUGE_CACHE[key]
-
     v = safe_float(value, 0.0)
     rmin = safe_float(ref_min, 0.0)
     rmax = safe_float(ref_max, rmin + 1.0)
@@ -137,7 +119,7 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
     # Marker color logic
     marker_color = '#ef4444'
     if rmin <= v <= rmax:
-        marker_color = '#22c55e'  # vert
+        marker_color = '#22c55e'
     if optimal_min is not None and optimal_max is not None:
         omin = safe_float(optimal_min, None)
         omax = safe_float(optimal_max, None)
@@ -175,53 +157,81 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
     buf.seek(0)
     plt.close(fig)
 
-    _GAUGE_CACHE[key] = buf
     return buf
 
 
-def create_score_gauge(score, max_score=100, title="Score", grade=""):
-    v = safe_float(score, 0.0)
-    v = max(0, min(max_score, v))
-
-    fig, ax = plt.subplots(figsize=(4, 3), subplot_kw={'projection': 'polar'})
-    zones = [
-        (0, 60, '#ef4444'),
-        (60, 80, '#f59e0b'),
-        (80, 90, '#3b82f6'),
-        (90, 100, '#10b981')
-    ]
-
-    for start, end, color in zones:
-        start_angle = (start / max_score) * np.pi
-        end_angle = (end / max_score) * np.pi
-        theta_zone = np.linspace(start_angle, end_angle, 50)
-        ax.fill_between(theta_zone, 0.7, 1, color=color, alpha=0.3)
-
-    score_angle = (v / max_score) * np.pi
-    ax.plot([score_angle, score_angle], [0, 0.9], color='black', linewidth=3)
-    ax.plot([score_angle], [0.95], marker='o', markersize=10, color='black')
-
-    ax.text(np.pi/2, 0.3, f"{v:.1f}", ha='center', va='center',
-            fontsize=32, fontweight='bold', color='#2C3E50')
-    ax.text(np.pi/2, 0.1, f"/{max_score}", ha='center', va='center',
-            fontsize=14, color='#7f8c8d')
-    ax.text(np.pi/2, -0.1, str(grade), ha='center', va='center',
-            fontsize=16, fontweight='bold', color='#667eea')
-
-    ax.text(np.pi/2, 1.3, str(title), ha='center', va='center',
-            fontsize=14, fontweight='bold', color='#2C3E50')
-
-    ax.set_ylim(0, 1.4)
-    ax.set_theta_zero_location('W')
-    ax.set_theta_direction(1)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.spines['polar'].set_visible(False)
-    ax.grid(False)
-
-    buf = io.BytesIO()
+def create_biological_age_visual(biological_age, chronological_age, delta, delta_percent):
+    """
+    Visualisation élégante de l'âge biologique - Design haut de gamme
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
+    fig.patch.set_facecolor('white')
+    
+    bio_age = safe_float(biological_age, 50)
+    chrono_age = safe_float(chronological_age, 50)
+    delta_val = safe_float(delta, 0)
+    
+    # ===== GRAPHIQUE 1: Comparaison des âges =====
+    ages = ['Chronologique', 'Biologique']
+    values = [chrono_age, bio_age]
+    
+    bar_colors = ['#3b82f6', '#10b981' if delta_val <= 0 else '#f59e0b']
+    
+    bars = ax1.bar(ages, values, color=bar_colors, alpha=0.85, 
+                   edgecolor='white', linewidth=3, width=0.6)
+    
+    for bar, val in zip(bars, values):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2, height + 1,
+                f'{val:.1f}\nans', ha='center', va='bottom',
+                fontsize=13, fontweight='bold', color=bar.get_facecolor())
+    
+    if abs(delta_val) > 0:
+        y_middle = (bio_age + chrono_age) / 2
+        ax1.plot([0, 1], [y_middle, y_middle], 'k--', alpha=0.3, linewidth=1)
+    
+    ax1.set_ylim(0, max(values) * 1.3)
+    ax1.set_ylabel('Âge (années)', fontsize=11, fontweight='bold')
+    ax1.set_title('Comparaison des Âges', fontsize=12, fontweight='bold', pad=15)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
+    ax1.grid(axis='y', alpha=0.2, linestyle='--')
+    
+    # ===== GRAPHIQUE 2: Delta et pourcentage =====
+    delta_color = '#10b981' if delta_val <= 0 else '#f59e0b'
+    delta_text = 'Rajeunissement' if delta_val < 0 else ('Vieillissement' if delta_val > 0 else 'Équilibre')
+    
+    ax2.text(0.5, 0.65, f"{delta_val:+.1f}", ha='center', va='center',
+            fontsize=48, fontweight='bold', color=delta_color,
+            transform=ax2.transAxes)
+    
+    ax2.text(0.5, 0.42, 'ans', ha='center', va='center',
+            fontsize=16, color='#6b7280',
+            transform=ax2.transAxes)
+    
+    ax2.text(0.5, 0.25, f"({delta_percent:+.1f}%)", ha='center', va='center',
+            fontsize=18, fontweight='bold', color=delta_color,
+            transform=ax2.transAxes)
+    
+    ax2.text(0.5, 0.08, delta_text, ha='center', va='center',
+            fontsize=13, fontweight='600', color=delta_color,
+            style='italic', transform=ax2.transAxes)
+    
+    rect = Rectangle((0.05, 0.05), 0.9, 0.9, linewidth=3,
+                     edgecolor=delta_color, facecolor='none',
+                     transform=ax2.transAxes, alpha=0.6)
+    ax2.add_patch(rect)
+    
+    ax2.set_xlim(0, 1)
+    ax2.set_ylim(0, 1)
+    ax2.axis('off')
+    ax2.set_title('Delta Biologique', fontsize=12, fontweight='bold', pad=15)
+    
     plt.tight_layout()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', transparent=True)
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                transparent=False, facecolor='white')
     buf.seek(0)
     plt.close(fig)
     return buf
@@ -284,19 +294,18 @@ def generate_algolife_pdf_report(
     biological_age=None,
     nutritional_needs=None,
     recommendations=None,
-    # ✅ NOUVEAU : database optionnelle (zéro import en dur)
     biomarker_db=None,
-    # options perf
-    max_gauges_abnormal=10,
-    max_gauges_watch=8
+    max_gauges_abnormal=None,
+    max_gauges_watch=None
 ):
     """
-    Génère un rapport PDF professionnel ALGO-LIFE v4.2
+    Génère un rapport PDF professionnel ALGO-LIFE v5.0
     - patient_data: dict (ou dict contenant patient_info)
     - biomarker_results: dict OU list[dict]
     - biomarker_db: objet optionnel ayant:
         - get_reference_ranges() -> dict
         - classify_biomarker(key, value, age, sexe) -> dict {status, interpretation, icon}
+    - TOUTES LES JAUGES AFFICHÉES (pas de limite max_gauges)
     """
     engine_results = engine_results or {}
 
@@ -438,17 +447,19 @@ def generate_algolife_pdf_report(
     story.append(Spacer(1, 10))
 
     if biological_age and health_score:
-        score_gauge_buf = create_score_gauge(
-            health_score.get('global_score', 0),
-            100,
-            "Score Santé Global",
-            health_score.get('grade', '')
+        # Visualisation âge biologique (design haut de gamme)
+        age_visual_buf = create_biological_age_visual(
+            biological_age.get('biological_age'),
+            biological_age.get('chronological_age'),
+            biological_age.get('delta'),
+            biological_age.get('delta_percent')
         )
-        score_gauge_img = Image(score_gauge_buf, width=100*mm, height=75*mm)
+        story.append(Image(age_visual_buf, width=170*mm, height=60*mm))
+        story.append(Spacer(1, 15))
 
         delta = safe_float(biological_age.get('delta'), 0.0)
         delta_percent = safe_float(biological_age.get('delta_percent'), 0.0)
-        delta_color = 'green' if delta < 0 else 'orange'
+        delta_color = 'green' if delta <= 0 else 'orange'
 
         info_data = [
             ['Âge Biologique', f"<font size=16><b>{biological_age.get('biological_age', '—')} ans</b></font>"],
@@ -472,13 +483,30 @@ def generate_algolife_pdf_report(
             ('SPAN', (0, 5), (1, 5)),
             ('VALIGN', (0, 0), (-1, -1), 'TOP')
         ]))
+        story.append(info_table)
+        story.append(Spacer(1, 15))
 
-        combined_table = Table([[score_gauge_img, info_table]], colWidths=[100*mm, 60*mm])
-        combined_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+        # Score de santé global
+        score_value = safe_float(health_score.get('global_score', 0), 0)
+        score_color = 'green' if score_value >= 80 else ('orange' if score_value >= 60 else 'red')
+
+        score_data = [
+            ['Score Santé Global', f"<font size=20 color='{score_color}'><b>{score_value:.1f}/100</b></font>"],
+            ['Grade', f"<font size=14 color='{score_color}'><b>{health_score.get('grade', '—')}</b></font>"],
+        ]
+
+        score_table = Table(score_data, colWidths=[60*mm, 110*mm])
+        score_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#667eea')),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 15),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e5e7eb')),
         ]))
-        story.append(combined_table)
+        story.append(score_table)
         story.append(Spacer(1, 15))
 
         if health_score.get('category_scores'):
@@ -495,9 +523,7 @@ def generate_algolife_pdf_report(
     story.append(Spacer(1, 10))
     story.append(PageBreak())
 
-    # ============================================================
-    # BIOMARQUEURS AVEC CLASSIFICATION (OPTIONNEL)
-    # ============================================================
+    # ===== BIOMARQUEURS AVEC CLASSIFICATION =====
     story.append(Paragraph("Résultats Détaillés des Biomarqueurs", heading2_style))
     story.append(Spacer(1, 10))
 
@@ -508,11 +534,9 @@ def generate_algolife_pdf_report(
         try:
             refs_db = biomarker_db.get_reference_ranges()
 
-            # on itère selon format
             if mode == "dict":
                 iterable = list(biomarkers_dict.items())
             else:
-                # list format -> (key,value) conservé
                 iterable = [(it["key"], it["value"]) for it in biomarkers_list]
 
             for biomarker_key, value in iterable:
@@ -567,7 +591,7 @@ def generate_algolife_pdf_report(
                     str(it.get("flag", "—")),
                 ])
 
-        bio_table = Table(bio_data, colWidths=[90*mm, 70*mm] if biomarker_db is None and mode == "dict" else [40*mm, 60*mm, 30*mm, 30*mm, 20*mm])
+        bio_table = Table(bio_data, colWidths=[90*mm, 70*mm] if mode == "dict" else [40*mm, 60*mm, 30*mm, 30*mm, 20*mm])
         bio_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -603,15 +627,14 @@ def generate_algolife_pdf_report(
         story.append(summary_table)
         story.append(Spacer(1, 15))
 
-        # JAUGES ANORMAUX
+        # JAUGES ANORMAUX - TOUTES AFFICHÉES
         if anormaux:
             story.append(Paragraph("⚠️ Biomarqueurs Anormaux - Analyse Détaillée", heading3_style))
             story.append(Spacer(1, 5))
 
-            for item in anormaux[:max_gauges_abnormal]:
+            for item in anormaux:
                 ref_data = item['ref_data']
 
-                # bornes normales
                 ref_min, ref_max = 0, 100
                 if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
                     ref_min, ref_max = ref_data['normal']
@@ -620,7 +643,6 @@ def generate_algolife_pdf_report(
                 elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('normal_male'), (list, tuple)):
                     ref_min, ref_max = ref_data['normal_male']
 
-                # bornes optimales
                 opt_min, opt_max = None, None
                 if isinstance(ref_data.get('optimal'), (list, tuple)) and len(ref_data['optimal']) == 2:
                     opt_min, opt_max = ref_data['optimal']
@@ -629,7 +651,6 @@ def generate_algolife_pdf_report(
                 elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
                     opt_min, opt_max = ref_data['optimal_male']
 
-                # sécuriser None
                 if ref_min is None:
                     ref_min = 0
                 if ref_max is None:
@@ -648,13 +669,13 @@ def generate_algolife_pdf_report(
                     interp_style
                 ))
 
-        # JAUGES A SURVEILLER
+        # JAUGES A SURVEILLER - TOUTES AFFICHÉES
         if a_surveiller:
             story.append(Spacer(1, 10))
             story.append(Paragraph("⚡ Biomarqueurs À Surveiller", heading3_style))
             story.append(Spacer(1, 5))
 
-            for item in a_surveiller[:max_gauges_watch]:
+            for item in a_surveiller:
                 ref_data = item['ref_data']
 
                 ref_min, ref_max = 0, 100
@@ -725,9 +746,7 @@ def generate_algolife_pdf_report(
     story.append(Spacer(1, 15))
     story.append(PageBreak())
 
-    # ============================================================
-    # BESOINS NUTRITIONNELS
-    # ============================================================
+    # ===== BESOINS NUTRITIONNELS =====
     if nutritional_needs:
         story.append(Paragraph("Besoins Nutritionnels Calculés", heading2_style))
         story.append(Spacer(1, 10))
@@ -756,9 +775,7 @@ def generate_algolife_pdf_report(
         story.append(nutri_table)
         story.append(Spacer(1, 15))
 
-    # ============================================================
-    # RECOMMANDATIONS
-    # ============================================================
+    # ===== RECOMMANDATIONS =====
     if recommendations:
         story.append(Paragraph("💡 Recommandations Personnalisées", heading2_style))
         story.append(Spacer(1, 10))
@@ -796,9 +813,7 @@ def generate_algolife_pdf_report(
             for life in recs['lifestyle'][:12]:
                 story.append(Paragraph(f"• {life}", styles['Normal']))
 
-    # ============================================================
-    # PLAN DE SUIVI
-    # ============================================================
+    # ===== PLAN DE SUIVI =====
     story.append(Spacer(1, 20))
     story.append(Paragraph("Plan de Suivi Recommandé", heading2_style))
     story.append(Spacer(1, 10))
@@ -826,7 +841,6 @@ def generate_algolife_pdf_report(
         buffer.seek(0)
         return buffer
     except Exception as e:
-        # fallback minimal
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
         story = [
@@ -843,10 +857,8 @@ __all__ = ["generate_algolife_pdf_report"]
 
 
 if __name__ == "__main__":
-    print("✅ Module algolife_pdf_generator v4.2 chargé!")
-    print("✨ Fix inclus:")
-    print("   - Normalisation patient_data & biomarker_results")
-    print("   - BiomarkerDatabase optionnel")
-    print("   - Robustesse bornes/None & %")
-    print("   - Cache jauges + limites perf")
-
+    print("✅ Module algolife_pdf_generator v5.0 chargé!")
+    print("✨ Améliorations:")
+    print("   - Design haut de gamme pour âge biologique")
+    print("   - TOUTES les jauges affichées (pas de limite)")
+    print("   - Visualisations élégantes")
