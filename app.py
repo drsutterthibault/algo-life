@@ -1,6 +1,6 @@
 """
 ALGO-LIFE - Plateforme Multimodale d'Analyse de Santé Fonctionnelle
-Version 4.0 - Janvier 2026 - MAJOR IMPROVEMENTS
+Version 4.1 - Janvier 2026 - EXTRACTION UNIVERSELLE
 
 Intégration multimodale:
 - Biologie fonctionnelle (hormones, métabolisme, inflammation, microbiote)
@@ -36,6 +36,7 @@ except ImportError:
 # Import modules ALGO-LIFE
 from algolife_statistical_analysis import AlgoLifeStatisticalAnalysis
 from algolife_engine import AlgoLifeEngine
+from advanced_pdf_extractor_universal import UniversalPDFExtractor  # ✅ NOUVEAU
 
 # ✅ PATCH: reload au runtime + alias fonction
 pdfgen = importlib.reload(pdfgen)
@@ -53,7 +54,7 @@ st.set_page_config(
     menu_items={
         'Get Help': 'https://bilan-hormonal.com',
         'Report a bug': "mailto:contact@bilan-hormonal.com",
-        'About': "ALGO-LIFE v4.0 - Plateforme d'analyse multimodale de santé"
+        'About': "ALGO-LIFE v4.1 - Plateforme d'analyse multimodale de santé"
     }
 )
 
@@ -513,10 +514,14 @@ class BiomarkerDatabase:
         refs = BiomarkerDatabase.get_reference_ranges()
         
         if name not in refs:
+            # ✅ AMÉLIORATION: Ne pas rejeter, retourner statut "non référencé"
             return {
                 'status': 'unknown',
-                'interpretation': 'Biomarqueur non référencé',
-                'color': 'gray'
+                'interpretation': f'Biomarqueur détecté mais non référencé (valeur: {value})',
+                'color': 'gray',
+                'icon': '❓',
+                'value': value,
+                'needs_reference': True
             }
         
         ref = refs[name]
@@ -611,131 +616,41 @@ class BiomarkerDatabase:
 
 
 class AdvancedPDFExtractor:
-    """Extracteur PDF avancé avec reconnaissance intelligente des patterns"""
+    """Extracteur PDF avec support universel (wrapper)"""
     
     @staticmethod
     def extract_text(pdf_file) -> str:
         """Extrait le texte du PDF avec fallback"""
-        text = ""
-        
-        # Méthode 1: pdfplumber (meilleure qualité)
-        try:
-            with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-                if text.strip():
-                    return text
-        except Exception as e:
-            st.warning(f"pdfplumber échoué: {e}")
-        
-        # Méthode 2: PyPDF2 (fallback)
-        try:
-            pdf_file.seek(0)  # Reset file pointer
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
-            for page in pdf_reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        except Exception as e:
-            st.error(f"PyPDF2 échoué: {e}")
-        
-        return text
-    
-    @staticmethod
-    def build_flexible_patterns() -> Dict[str, List[str]]:
-        """Construit des patterns regex ultra-flexibles pour l'extraction"""
-        
-        refs = BiomarkerDatabase.get_reference_ranges()
-        patterns = {}
-        
-        for biomarker_key, ref_data in refs.items():
-            lab_names = ref_data.get('lab_names', [biomarker_key])
-            pattern_list = []
-            
-            for name in lab_names:
-                # Normaliser le nom
-                name_normalized = name.lower().replace('é', '[eé]').replace('è', '[eè]')
-                
-                # Pattern 1: Valeur AVANT le label (format LIMS)
-                # Ex: "15.73 Cortisol réveil"
-                pattern_list.append(
-                    rf'(\d+[.,]?\d*)\s+{name_normalized}'
-                )
-                
-                # Pattern 2: Label AVANT la valeur (format classique)
-                # Ex: "Cortisol réveil: 15.73" ou "Cortisol réveil 15.73"
-                pattern_list.append(
-                    rf'{name_normalized}[:\s]+(\d+[.,]?\d*)'
-                )
-                
-                # Pattern 3: Avec unités intermédiaires
-                # Ex: "Cortisol réveil 15.73 nmol/L"
-                pattern_list.append(
-                    rf'{name_normalized}\s+(\d+[.,]?\d*)\s*[a-zµμ°/%]*'
-                )
-                
-                # Pattern 4: Formats SYNLAB/LIMS avec symboles
-                # Ex: "Cortisol réveil * 15.73"
-                pattern_list.append(
-                    rf'{name_normalized}\s*[*+\-]*\s*(\d+[.,]?\d*)'
-                )
-            
-            patterns[biomarker_key] = pattern_list
-        
-        return patterns
+        return UniversalPDFExtractor.extract_text_from_pdf(pdf_file)
     
     @staticmethod
     def extract_biomarkers(text: str, debug: bool = False) -> Dict[str, float]:
-        """Extrait les biomarqueurs du texte avec patterns intelligents"""
+        """
+        Extrait TOUS les biomarqueurs (mode universel)
         
-        if not text:
-            return {}
+        Returns:
+            Dict[biomarker_key, value]
+        """
+        # Charger la DB des biomarqueurs connus
+        known_db = BiomarkerDatabase.get_reference_ranges()
         
-        data = {}
-        text_lower = text.lower()
+        # Créer extracteur universel
+        extractor = UniversalPDFExtractor(known_biomarkers=known_db)
         
-        patterns = AdvancedPDFExtractor.build_flexible_patterns()
+        # Extraction complète
+        known, all_biomarkers = extractor.extract_complete(text, debug=debug)
         
-        if debug:
-            st.write("### 🔍 Mode Debug - Extraction")
-            st.code(text[:2000], language='text')
-            st.write("---")
-        
-        for biomarker_key, pattern_list in patterns.items():
-            for pattern in pattern_list:
-                try:
-                    matches = re.finditer(pattern, text_lower, re.IGNORECASE | re.MULTILINE)
-                    
-                    for match in matches:
-                        try:
-                            value_str = match.group(1).replace(',', '.').strip()
-                            value = float(value_str)
-                            
-                            # Validation basique
-                            if 0 < value < 10000:  # Sanity check
-                                data[biomarker_key] = value
-                                
-                                if debug:
-                                    st.success(f"✅ **{biomarker_key}**: {value} (pattern: {pattern[:50]}...)")
-                                
-                                break  # Stopper à la première valeur trouvée
-                        except (ValueError, IndexError):
-                            continue
-                    
-                    if biomarker_key in data:
-                        break  # Passer au biomarqueur suivant
-                        
-                except re.error:
-                    continue
+        # Retourner format compatible (Dict[key, value])
+        result = {}
+        for key, data in all_biomarkers.items():
+            result[key] = data['value']
         
         if debug:
-            st.write(f"\n**Total extrait:** {len(data)} biomarqueurs")
-            if not data:
-                st.warning("⚠️ Aucune donnée extraite. Vérifiez les patterns ou le format du PDF.")
+            st.write(f"✅ EXTRACTION UNIVERSELLE: {len(result)} biomarqueurs")
+            st.write(f"  - Connus (avec ranges): {len(known)}")
+            st.write(f"  - Nouveaux détectés: {len(result) - len(known)}")
         
-        return data
+        return result
     
     @staticmethod
     def extract_patient_info(text: str) -> Dict:
@@ -1567,15 +1482,33 @@ with tab1:
                         
                         st.success(f"✅ **{len(biomarkers)} biomarqueurs extraits!**")
                         
+                        # ✅ AMÉLIORATION: Afficher statistiques
+                        known_db = BiomarkerDatabase.get_reference_ranges()
+                        known_count = sum(1 for k in biomarkers.keys() if k in known_db)
+                        new_count = len(biomarkers) - known_count
+                        
+                        col_stat1, col_stat2, col_stat3 = st.columns(3)
+                        with col_stat1:
+                            st.metric("📊 Total Extrait", len(biomarkers))
+                        with col_stat2:
+                            st.metric("⭐ Connus (avec ranges)", known_count)
+                        with col_stat3:
+                            st.metric("🆕 Nouveaux Détectés", new_count)
+                        
                         if patient_info:
                             st.info(f"ℹ️ Informations patient extraites: {', '.join(patient_info.keys())}")
                         
-                        with st.expander("📋 Données extraites"):
+                        # Afficher preview avec marqueur connu/nouveau
+                        with st.expander("📋 Données extraites", expanded=True):
                             df_bio = pd.DataFrame([
-                                {'Biomarqueur': k, 'Valeur': v}
+                                {
+                                    'Biomarqueur': k.replace('_', ' ').title(),
+                                    'Valeur': v,
+                                    'Type': '⭐ Connu' if k in known_db else '🆕 Nouveau'
+                                }
                                 for k, v in biomarkers.items()
-                            ])
-                            st.dataframe(df_bio, use_container_width=True)
+                            ]).sort_values('Type', ascending=False)
+                            st.dataframe(df_bio, use_container_width=True, hide_index=True)
                     else:
                         st.warning("⚠️ Aucune donnée extraite. Essayez le mode Debug.")
     
@@ -1903,7 +1836,12 @@ with tab2:
         biomarkers = st.session_state.patient_data['biological_markers']
         patient_info = st.session_state.patient_data['patient_info']
         
-        classified = {'normaux': [], 'a_surveiller': [], 'anormaux': []}
+        classified = {
+            'normaux': [], 
+            'a_surveiller': [], 
+            'anormaux': [],
+            'non_references': []  # ✅ NOUVEAU
+        }
         
         for biomarker_key, value in biomarkers.items():
             classification = BiomarkerDatabase.classify_biomarker(
@@ -1929,16 +1867,20 @@ with tab2:
                 classified['normaux'].append(item)
             elif classification.get('status') in ['insufficient', 'low', 'elevated']:
                 classified['a_surveiller'].append(item)
-            else:
+            elif classification.get('status') in ['deficient', 'high', 'abnormal']:
                 classified['anormaux'].append(item)
+            else:
+                classified['non_references'].append(item)  # ✅ NOUVEAU
         
-        col_class1, col_class2, col_class3 = st.columns(3)
+        col_class1, col_class2, col_class3, col_class4 = st.columns(4)
         with col_class1:
             st.metric("✅ Normaux", len(classified['normaux']), delta=None)
         with col_class2:
             st.metric("⚡ À surveiller", len(classified['a_surveiller']), delta=None)
         with col_class3:
             st.metric("⚠️ Anormaux", len(classified['anormaux']), delta=None)
+        with col_class4:
+            st.metric("❓ Non référencés", len(classified['non_references']), delta=None)
         
         with st.expander("✅ Biomarqueurs Normaux", expanded=False):
             if classified['normaux']:
@@ -1957,6 +1899,23 @@ with tab2:
                 st.dataframe(pd.DataFrame(classified['anormaux']), use_container_width=True, hide_index=True)
             else:
                 st.success("Aucun biomarqueur anormal.")
+        
+        # ✅ NOUVEAU: Expander pour biomarqueurs non référencés
+        with st.expander("❓ Biomarqueurs Non Référencés (nouveaux détectés)", expanded=False):
+            if classified['non_references']:
+                st.info(f"""
+                Ces {len(classified['non_references'])} biomarqueurs ont été extraits du PDF mais 
+                n'ont pas encore de plages de référence dans la base ALGO-LIFE.
+                
+                👉 Vous pouvez les visualiser ci-dessous et les ajouter à la base si pertinents.
+                """)
+                st.dataframe(
+                    pd.DataFrame(classified['non_references']), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                st.success("Tous les biomarqueurs extraits sont référencés!")
         
         st.divider()
         
@@ -2106,7 +2065,7 @@ with tab4:
     
     #### 1️⃣ Import des Données
     - Téléchargez vos PDF de résultats médicaux
-    - Le système extrait automatiquement les biomarqueurs
+    - Le système extrait automatiquement les biomarqueurs (MODE UNIVERSEL ✨)
     - Complétez les informations patient
     - Lancez l'analyse complète
     
@@ -2114,7 +2073,7 @@ with tab4:
     - **Score Santé Global** (0-100) avec grade (A+ à D)
     - **Âge Biologique** calculé selon algorithme Horvath modifié
     - **Scores par Catégorie**: Métabolisme, Inflammation, Hormones, etc.
-    - **Classification des Biomarqueurs**: Normaux / À surveiller / Anormaux
+    - **Classification des Biomarqueurs**: Normaux / À surveiller / Anormaux / Non référencés
     - **Besoins Nutritionnels**: BMR, DET, macronutriments
     
     #### 3️⃣ Recommandations
@@ -2136,7 +2095,7 @@ with tab4:
     **Email**: contact@bilan-hormonal.com  
     **Site**: https://bilan-hormonal.com  
     
-    **Version**: 4.0 - Janvier 2026  
+    **Version**: 4.1 - Janvier 2026 (Extraction Universelle)  
     **Dernière mise à jour**: {datetime.now().strftime('%d/%m/%Y')}
     
     ### ⚖️ Disclaimer
@@ -2162,5 +2121,5 @@ with col_footer2:
     st.caption("Geneva, Switzerland")
 
 with col_footer3:
-    st.caption("Version 4.0 - Janvier 2026")
+    st.caption("Version 4.1 - Janvier 2026")
     st.caption(f"Dernière exécution: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
