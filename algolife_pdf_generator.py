@@ -1,16 +1,13 @@
 """
-ALGO-LIFE PDF Generator - Version Professionnelle v5.0
-Design haut de gamme avec toutes les jauges visibles
+ALGO-LIFE PDF Generator - Version Complète v5.0
+Tout-en-un avec BiomarkerDatabase intégrée
 
 Auteur: Dr Thibault SUTTER
 """
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph,
-    Spacer, PageBreak, Image
-)
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER
@@ -23,16 +20,192 @@ from matplotlib.patches import Rectangle
 
 
 # ============================================================
-# NORMALISATION INPUTS (IMPORTANT)
+# BIOMARKER DATABASE - INTÉGRÉE
+# ============================================================
+
+class BiomarkerDatabase:
+    """
+    Base de données complète des biomarqueurs avec références
+    Classe intégrée pour classification automatique
+    """
+    
+    def get_reference_ranges(self):
+        """Retourne toutes les références des biomarqueurs"""
+        return {
+            "crp": {
+                "unit": "mg/L",
+                "normal": [0.0, 5.0],
+                "optimal": [0.0, 1.0],
+                "category": "Inflammation"
+            },
+            "insuline": {
+                "unit": "mU/L",
+                "normal": [3.0, 25.0],
+                "optimal": [3.0, 8.0],
+                "category": "Métabolisme"
+            },
+            "homa_index": {
+                "unit": "",
+                "normal": [0.0, 2.5],
+                "optimal": [0.0, 1.0],
+                "category": "Métabolisme"
+            },
+            "quicki_index": {
+                "unit": "",
+                "normal": [0.35, 0.45],
+                "optimal": [0.38, 0.45],
+                "category": "Métabolisme"
+            },
+            "ferritine": {
+                "unit": "µg/L",
+                "normal_male": [30.0, 400.0],
+                "normal_female": [15.0, 150.0],
+                "optimal_male": [50.0, 150.0],
+                "optimal_female": [30.0, 100.0],
+                "category": "Fer"
+            },
+            "zinc": {
+                "unit": "µg/dL",
+                "normal": [70.0, 150.0],
+                "optimal": [90.0, 130.0],
+                "category": "Micronutriments"
+            },
+            "selenium": {
+                "unit": "µg/L",
+                "normal": [70.0, 150.0],
+                "optimal": [100.0, 140.0],
+                "category": "Micronutriments"
+            },
+            "magnesium_erythrocytaire": {
+                "unit": "mg/dL",
+                "normal": [4.0, 6.0],
+                "optimal": [5.0, 6.0],
+                "category": "Micronutriments"
+            },
+            "glutathion_total": {
+                "unit": "µmol/L",
+                "normal": [900.0, 1750.0],
+                "optimal": [1200.0, 1750.0],
+                "category": "Antioxydants"
+            },
+            "coenzyme_q10": {
+                "unit": "µg/L",
+                "normal": [500.0, 1500.0],
+                "optimal": [800.0, 1200.0],
+                "category": "Antioxydants"
+            },
+            "gpx": {
+                "unit": "U/g Hb",
+                "normal": [27.5, 73.6],
+                "optimal": [40.0, 65.0],
+                "category": "Antioxydants"
+            },
+            "vitamine_d": {
+                "unit": "ng/mL",
+                "normal": [30.0, 100.0],
+                "optimal": [50.0, 80.0],
+                "category": "Vitamines"
+            },
+            "vitamine_b12": {
+                "unit": "pg/mL",
+                "normal": [200.0, 900.0],
+                "optimal": [400.0, 700.0],
+                "category": "Vitamines"
+            },
+            "homocysteine": {
+                "unit": "µmol/L",
+                "normal": [5.0, 15.0],
+                "optimal": [5.0, 9.0],
+                "category": "Cardiovasculaire"
+            },
+            "cortisol": {
+                "unit": "µg/dL",
+                "normal": [5.0, 25.0],
+                "optimal": [10.0, 18.0],
+                "category": "Hormones"
+            },
+            "testosterone": {
+                "unit": "ng/mL",
+                "normal_male": [3.0, 10.0],
+                "optimal_male": [5.0, 8.0],
+                "normal_female": [0.1, 0.7],
+                "optimal_female": [0.3, 0.5],
+                "category": "Hormones"
+            }
+        }
+    
+    def classify_biomarker(self, key, value, age=None, sexe=None):
+        """
+        Classifie un biomarqueur selon sa valeur
+        
+        Args:
+            key: Clé du biomarqueur
+            value: Valeur mesurée
+            age: Âge du patient (optionnel)
+            sexe: "Masculin" ou "Féminin"
+            
+        Returns:
+            dict: {status, interpretation, icon}
+        """
+        refs = self.get_reference_ranges()
+        
+        if key not in refs:
+            return {
+                "status": "unknown",
+                "interpretation": "Référence non disponible pour ce biomarqueur",
+                "icon": "❓"
+            }
+        
+        ref = refs[key]
+        val = float(value)
+        
+        # Déterminer les bornes selon le sexe
+        if sexe == "Masculin" and "normal_male" in ref:
+            normal = ref["normal_male"]
+            optimal = ref.get("optimal_male", ref.get("optimal"))
+        elif sexe == "Féminin" and "normal_female" in ref:
+            normal = ref["normal_female"]
+            optimal = ref.get("optimal_female", ref.get("optimal"))
+        else:
+            normal = ref.get("normal", [0, 100])
+            optimal = ref.get("optimal")
+        
+        # Classification
+        if optimal and len(optimal) == 2 and optimal[0] <= val <= optimal[1]:
+            return {
+                "status": "optimal",
+                "interpretation": f"Valeur optimale ({val:.2f} {ref['unit']}). Excellent ! Continuez ainsi.",
+                "icon": "✅"
+            }
+        elif normal[0] <= val <= normal[1]:
+            return {
+                "status": "normal",
+                "interpretation": f"Valeur dans les normes ({val:.2f} {ref['unit']}), mais optimisation possible.",
+                "icon": "✓"
+            }
+        elif val < normal[0]:
+            deficit = normal[0] - val
+            percent = (deficit / normal[0]) * 100
+            return {
+                "status": "low",
+                "interpretation": f"Valeur basse ({val:.2f} {ref['unit']}). Déficit de {deficit:.1f} ({percent:.0f}%). Supplémentation recommandée.",
+                "icon": "⚠️"
+            }
+        else:
+            excess = val - normal[1]
+            percent = (excess / normal[1]) * 100
+            return {
+                "status": "high",
+                "interpretation": f"Valeur élevée ({val:.2f} {ref['unit']}). Excès de {excess:.1f} ({percent:.0f}%). Investigation recommandée.",
+                "icon": "⚠️"
+            }
+
+
+# ============================================================
+# NORMALISATION INPUTS
 # ============================================================
 
 def normalize_patient(patient_data: dict) -> dict:
-    """
-    Accepte:
-    - patient_data = {"nom":..., "sexe":..., ...}
-    - ou patient_data = {"patient_info": {...}}
-    Retourne toujours patient_info dict.
-    """
     if not isinstance(patient_data, dict):
         return {}
     if "patient_info" in patient_data and isinstance(patient_data["patient_info"], dict):
@@ -41,14 +214,6 @@ def normalize_patient(patient_data: dict) -> dict:
 
 
 def normalize_biomarkers(biomarker_results):
-    """
-    Accepte:
-    - dict: {"crp": 1.2, "hba1c": 5.4, ...}
-    - list: [{"key":..., "value":..., "name":..., "unit":..., "flag":...}, ...]
-    Retour:
-    - mode = "dict" ou "list"
-    - dict_data / list_data
-    """
     if isinstance(biomarker_results, dict):
         return "dict", biomarker_results, []
     if isinstance(biomarker_results, list):
@@ -79,15 +244,12 @@ def safe_float(x, default=None):
 
 
 # ============================================================
-# VISUALS (MATPLOTLIB -> PNG BUFFERS)
+# VISUALISATIONS - JAUGES
 # ============================================================
 
 def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
                            optimal_min=None, optimal_max=None, unit=""):
-    """
-    Jauge horizontale type 'Mme X'
-    Retourne: BytesIO PNG
-    """
+    """Jauge horizontale premium pour biomarqueurs"""
     v = safe_float(value, 0.0)
     rmin = safe_float(ref_min, 0.0)
     rmax = safe_float(ref_max, rmin + 1.0)
@@ -95,28 +257,25 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
         rmax = rmin + 1.0
 
     fig, ax = plt.subplots(figsize=(8, 1.2))
-
+    fig.patch.set_facecolor('white')
+    
     total_range = rmax - rmin
     value_pos = (v - rmin) / total_range if total_range > 0 else 0.5
     value_pos = max(0, min(1, value_pos))
 
-    color_normal = '#d1fae5'
-    color_optimal = '#10b981'
-
-    ax.barh(0, 1, height=0.4, color=color_normal, alpha=0.25)
+    # Fond
+    ax.barh(0, 1, height=0.4, color='#d1fae5', alpha=0.3)
 
     # Zone optimale
     if optimal_min is not None and optimal_max is not None:
         omin = safe_float(optimal_min, None)
         omax = safe_float(optimal_max, None)
         if omin is not None and omax is not None and omax > omin:
-            opt_start = (omin - rmin) / total_range
-            opt_width = (omax - omin) / total_range
-            opt_start = max(0, min(1, opt_start))
-            opt_width = max(0, min(1 - opt_start, opt_width))
-            ax.barh(0, opt_width, left=opt_start, height=0.4, color=color_optimal, alpha=0.55)
+            opt_start = max(0, (omin - rmin) / total_range)
+            opt_width = min(1 - opt_start, (omax - omin) / total_range)
+            ax.barh(0, opt_width, left=opt_start, height=0.4, color='#10b981', alpha=0.5)
 
-    # Marker color logic
+    # Couleur marqueur
     marker_color = '#ef4444'
     if rmin <= v <= rmax:
         marker_color = '#22c55e'
@@ -126,13 +285,15 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
         if omin is not None and omax is not None and omin <= v <= omax:
             marker_color = '#10b981'
 
+    # Marqueur
     ax.plot([value_pos], [0], marker='v', markersize=15, color=marker_color,
             markeredgecolor='white', markeredgewidth=2, zorder=10)
 
-    ax.text(-0.02, 0, str(biomarker_name), va='center', ha='right', fontsize=10, fontweight='bold')
+    # Textes
+    ax.text(-0.02, 0, str(biomarker_name), va='center', ha='right', 
+            fontsize=10, fontweight='bold', color='#1f2937')
     ax.text(value_pos, 0.6, f"{v:.2f} {unit}".strip(), ha='center', va='bottom',
             fontsize=9, fontweight='bold', color=marker_color)
-
     ax.text(0, -0.6, f"{rmin:.1f}", ha='center', va='top', fontsize=8, color='gray')
     ax.text(1, -0.6, f"{rmax:.1f}", ha='center', va='top', fontsize=8, color='gray')
 
@@ -156,14 +317,11 @@ def create_biomarker_gauge(biomarker_name, value, ref_min, ref_max,
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', transparent=True)
     buf.seek(0)
     plt.close(fig)
-
     return buf
 
 
 def create_biological_age_visual(biological_age, chronological_age, delta, delta_percent):
-    """
-    Visualisation élégante de l'âge biologique - Design haut de gamme
-    """
+    """Visualisation âge biologique"""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
     fig.patch.set_facecolor('white')
     
@@ -171,10 +329,8 @@ def create_biological_age_visual(biological_age, chronological_age, delta, delta
     chrono_age = safe_float(chronological_age, 50)
     delta_val = safe_float(delta, 0)
     
-    # ===== GRAPHIQUE 1: Comparaison des âges =====
     ages = ['Chronologique', 'Biologique']
     values = [chrono_age, bio_age]
-    
     bar_colors = ['#3b82f6', '#10b981' if delta_val <= 0 else '#f59e0b']
     
     bars = ax1.bar(ages, values, color=bar_colors, alpha=0.85, 
@@ -186,10 +342,6 @@ def create_biological_age_visual(biological_age, chronological_age, delta, delta
                 f'{val:.1f}\nans', ha='center', va='bottom',
                 fontsize=13, fontweight='bold', color=bar.get_facecolor())
     
-    if abs(delta_val) > 0:
-        y_middle = (bio_age + chrono_age) / 2
-        ax1.plot([0, 1], [y_middle, y_middle], 'k--', alpha=0.3, linewidth=1)
-    
     ax1.set_ylim(0, max(values) * 1.3)
     ax1.set_ylabel('Âge (années)', fontsize=11, fontweight='bold')
     ax1.set_title('Comparaison des Âges', fontsize=12, fontweight='bold', pad=15)
@@ -197,29 +349,20 @@ def create_biological_age_visual(biological_age, chronological_age, delta, delta
     ax1.spines['right'].set_visible(False)
     ax1.grid(axis='y', alpha=0.2, linestyle='--')
     
-    # ===== GRAPHIQUE 2: Delta et pourcentage =====
     delta_color = '#10b981' if delta_val <= 0 else '#f59e0b'
     delta_text = 'Rajeunissement' if delta_val < 0 else ('Vieillissement' if delta_val > 0 else 'Équilibre')
     
     ax2.text(0.5, 0.65, f"{delta_val:+.1f}", ha='center', va='center',
-            fontsize=48, fontweight='bold', color=delta_color,
-            transform=ax2.transAxes)
-    
+            fontsize=48, fontweight='bold', color=delta_color, transform=ax2.transAxes)
     ax2.text(0.5, 0.42, 'ans', ha='center', va='center',
-            fontsize=16, color='#6b7280',
-            transform=ax2.transAxes)
-    
+            fontsize=16, color='#6b7280', transform=ax2.transAxes)
     ax2.text(0.5, 0.25, f"({delta_percent:+.1f}%)", ha='center', va='center',
-            fontsize=18, fontweight='bold', color=delta_color,
-            transform=ax2.transAxes)
-    
+            fontsize=18, fontweight='bold', color=delta_color, transform=ax2.transAxes)
     ax2.text(0.5, 0.08, delta_text, ha='center', va='center',
-            fontsize=13, fontweight='600', color=delta_color,
-            style='italic', transform=ax2.transAxes)
+            fontsize=13, fontweight='600', color=delta_color, style='italic', transform=ax2.transAxes)
     
     rect = Rectangle((0.05, 0.05), 0.9, 0.9, linewidth=3,
-                     edgecolor=delta_color, facecolor='none',
-                     transform=ax2.transAxes, alpha=0.6)
+                     edgecolor=delta_color, facecolor='none', transform=ax2.transAxes, alpha=0.6)
     ax2.add_patch(rect)
     
     ax2.set_xlim(0, 1)
@@ -228,16 +371,15 @@ def create_biological_age_visual(biological_age, chronological_age, delta, delta
     ax2.set_title('Delta Biologique', fontsize=12, fontweight='bold', pad=15)
     
     plt.tight_layout()
-    
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight',
-                transparent=False, facecolor='white')
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
     buf.seek(0)
     plt.close(fig)
     return buf
 
 
 def create_category_bars(category_scores: dict):
+    """Graphique scores par catégorie"""
     fig, ax = plt.subplots(figsize=(8, 5))
     categories = list(category_scores.keys())
     scores = [safe_float(category_scores[k], 0.0) for k in categories]
@@ -273,7 +415,6 @@ def create_category_bars(category_scores: dict):
     ax.spines['right'].set_visible(False)
 
     plt.tight_layout()
-
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     buf.seek(0)
@@ -282,7 +423,7 @@ def create_category_bars(category_scores: dict):
 
 
 # ============================================================
-# MAIN GENERATOR
+# GÉNÉRATEUR PRINCIPAL
 # ============================================================
 
 def generate_algolife_pdf_report(
@@ -299,116 +440,45 @@ def generate_algolife_pdf_report(
     max_gauges_watch=None
 ):
     """
-    Génère un rapport PDF professionnel ALGO-LIFE v5.0
-    - patient_data: dict (ou dict contenant patient_info)
-    - biomarker_results: dict OU list[dict]
-    - biomarker_db: objet optionnel ayant:
-        - get_reference_ranges() -> dict
-        - classify_biomarker(key, value, age, sexe) -> dict {status, interpretation, icon}
-    - TOUTES LES JAUGES AFFICHÉES (pas de limite max_gauges)
+    Génère un rapport PDF ALGO-LIFE complet avec TOUTES les jauges
+    
+    Si biomarker_db n'est pas fourni, une instance par défaut est créée automatiquement
     """
+    
+    # Créer BiomarkerDatabase par défaut si non fournie
+    if biomarker_db is None:
+        biomarker_db = BiomarkerDatabase()
+    
     engine_results = engine_results or {}
-
     buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        topMargin=15*mm,
-        bottomMargin=15*mm,
-        leftMargin=20*mm,
-        rightMargin=20*mm
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=15*mm, bottomMargin=15*mm,
+                           leftMargin=20*mm, rightMargin=20*mm)
     story = []
     styles = getSampleStyleSheet()
 
-    # ===== STYLES PERSONNALISÉS =====
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=32,
-        textColor=colors.HexColor('#667eea'),
-        spaceAfter=5,
-        alignment=TA_CENTER,
-        fontName='Helvetica-Bold'
-    )
+    # Styles
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=32,
+        textColor=colors.HexColor('#667eea'), spaceAfter=5, alignment=TA_CENTER, fontName='Helvetica-Bold')
+    subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'], fontSize=13,
+        textColor=colors.HexColor('#4A5568'), spaceAfter=25, alignment=TA_CENTER, fontName='Helvetica')
+    heading2_style = ParagraphStyle('CustomHeading2', parent=styles['Heading2'], fontSize=18,
+        textColor=colors.HexColor('#2C3E50'), spaceAfter=10, spaceBefore=15, fontName='Helvetica-Bold',
+        borderWidth=1, borderColor=colors.HexColor('#667eea'), borderPadding=8, backColor=colors.HexColor('#f8f9fa'))
+    heading3_style = ParagraphStyle('CustomHeading3', parent=styles['Heading3'], fontSize=14,
+        textColor=colors.HexColor('#34495E'), spaceAfter=8, spaceBefore=10, fontName='Helvetica-Bold')
+    interp_style = ParagraphStyle('Interpretation', parent=styles['Normal'], fontSize=9,
+        textColor=colors.HexColor('#6b7280'), leftIndent=10, spaceAfter=10)
 
-    subtitle_style = ParagraphStyle(
-        'CustomSubtitle',
-        parent=styles['Normal'],
-        fontSize=13,
-        textColor=colors.HexColor('#4A5568'),
-        spaceAfter=25,
-        alignment=TA_CENTER,
-        fontName='Helvetica'
-    )
-
-    heading2_style = ParagraphStyle(
-        'CustomHeading2',
-        parent=styles['Heading2'],
-        fontSize=18,
-        textColor=colors.HexColor('#2C3E50'),
-        spaceAfter=10,
-        spaceBefore=15,
-        fontName='Helvetica-Bold',
-        borderWidth=1,
-        borderColor=colors.HexColor('#667eea'),
-        borderPadding=8,
-        backColor=colors.HexColor('#f8f9fa')
-    )
-
-    heading3_style = ParagraphStyle(
-        'CustomHeading3',
-        parent=styles['Heading3'],
-        fontSize=14,
-        textColor=colors.HexColor('#34495E'),
-        spaceAfter=8,
-        spaceBefore=10,
-        fontName='Helvetica-Bold'
-    )
-
-    warning_style = ParagraphStyle(
-        'Warning',
-        parent=styles['Normal'],
-        fontSize=11,
-        textColor=colors.HexColor('#d97706'),
-        backColor=colors.HexColor('#fef3c7'),
-        borderWidth=1,
-        borderColor=colors.HexColor('#f59e0b'),
-        borderPadding=10,
-        spaceAfter=10
-    )
-
-    footer_style = ParagraphStyle(
-        'Footer',
-        parent=styles['Normal'],
-        fontSize=8,
-        textColor=colors.grey,
-        alignment=TA_CENTER,
-        spaceAfter=3
-    )
-
-    interp_style = ParagraphStyle(
-        'Interpretation',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.HexColor('#6b7280'),
-        leftIndent=10,
-        spaceAfter=10
-    )
-
-    # ===== NORMALISATION =====
+    # Normalisation
     patient_info = normalize_patient(patient_data)
     mode, biomarkers_dict, biomarkers_list = normalize_biomarkers(biomarker_results)
 
-    # ===== EN-TÊTE =====
+    # EN-TÊTE
     story.append(Paragraph("🧬 ALGO-LIFE", title_style))
-    story.append(Paragraph(
-        "Rapport d'Analyses Biologiques<br/>Analyse Multimodale de Santé Fonctionnelle",
-        subtitle_style
-    ))
+    story.append(Paragraph("Rapport d'Analyses Biologiques<br/>Analyse Multimodale de Santé Fonctionnelle", subtitle_style))
     story.append(Spacer(1, 5))
 
-    # ===== INFORMATIONS PATIENT =====
+    # INFORMATIONS PATIENT
     story.append(Paragraph("Informations Patient", heading2_style))
     story.append(Spacer(1, 5))
 
@@ -432,7 +502,6 @@ def generate_algolife_pdf_report(
         ('FONTSIZE', (0, 0), (-1, -1), 11),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('LEFTPADDING', (0, 0), (-1, -1), 12),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
         ('TOPPADDING', (0, 0), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ('GRID', (0, 1), (-1, -1), 1, colors.HexColor('#e5e7eb')),
@@ -442,12 +511,11 @@ def generate_algolife_pdf_report(
     story.append(patient_table)
     story.append(Spacer(1, 20))
 
-    # ===== SCORES PRINCIPAUX =====
+    # ÂGE BIOLOGIQUE & SCORE
     story.append(Paragraph("Âge Biologique & Score Santé", heading2_style))
     story.append(Spacer(1, 10))
 
     if biological_age and health_score:
-        # Visualisation âge biologique (design haut de gamme)
         age_visual_buf = create_biological_age_visual(
             biological_age.get('biological_age'),
             biological_age.get('chronological_age'),
@@ -462,18 +530,22 @@ def generate_algolife_pdf_report(
         delta_color = 'green' if delta <= 0 else 'orange'
 
         info_data = [
-            ['Âge Biologique', f"<font size=16><b>{biological_age.get('biological_age', '—')} ans</b></font>"],
-            ['Âge Chronologique', f"{biological_age.get('chronological_age', '—')} ans"],
-            ['Delta', f"<font color='{delta_color}'><b>{delta:+.1f} ans ({delta_percent:+.1f}%)</b></font>"],
-            ['Status', biological_age.get('status', '—')],
+            [Paragraph('<b>Âge Biologique</b>', styles['Normal']), 
+             Paragraph(f"<font size=16 color='#667eea'><b>{biological_age.get('biological_age', '—')} ans</b></font>", styles['Normal'])],
+            [Paragraph('Âge Chronologique', styles['Normal']), 
+             Paragraph(f"{biological_age.get('chronological_age', '—')} ans", styles['Normal'])],
+            [Paragraph('Delta', styles['Normal']), 
+             Paragraph(f"<font color='{delta_color}'><b>{delta:+.1f} ans ({delta_percent:+.1f}%)</b></font>", styles['Normal'])],
+            [Paragraph('Status', styles['Normal']), 
+             Paragraph(biological_age.get('status', '—'), styles['Normal'])],
             ['', ''],
-            ['Interprétation', biological_age.get('interpretation', '—')],
+            [Paragraph('<b>Interprétation</b>', styles['Normal']), 
+             Paragraph(biological_age.get('interpretation', '—'), styles['Normal'])],
         ]
 
         info_table = Table(info_data, colWidths=[50*mm, 100*mm])
         info_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -2), colors.HexColor('#f3f4f6')),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 0), (0, 4), colors.HexColor('#f3f4f6')),
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('LEFTPADDING', (0, 0), (-1, -1), 10),
@@ -486,21 +558,21 @@ def generate_algolife_pdf_report(
         story.append(info_table)
         story.append(Spacer(1, 15))
 
-        # Score de santé global
+        # Score
         score_value = safe_float(health_score.get('global_score', 0), 0)
-        score_color = 'green' if score_value >= 80 else ('orange' if score_value >= 60 else 'red')
+        score_color = '#10b981' if score_value >= 80 else ('#f59e0b' if score_value >= 60 else '#ef4444')
 
         score_data = [
-            ['Score Santé Global', f"<font size=20 color='{score_color}'><b>{score_value:.1f}/100</b></font>"],
-            ['Grade', f"<font size=14 color='{score_color}'><b>{health_score.get('grade', '—')}</b></font>"],
+            [Paragraph('<b>Score Santé Global</b>', styles['Normal']), 
+             Paragraph(f"<font size=20 color='{score_color}'><b>{score_value:.1f}/100</b></font>", styles['Normal'])],
+            [Paragraph('<b>Grade</b>', styles['Normal']), 
+             Paragraph(f"<font size=14 color='{score_color}'><b>{health_score.get('grade', '—')}</b></font>", styles['Normal'])],
         ]
 
         score_table = Table(score_data, colWidths=[60*mm, 110*mm])
         score_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#667eea')),
             ('TEXTCOLOR', (0, 0), (0, -1), colors.white),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('TOPPADDING', (0, 0), (-1, -1), 15),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 15),
@@ -513,240 +585,185 @@ def generate_algolife_pdf_report(
             story.append(Paragraph("Scores par Catégorie de Santé", heading3_style))
             category_bars_buf = create_category_bars(health_score['category_scores'])
             story.append(Image(category_bars_buf, width=160*mm, height=100*mm))
-    else:
-        story.append(Paragraph(
-            "⚠️ <b>Les scores ne sont pas disponibles.</b><br/>"
-            "L'analyse est incomplète. Vérifie extraction biomarqueurs + calculs.",
-            warning_style
-        ))
 
     story.append(Spacer(1, 10))
     story.append(PageBreak())
 
-    # ===== BIOMARQUEURS AVEC CLASSIFICATION =====
+    # BIOMARQUEURS AVEC JAUGES
     story.append(Paragraph("Résultats Détaillés des Biomarqueurs", heading2_style))
     story.append(Spacer(1, 10))
 
     normaux, a_surveiller, anormaux = [], [], []
 
-    # Classification si biomarker_db dispo
-    if biomarker_db is not None:
-        try:
-            refs_db = biomarker_db.get_reference_ranges()
+    # Classification
+    try:
+        refs_db = biomarker_db.get_reference_ranges()
+        iterable = list(biomarkers_dict.items()) if mode == "dict" else [(it["key"], it["value"]) for it in biomarkers_list]
 
-            if mode == "dict":
-                iterable = list(biomarkers_dict.items())
+        for biomarker_key, value in iterable:
+            if biomarker_key not in refs_db:
+                continue
+
+            classification = biomarker_db.classify_biomarker(biomarker_key, value, 
+                patient_info.get('age'), patient_info.get('sexe'))
+            ref_data = refs_db[biomarker_key]
+
+            item = {
+                'key': biomarker_key,
+                'name': str(biomarker_key).replace('_', ' ').title(),
+                'value': safe_float(value, value),
+                'unit': ref_data.get('unit', ''),
+                'classification': classification,
+                'ref_data': ref_data
+            }
+
+            st = (classification.get('status') or '').lower()
+            if st in ('optimal', 'normal', 'ok'):
+                normaux.append(item)
+            elif st in ('insufficient', 'low', 'elevated', 'watch', 'surveiller', 'monitor'):
+                a_surveiller.append(item)
             else:
-                iterable = [(it["key"], it["value"]) for it in biomarkers_list]
+                anormaux.append(item)
 
-            for biomarker_key, value in iterable:
-                if biomarker_key not in refs_db:
-                    continue
+    except Exception as e:
+        story.append(Paragraph(f"⚠️ Erreur classification: {str(e)}", styles['Normal']))
 
-                classification = biomarker_db.classify_biomarker(
-                    biomarker_key, value,
-                    patient_info.get('age'),
-                    patient_info.get('sexe')
-                )
-                ref_data = refs_db[biomarker_key]
+    # Résumé
+    total = max(1, (len(normaux) + len(a_surveiller) + len(anormaux)))
+    summary_data = [
+        ['Catégorie', 'Nombre', '%'],
+        ['✅ Normaux', str(len(normaux)), f"{len(normaux)/total*100:.0f}%"],
+        ['⚡ À surveiller', str(len(a_surveiller)), f"{len(a_surveiller)/total*100:.0f}%"],
+        ['⚠️ Anormaux', str(len(anormaux)), f"{len(anormaux)/total*100:.0f}%"]
+    ]
+    summary_table = Table(summary_data, colWidths=[80*mm, 40*mm, 40*mm])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#d1fae5')),
+        ('BACKGROUND', (0, 2), (-1, 2), colors.HexColor('#fef3c7')),
+        ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#fee2e2')),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 1, colors.white),
+        ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold')
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 15))
 
-                item = {
-                    'key': biomarker_key,
-                    'name': str(biomarker_key).replace('_', ' ').title(),
-                    'value': safe_float(value, value),
-                    'unit': ref_data.get('unit', ''),
-                    'classification': classification,
-                    'ref_data': ref_data
-                }
+    # TOUTES LES JAUGES ANORMAUX
+    if anormaux:
+        story.append(Paragraph("⚠️ Biomarqueurs Anormaux - Analyse Détaillée", heading3_style))
+        story.append(Spacer(1, 5))
 
-                st = (classification.get('status') or '').lower()
-                if st in ('optimal', 'normal', 'ok'):
-                    normaux.append(item)
-                elif st in ('insufficient', 'low', 'elevated', 'watch', 'surveiller', 'monitor'):
-                    a_surveiller.append(item)
-                else:
-                    anormaux.append(item)
+        for item in anormaux:
+            ref_data = item['ref_data']
+            ref_min, ref_max = 0, 100
+            
+            if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
+                ref_min, ref_max = ref_data['normal']
+            elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('normal_female'), (list, tuple)):
+                ref_min, ref_max = ref_data['normal_female']
+            elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('normal_male'), (list, tuple)):
+                ref_min, ref_max = ref_data['normal_male']
 
-        except Exception as e:
+            opt_min, opt_max = None, None
+            if isinstance(ref_data.get('optimal'), (list, tuple)) and len(ref_data['optimal']) == 2:
+                opt_min, opt_max = ref_data['optimal']
+            elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('optimal_female'), (list, tuple)):
+                opt_min, opt_max = ref_data['optimal_female']
+            elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
+                opt_min, opt_max = ref_data['optimal_male']
+
+            if ref_min is None:
+                ref_min = 0
+            if ref_max is None:
+                v = safe_float(item['value'], 1.0)
+                ref_max = v * 1.5 if v else 1.0
+
+            gauge_buf = create_biomarker_gauge(item['name'], safe_float(item['value'], 0.0),
+                ref_min, ref_max, opt_min, opt_max, item['unit'])
+            story.append(Image(gauge_buf, width=150*mm, height=25*mm))
             story.append(Paragraph(
-                f"⚠️ Classification BiomarkerDatabase indisponible.<br/>Erreur: {str(e)}",
-                styles['Normal']
-            ))
-            biomarker_db = None
+                f"<i>{item['classification'].get('icon','')} {item['classification'].get('interpretation','')}</i>",
+                interp_style))
 
-    # Si pas de DB : fallback tableau brut
-    if biomarker_db is None:
-        if mode == "dict":
-            bio_data = [['Biomarqueur', 'Valeur']]
-            for key, value in biomarkers_dict.items():
-                bio_data.append([str(key).replace('_', ' ').title(), f"{safe_float(value, value)}"])
-        else:
-            bio_data = [['Catégorie', 'Biomarqueur', 'Valeur', 'Normes', 'Statut']]
-            for it in biomarkers_list:
-                bio_data.append([
-                    it.get("category", "—"),
-                    it.get("name", "—"),
-                    str(it.get("value", "—")),
-                    str(it.get("range", "—")),
-                    str(it.get("flag", "—")),
-                ])
+    # TOUTES LES JAUGES À SURVEILLER
+    if a_surveiller:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("⚡ Biomarqueurs À Surveiller", heading3_style))
+        story.append(Spacer(1, 5))
 
-        bio_table = Table(bio_data, colWidths=[90*mm, 70*mm] if mode == "dict" else [40*mm, 60*mm, 30*mm, 30*mm, 20*mm])
-        bio_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        for item in a_surveiller:
+            ref_data = item['ref_data']
+            ref_min, ref_max = 0, 100
+            
+            if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
+                ref_min, ref_max = ref_data['normal']
+            elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('normal_female'), (list, tuple)):
+                ref_min, ref_max = ref_data['normal_female']
+            elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('normal_male'), (list, tuple)):
+                ref_min, ref_max = ref_data['normal_male']
+
+            opt_min, opt_max = None, None
+            if isinstance(ref_data.get('optimal'), (list, tuple)) and len(ref_data['optimal']) == 2:
+                opt_min, opt_max = ref_data['optimal']
+            elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('optimal_female'), (list, tuple)):
+                opt_min, opt_max = ref_data['optimal_female']
+            elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
+                opt_min, opt_max = ref_data['optimal_male']
+
+            if ref_min is None:
+                ref_min = 0
+            if ref_max is None:
+                v = safe_float(item['value'], 1.0)
+                ref_max = v * 1.5 if v else 1.0
+
+            gauge_buf = create_biomarker_gauge(item['name'], safe_float(item['value'], 0.0),
+                ref_min, ref_max, opt_min, opt_max, item['unit'])
+            story.append(Image(gauge_buf, width=150*mm, height=25*mm))
+            story.append(Paragraph(
+                f"<i>{item['classification'].get('icon','')} {item['classification'].get('interpretation','')}</i>",
+                interp_style))
+
+    # Tableau normaux
+    if normaux:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("✅ Biomarqueurs Normaux", heading3_style))
+        story.append(Spacer(1, 5))
+
+        normaux_data = [['Biomarqueur', 'Valeur', 'Unité', 'Status']]
+        for item in normaux:
+            v = safe_float(item['value'], item['value'])
+            normaux_data.append([
+                item['name'],
+                f"{v:.2f}" if isinstance(v, (int, float)) else str(v),
+                item['unit'],
+                f"{item['classification'].get('icon','')} {str(item['classification'].get('status','')).title()}"
+            ])
+
+        normaux_table = Table(normaux_data, colWidths=[70*mm, 30*mm, 25*mm, 35*mm])
+        normaux_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d1fae5')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#065f46')),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 1), (2, -1), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')])
         ]))
-        story.append(bio_table)
-    else:
-        total = max(1, (len(normaux) + len(a_surveiller) + len(anormaux)))
-        summary_data = [
-            ['Catégorie', 'Nombre', '%'],
-            ['✅ Normaux', str(len(normaux)), f"{len(normaux)/total*100:.0f}%"],
-            ['⚡ À surveiller', str(len(a_surveiller)), f"{len(a_surveiller)/total*100:.0f}%"],
-            ['⚠️ Anormaux', str(len(anormaux)), f"{len(anormaux)/total*100:.0f}%"]
-        ]
-        summary_table = Table(summary_data, colWidths=[80*mm, 40*mm, 40*mm])
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#d1fae5')),
-            ('BACKGROUND', (0, 2), (-1, 2), colors.HexColor('#fef3c7')),
-            ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#fee2e2')),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, colors.white),
-            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold')
-        ]))
-        story.append(summary_table)
-        story.append(Spacer(1, 15))
-
-        # JAUGES ANORMAUX - TOUTES AFFICHÉES
-        if anormaux:
-            story.append(Paragraph("⚠️ Biomarqueurs Anormaux - Analyse Détaillée", heading3_style))
-            story.append(Spacer(1, 5))
-
-            for item in anormaux:
-                ref_data = item['ref_data']
-
-                ref_min, ref_max = 0, 100
-                if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
-                    ref_min, ref_max = ref_data['normal']
-                elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('normal_female'), (list, tuple)):
-                    ref_min, ref_max = ref_data['normal_female']
-                elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('normal_male'), (list, tuple)):
-                    ref_min, ref_max = ref_data['normal_male']
-
-                opt_min, opt_max = None, None
-                if isinstance(ref_data.get('optimal'), (list, tuple)) and len(ref_data['optimal']) == 2:
-                    opt_min, opt_max = ref_data['optimal']
-                elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('optimal_female'), (list, tuple)):
-                    opt_min, opt_max = ref_data['optimal_female']
-                elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
-                    opt_min, opt_max = ref_data['optimal_male']
-
-                if ref_min is None:
-                    ref_min = 0
-                if ref_max is None:
-                    v = safe_float(item['value'], 1.0)
-                    ref_max = v * 1.5 if v else 1.0
-
-                gauge_buf = create_biomarker_gauge(
-                    item['name'], safe_float(item['value'], 0.0),
-                    ref_min, ref_max,
-                    opt_min, opt_max,
-                    item['unit']
-                )
-                story.append(Image(gauge_buf, width=150*mm, height=25*mm))
-                story.append(Paragraph(
-                    f"<i>{item['classification'].get('icon','')} {item['classification'].get('interpretation','')}</i>",
-                    interp_style
-                ))
-
-        # JAUGES A SURVEILLER - TOUTES AFFICHÉES
-        if a_surveiller:
-            story.append(Spacer(1, 10))
-            story.append(Paragraph("⚡ Biomarqueurs À Surveiller", heading3_style))
-            story.append(Spacer(1, 5))
-
-            for item in a_surveiller:
-                ref_data = item['ref_data']
-
-                ref_min, ref_max = 0, 100
-                if isinstance(ref_data.get('normal'), (list, tuple)) and len(ref_data['normal']) == 2:
-                    ref_min, ref_max = ref_data['normal']
-                elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('normal_female'), (list, tuple)):
-                    ref_min, ref_max = ref_data['normal_female']
-                elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('normal_male'), (list, tuple)):
-                    ref_min, ref_max = ref_data['normal_male']
-
-                opt_min, opt_max = None, None
-                if isinstance(ref_data.get('optimal'), (list, tuple)) and len(ref_data['optimal']) == 2:
-                    opt_min, opt_max = ref_data['optimal']
-                elif patient_info.get('sexe') == 'Féminin' and isinstance(ref_data.get('optimal_female'), (list, tuple)):
-                    opt_min, opt_max = ref_data['optimal_female']
-                elif patient_info.get('sexe') == 'Masculin' and isinstance(ref_data.get('optimal_male'), (list, tuple)):
-                    opt_min, opt_max = ref_data['optimal_male']
-
-                if ref_min is None:
-                    ref_min = 0
-                if ref_max is None:
-                    v = safe_float(item['value'], 1.0)
-                    ref_max = v * 1.5 if v else 1.0
-
-                gauge_buf = create_biomarker_gauge(
-                    item['name'], safe_float(item['value'], 0.0),
-                    ref_min, ref_max,
-                    opt_min, opt_max,
-                    item['unit']
-                )
-                story.append(Image(gauge_buf, width=150*mm, height=25*mm))
-                story.append(Paragraph(
-                    f"<i>{item['classification'].get('icon','')} {item['classification'].get('interpretation','')}</i>",
-                    interp_style
-                ))
-
-        # Tableau compact normaux
-        if normaux:
-            story.append(Spacer(1, 10))
-            story.append(Paragraph("✅ Biomarqueurs Normaux", heading3_style))
-            story.append(Spacer(1, 5))
-
-            normaux_data = [['Biomarqueur', 'Valeur', 'Unité', 'Status']]
-            for item in normaux:
-                v = safe_float(item['value'], item['value'])
-                normaux_data.append([
-                    item['name'],
-                    f"{v:.2f}" if isinstance(v, (int, float)) else str(v),
-                    item['unit'],
-                    f"{item['classification'].get('icon','')} {str(item['classification'].get('status','')).title()}"
-                ])
-
-            normaux_table = Table(normaux_data, colWidths=[70*mm, 30*mm, 25*mm, 35*mm])
-            normaux_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d1fae5')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#065f46')),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (1, 1), (2, -1), 'CENTER'),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9fafb')])
-            ]))
-            story.append(normaux_table)
+        story.append(normaux_table)
 
     story.append(Spacer(1, 15))
     story.append(PageBreak())
 
-    # ===== BESOINS NUTRITIONNELS =====
+    # BESOINS NUTRITIONNELS
     if nutritional_needs:
         story.append(Paragraph("Besoins Nutritionnels Calculés", heading2_style))
         story.append(Spacer(1, 10))
@@ -775,7 +792,7 @@ def generate_algolife_pdf_report(
         story.append(nutri_table)
         story.append(Spacer(1, 15))
 
-    # ===== RECOMMANDATIONS =====
+    # RECOMMANDATIONS
     if recommendations:
         story.append(Paragraph("💡 Recommandations Personnalisées", heading2_style))
         story.append(Spacer(1, 10))
@@ -790,10 +807,8 @@ def generate_algolife_pdf_report(
                 priority_level = str(priority.get('priority', '—'))
                 priority_color = '#ef4444' if 'élev' in priority_level.lower() else '#f59e0b'
                 story.append(Paragraph(
-                    f"<b>{i}.</b> <font color='{priority_color}'><b>{biomarker_name}</b></font> "
-                    f"- Priorité: <b>{priority_level}</b>",
-                    styles['Normal']
-                ))
+                    f"<b>{i}.</b> <font color='{priority_color}'><b>{biomarker_name}</b></font> - Priorité: <b>{priority_level}</b>",
+                    styles['Normal']))
             story.append(Spacer(1, 12))
 
         if recs.get('supplements'):
@@ -813,29 +828,18 @@ def generate_algolife_pdf_report(
             for life in recs['lifestyle'][:12]:
                 story.append(Paragraph(f"• {life}", styles['Normal']))
 
-    # ===== PLAN DE SUIVI =====
-    story.append(Spacer(1, 20))
-    story.append(Paragraph("Plan de Suivi Recommandé", heading2_style))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Prochain contrôle:</b> 3-6 mois selon évolution", styles['Normal']))
-    story.append(Spacer(1, 5))
-
-    if biomarker_db is not None and anormaux:
-        story.append(Paragraph("<b>Biomarqueurs à recontrôler en priorité:</b>", styles['Normal']))
-        for item in anormaux[:5]:
-            story.append(Paragraph(f"• {item['name']}", styles['Normal']))
-
-    # ===== FOOTER =====
+    # FOOTER
     story.append(Spacer(1, 30))
-    story.append(Paragraph("_" * 100, footer_style))
+    story.append(Paragraph("_" * 100, styles['Normal']))
     story.append(Spacer(1, 8))
-    story.append(Paragraph("<b>Rapport établi par Dr Thibault SUTTER - Biologiste</b>", footer_style))
-    story.append(Paragraph("Product Manager Functional Biology, Espace Lab SA (Unilabs Group)", footer_style))
-    story.append(Paragraph("ALGO-LIFE | Plateforme Multimodale d'Analyse de Santé Fonctionnelle", footer_style))
+    footer = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.grey, alignment=TA_CENTER)
+    story.append(Paragraph("<b>Rapport établi par Dr Thibault SUTTER - Biologiste</b>", footer))
+    story.append(Paragraph("Product Manager Functional Biology, Espace Lab SA (Unilabs Group)", footer))
+    story.append(Paragraph("ALGO-LIFE | Plateforme Multimodale d'Analyse de Santé Fonctionnelle", footer))
     story.append(Spacer(1, 5))
-    story.append(Paragraph("© 2026 ALGO-LIFE - Document médical confidentiel", footer_style))
+    story.append(Paragraph("© 2026 ALGO-LIFE - Document médical confidentiel", footer))
 
-    # ===== BUILD PDF =====
+    # BUILD
     try:
         doc.build(story)
         buffer.seek(0)
@@ -843,22 +847,15 @@ def generate_algolife_pdf_report(
     except Exception as e:
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
-        story = [
-            Paragraph("ALGO-LIFE - Erreur de Génération", title_style),
-            Spacer(1, 20),
-            Paragraph(f"Une erreur s'est produite: {str(e)}", styles['Normal'])
-        ]
+        story = [Paragraph(f"ERREUR: {str(e)}", styles['Normal'])]
         doc.build(story)
         buffer.seek(0)
         return buffer
 
 
-__all__ = ["generate_algolife_pdf_report"]
-
+__all__ = ["generate_algolife_pdf_report", "BiomarkerDatabase"]
 
 if __name__ == "__main__":
-    print("✅ Module algolife_pdf_generator v5.0 chargé!")
-    print("✨ Améliorations:")
-    print("   - Design haut de gamme pour âge biologique")
-    print("   - TOUTES les jauges affichées (pas de limite)")
-    print("   - Visualisations élégantes")
+    print("✅ ALGO-LIFE PDF Generator v5.0 COMPLET")
+    print("📦 BiomarkerDatabase intégrée")
+    print("🎨 Toutes les jauges automatiques")
