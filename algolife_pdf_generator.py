@@ -1,6 +1,6 @@
 """
 ALGO-LIFE PDF Generator v7.0 ULTRA PREMIUM
-Design haut de gamme - Typographie soignée - Visualisations élégantes
+Compatible avec app.py existant - Garde le nom generate_algolife_pdf_report()
 
 Auteur: Dr Thibault SUTTER
 Date: Janvier 2026
@@ -10,11 +10,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-    PageBreak, Image, KeepTogether, Frame, PageTemplate
+    PageBreak, Image, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -23,8 +23,7 @@ from datetime import datetime
 import io
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import Circle, Wedge, Rectangle, FancyBboxPatch
+from matplotlib.patches import Circle, Wedge, FancyBboxPatch
 
 
 # ============================================================
@@ -32,28 +31,20 @@ from matplotlib.patches import Circle, Wedge, Rectangle, FancyBboxPatch
 # ============================================================
 
 PREMIUM_THEME = {
-    # Couleurs primaires sophistiquées
     "deep_navy": colors.HexColor("#0A1628"),
     "slate": colors.HexColor("#1E293B"),
     "steel": colors.HexColor("#475569"),
     "mist": colors.HexColor("#94A3B8"),
-    
-    # Arrière-plans
     "cloud": colors.HexColor("#F8FAFC"),
     "pearl": colors.HexColor("#FFFFFF"),
     "silver": colors.HexColor("#E2E8F0"),
-    
-    # Accents premium
-    "gold": colors.HexColor("#F59E0B"),
     "emerald": colors.HexColor("#059669"),
     "sapphire": colors.HexColor("#0284C7"),
+    "gold": colors.HexColor("#F59E0B"),
     "ruby": colors.HexColor("#DC2626"),
-    "amethyst": colors.HexColor("#7C3AED"),
-    
-    # Backgrounds subtils
-    "gold_subtle": colors.HexColor("#FFFBEB"),
     "emerald_subtle": colors.HexColor("#ECFDF5"),
     "sapphire_subtle": colors.HexColor("#F0F9FF"),
+    "gold_subtle": colors.HexColor("#FFFBEB"),
     "ruby_subtle": colors.HexColor("#FEF2F2"),
 }
 
@@ -66,7 +57,7 @@ STATUS_COLORS = {
 
 
 # ============================================================
-# FONTS PREMIUM (fallback safe)
+# FONTS
 # ============================================================
 
 def register_fonts():
@@ -80,7 +71,7 @@ def register_fonts():
 
 
 # ============================================================
-# BIOMARKER DATABASE (inchangée)
+# BIOMARKER DATABASE
 # ============================================================
 
 class BiomarkerDatabase:
@@ -102,6 +93,8 @@ class BiomarkerDatabase:
             "glutathion_total": {"unit": "µmol/L", "normal": [900.0, 1750.0], "optimal": [1200.0, 1750.0], "category": "Antioxydants"},
             "coenzyme_q10": {"unit": "µg/L", "normal": [500.0, 1500.0], "optimal": [800.0, 1200.0], "category": "Antioxydants"},
             "gpx": {"unit": "U/g Hb", "normal": [27.5, 73.6], "optimal": [40.0, 65.0], "category": "Antioxydants"},
+            "vitamine_d": {"unit": "ng/mL", "normal": [30.0, 100.0], "optimal": [50.0, 80.0], "category": "Vitamines"},
+            "vitamine_b12": {"unit": "pg/mL", "normal": [200.0, 900.0], "optimal": [400.0, 700.0], "category": "Vitamines"},
         }
 
     def classify_biomarker(self, key, value, age=None, sexe=None):
@@ -185,62 +178,51 @@ def canonical_key(raw_key):
 # ============================================================
 
 def create_bioage_ultra_premium(bio_age, chrono_age):
-    """
-    ⭐ Visuel ÂGE BIOLOGIQUE ultra premium:
-    - Design circulaire sophistiqué avec gradients
-    - Typographie élégante
-    - Palette raffinée
-    """
+    """Visuel âge biologique ultra premium"""
     b = safe_float(bio_age, 45.0)
     c = safe_float(chrono_age, 45.0)
     delta = b - c
     
-    # Couleur selon delta
     if delta <= -2:
-        main_color = "#059669"  # emerald
+        main_color = "#059669"
         bg_color = "#ECFDF5"
         label = "Âge biologique OPTIMAL"
         sublabel = "Plus jeune que l'âge chronologique"
     elif delta <= 2:
-        main_color = "#0284C7"  # sapphire
+        main_color = "#0284C7"
         bg_color = "#F0F9FF"
         label = "Âge biologique ÉQUILIBRÉ"
         sublabel = "En ligne avec l'âge chronologique"
     else:
-        main_color = "#F59E0B"  # gold
+        main_color = "#F59E0B"
         bg_color = "#FFFBEB"
         label = "Âge biologique ÉLEVÉ"
         sublabel = "Nécessite attention"
     
     fig = plt.figure(figsize=(9.5, 4.2), facecolor='white')
     
-    # === GAUCHE: Cercle principal avec anneaux ===
+    # Cercle gauche
     ax1 = fig.add_axes([0.02, 0.08, 0.42, 0.84])
     ax1.set_aspect('equal')
     ax1.axis('off')
     ax1.set_xlim(-1.4, 1.4)
     ax1.set_ylim(-1.4, 1.4)
     
-    # Fond doux
     bg_circle = Circle((0, 0), 1.38, color=bg_color, alpha=0.3, zorder=1)
     ax1.add_patch(bg_circle)
     
-    # Anneau extérieur subtil
     outer_ring = Circle((0, 0), 1.15, fill=False, edgecolor='#E2E8F0', linewidth=3, zorder=2)
     ax1.add_patch(outer_ring)
     
-    # Anneau central gradient (simulé avec plusieurs cercles)
     for r in np.linspace(0.95, 1.05, 8):
         alpha_val = 0.15 + (1.05 - r) * 0.85 / 0.1
         ring = Circle((0, 0), r, fill=False, edgecolor=main_color, 
                      linewidth=2.5, alpha=alpha_val, zorder=3)
         ax1.add_patch(ring)
     
-    # Centre blanc pur
     center = Circle((0, 0), 0.88, color='white', zorder=4)
     ax1.add_patch(center)
     
-    # Texte central
     ax1.text(0, 0.22, f"{b:.1f}", ha='center', va='center',
              fontsize=42, fontweight='bold', color=main_color, zorder=5)
     ax1.text(0, -0.18, "Âge biologique", ha='center', va='center',
@@ -248,7 +230,6 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     ax1.text(0, -0.38, "(années)", ha='center', va='center',
              fontsize=9, color='#94A3B8', zorder=5)
     
-    # Petit indicateur delta sur le côté
     delta_x, delta_y = 0.75, 0.75
     delta_symbol = "▼" if delta < 0 else "▲" if delta > 0 else "●"
     ax1.text(delta_x, delta_y, delta_symbol, ha='center', va='center',
@@ -256,17 +237,15 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     ax1.text(delta_x, delta_y - 0.18, f"{delta:+.1f}", ha='center', va='center',
              fontsize=9, fontweight='bold', color=main_color, zorder=6)
     
-    # === DROITE: Informations textuelles ===
+    # Info droite
     ax2 = fig.add_axes([0.48, 0.08, 0.50, 0.84])
     ax2.axis('off')
     ax2.set_xlim(0, 1)
     ax2.set_ylim(0, 1)
     
-    # Titre
     ax2.text(0.02, 0.88, label, fontsize=16, fontweight='bold',
              color='#0A1628', va='top')
     
-    # Box sublabel
     box = FancyBboxPatch((0, 0.72), 0.96, 0.10, boxstyle="round,pad=0.01",
                          edgecolor=main_color, facecolor=bg_color, 
                          linewidth=1.5, alpha=0.6)
@@ -274,7 +253,6 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     ax2.text(0.48, 0.77, sublabel, fontsize=11, fontweight='600',
              color=main_color, ha='center', va='center')
     
-    # Détails
     y_pos = 0.58
     ax2.text(0.02, y_pos, "Âge chronologique", fontsize=10, color='#64748B')
     ax2.text(0.98, y_pos, f"{c:.1f} ans", fontsize=12, fontweight='bold',
@@ -290,26 +268,22 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     ax2.text(0.98, y_pos, f"{delta:+.1f} ans", fontsize=13, fontweight='bold',
              color=main_color, ha='right')
     
-    # Timeline visuelle
+    # Timeline
     y_pos -= 0.18
     timeline_y = y_pos
     
-    # Ligne principale
     ax2.plot([0.08, 0.92], [timeline_y, timeline_y], color='#CBD5E1', 
              linewidth=3, solid_capstyle='round', zorder=1)
     
-    # Marqueurs
-    chron_pos = 0.5  # Centre pour l'âge chrono
-    bio_offset = (delta / 20.0) * 0.4  # Scaling visuel
+    chron_pos = 0.5
+    bio_offset = (delta / 20.0) * 0.4
     bio_pos = np.clip(chron_pos + bio_offset, 0.08, 0.92)
     
-    # Point chronologique
     ax2.plot([chron_pos], [timeline_y], 'o', markersize=9, color='#64748B',
              markeredgecolor='white', markeredgewidth=2, zorder=3)
     ax2.text(chron_pos, timeline_y - 0.06, f"{c:.0f}", ha='center',
              fontsize=8, color='#64748B', fontweight='600')
     
-    # Point biologique
     ax2.plot([bio_pos], [timeline_y], 'o', markersize=12, color=main_color,
              markeredgecolor='white', markeredgewidth=2.5, zorder=4)
     ax2.text(bio_pos, timeline_y + 0.06, f"{b:.0f}", ha='center',
@@ -325,11 +299,7 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
 
 def create_gauge_vertical_premium(name, value, ref_min, ref_max, 
                                    opt_min=None, opt_max=None, unit="", status="normal"):
-    """
-    ⭐ Jauge VERTICALE premium (remplace les barres horizontales vulgaires)
-    - Design élégant avec gradient
-    - Indicateur circulaire sophistiqué
-    """
+    """Jauge verticale premium"""
     v = safe_float(value, 0.0)
     rmin = safe_float(ref_min, 0.0)
     rmax = safe_float(ref_max, rmin + 1.0)
@@ -339,36 +309,29 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
     total = rmax - rmin
     pos_norm = np.clip((v - rmin) / total, 0, 1)
     
-    # Couleur selon statut
     if status == "optimal":
         main_col = "#059669"
-        bg_col = "#ECFDF5"
     elif status == "normal":
         main_col = "#0284C7"
-        bg_col = "#F0F9FF"
     elif status == "low":
         main_col = "#F59E0B"
-        bg_col = "#FFFBEB"
     elif status == "high":
         main_col = "#DC2626"
-        bg_col = "#FEF2F2"
     else:
         main_col = "#64748B"
-        bg_col = "#F1F5F9"
     
     fig, ax = plt.subplots(figsize=(1.8, 3.5), facecolor='white')
     ax.set_xlim(-0.55, 0.55)
     ax.set_ylim(-0.1, 1.15)
     ax.axis('off')
     
-    # Track vertical (fond)
     track_width = 0.18
+    from matplotlib.patches import Rectangle
     track = Rectangle((-track_width/2, 0), track_width, 1.0,
                       facecolor='#F1F5F9', edgecolor='#E2E8F0',
                       linewidth=1.5, zorder=1)
     ax.add_patch(track)
     
-    # Zone optimale (si définie)
     if opt_min is not None and opt_max is not None:
         omin = safe_float(opt_min, None)
         omax = safe_float(opt_max, None)
@@ -380,7 +343,6 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
                                 alpha=0.5, zorder=2)
             ax.add_patch(opt_zone)
     
-    # Barre de progression (gradient simulé)
     n_segments = 25
     for i in range(int(pos_norm * n_segments)):
         seg_y = i / n_segments
@@ -391,17 +353,14 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
                        alpha=alpha_val, zorder=3)
         ax.add_patch(seg)
     
-    # Indicateur circulaire
     marker = Circle((0, pos_norm), 0.12, facecolor=main_col,
                    edgecolor='white', linewidth=2.5, zorder=5)
     ax.add_patch(marker)
     
-    # Pulse ring autour du marqueur
     pulse = Circle((0, pos_norm), 0.18, fill=False,
                   edgecolor=main_col, linewidth=2, alpha=0.4, zorder=4)
     ax.add_patch(pulse)
     
-    # Labels
     ax.text(0, 1.08, name, ha='center', va='bottom',
             fontsize=9, fontweight='bold', color='#0A1628')
     
@@ -411,7 +370,6 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
     ax.text(0.32, pos_norm, unit, ha='left', va='center',
             fontsize=7.5, color=main_col, fontweight='600')
     
-    # Min/Max
     ax.text(-0.35, 0, f"{rmin:.0f}", ha='right', va='center',
             fontsize=7, color='#94A3B8')
     ax.text(-0.35, 1.0, f"{rmax:.0f}", ha='right', va='center',
@@ -426,7 +384,7 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
 
 
 def create_category_bars_premium(category_scores):
-    """Barres catégories avec design premium"""
+    """Barres catégories premium"""
     fig, ax = plt.subplots(figsize=(9.0, 5.2), facecolor='white')
     
     cats = list(category_scores.keys())
@@ -437,7 +395,6 @@ def create_category_bars_premium(category_scores):
     
     y_pos = np.arange(len(cats))
     
-    # Couleurs avec gradients
     colors_list = []
     for v in vals:
         if v >= 90:
@@ -449,11 +406,9 @@ def create_category_bars_premium(category_scores):
         else:
             colors_list.append('#DC2626')
     
-    # Barres avec edge
-    bars = ax.barh(y_pos, vals, height=0.65, color=colors_list,
-                   edgecolor='white', linewidth=2.5, alpha=0.92)
+    ax.barh(y_pos, vals, height=0.65, color=colors_list,
+            edgecolor='white', linewidth=2.5, alpha=0.92)
     
-    # Valeurs à droite
     for i, (yi, v, c) in enumerate(zip(y_pos, vals, colors_list)):
         ax.text(v + 1.8, yi, f"{v:.1f}", va='center', ha='left',
                 fontsize=10, fontweight='bold', color=c)
@@ -486,16 +441,12 @@ def create_category_bars_premium(category_scores):
 # REPORTLAB HELPERS
 # ============================================================
 
-def premium_section_title(text, font_map, size=16, color=None):
-    """Titre de section premium"""
-    if color is None:
-        color = PREMIUM_THEME["deep_navy"]
-    
+def premium_section_title(text, font_map, size=16):
     style = ParagraphStyle(
         "PremiumTitle",
         fontName=font_map["bold"],
         fontSize=size,
-        textColor=color,
+        textColor=PREMIUM_THEME["deep_navy"],
         spaceBefore=14,
         spaceAfter=10,
         leading=size * 1.3
@@ -503,17 +454,11 @@ def premium_section_title(text, font_map, size=16, color=None):
     return Paragraph(text, style)
 
 
-def premium_card(content_rows, col_widths, bg_color=None, border_color=None):
-    """Card premium avec ombre subtile simulée"""
-    if bg_color is None:
-        bg_color = PREMIUM_THEME["pearl"]
-    if border_color is None:
-        border_color = PREMIUM_THEME["silver"]
-    
+def premium_card(content_rows, col_widths):
     t = Table(content_rows, colWidths=col_widths)
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), bg_color),
-        ("BOX", (0, 0), (-1, -1), 1.2, border_color),
+        ("BACKGROUND", (0, 0), (-1, -1), PREMIUM_THEME["pearl"]),
+        ("BOX", (0, 0), (-1, -1), 1.2, PREMIUM_THEME["silver"]),
         ("LEFTPADDING", (0, 0), (-1, -1), 12),
         ("RIGHTPADDING", (0, 0), (-1, -1), 12),
         ("TOPPADDING", (0, 0), (-1, -1), 10),
@@ -523,41 +468,8 @@ def premium_card(content_rows, col_widths, bg_color=None, border_color=None):
     return t
 
 
-def status_badge_premium(status, font_map):
-    """Badge statut premium"""
-    color, bg = STATUS_COLORS.get(status.lower(), (PREMIUM_THEME["steel"], PREMIUM_THEME["cloud"]))
-    
-    labels = {
-        "optimal": "OPTIMAL",
-        "normal": "NORMAL",
-        "low": "BAS",
-        "high": "ÉLEVÉ"
-    }
-    label = labels.get(status.lower(), "N/A")
-    
-    style = ParagraphStyle(
-        "Badge",
-        fontName=font_map["bold"],
-        fontSize=8.5,
-        textColor=color,
-        alignment=TA_CENTER
-    )
-    p = Paragraph(f"<b>{label}</b>", style)
-    
-    t = Table([[p]], colWidths=[24*mm], rowHeights=[7*mm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, 0), bg),
-        ("BOX", (0, 0), (0, 0), 1.2, color),
-        ("ROUNDEDCORNERS", [3, 3, 3, 3]),
-        ("VALIGN", (0, 0), (0, 0), "MIDDLE"),
-        ("ALIGN", (0, 0), (0, 0), "CENTER"),
-    ]))
-    return t
-
-
-def divider_line(width=170, height=0.5):
-    """Ligne séparatrice subtile"""
-    t = Table([[""]], colWidths=[width*mm], rowHeights=[height*mm])
+def divider_line(width=170):
+    t = Table([[""]], colWidths=[width*mm], rowHeights=[0.5*mm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 0), PREMIUM_THEME["silver"]),
     ]))
@@ -565,20 +477,26 @@ def divider_line(width=170, height=0.5):
 
 
 # ============================================================
-# MAIN GENERATOR
+# MAIN GENERATOR - NOM COMPATIBLE APP.PY ⭐
 # ============================================================
 
-def generate_algolife_pdf_premium(
+def generate_algolife_pdf_report(
     patient_data,
     biomarker_results,
+    engine_results=None,  # Paramètre legacy ignoré
+    chart_buffer=None,     # Paramètre legacy ignoré
     health_score=None,
     biological_age=None,
     nutritional_needs=None,
     recommendations=None,
     biomarker_db=None,
+    max_gauges_abnormal=30,    # Paramètres legacy ignorés
+    max_gauges_watch=25,
+    max_gauges_normal=18,
 ):
     """
     ⭐ Générateur PDF ULTRA PREMIUM v7.0
+    Compatible avec app.py existant
     """
     if biomarker_db is None:
         biomarker_db = BiomarkerDatabase()
@@ -594,53 +512,34 @@ def generate_algolife_pdf_premium(
     
     styles = getSampleStyleSheet()
     
-    # === STYLES PREMIUM ===
     title_style = ParagraphStyle(
-        "Title",
-        fontName=font_map["bold"],
-        fontSize=34,
+        "Title", fontName=font_map["bold"], fontSize=34,
         textColor=PREMIUM_THEME["deep_navy"],
-        alignment=TA_CENTER,
-        spaceAfter=4,
-        leading=40
+        alignment=TA_CENTER, spaceAfter=4, leading=40
     )
     
     subtitle_style = ParagraphStyle(
-        "Subtitle",
-        fontName=font_map["regular"],
-        fontSize=12,
+        "Subtitle", fontName=font_map["regular"], fontSize=12,
         textColor=PREMIUM_THEME["steel"],
-        alignment=TA_CENTER,
-        spaceAfter=16,
-        leading=16
+        alignment=TA_CENTER, spaceAfter=16, leading=16
     )
     
     body_style = ParagraphStyle(
-        "Body",
-        fontName=font_map["regular"],
-        fontSize=10,
-        textColor=PREMIUM_THEME["slate"],
-        leading=15
+        "Body", fontName=font_map["regular"], fontSize=10,
+        textColor=PREMIUM_THEME["slate"], leading=15
     )
     
     small_style = ParagraphStyle(
-        "Small",
-        fontName=font_map["regular"],
-        fontSize=9,
-        textColor=PREMIUM_THEME["mist"],
-        leading=12
+        "Small", fontName=font_map["regular"], fontSize=9,
+        textColor=PREMIUM_THEME["mist"], leading=12
     )
     
-    # Normalize inputs
     patient_info = normalize_patient(patient_data)
     mode, biomarkers_dict, biomarkers_list = normalize_biomarkers(biomarker_results)
     
     story = []
     
-    # ============================================================
-    # COVER
-    # ============================================================
-    
+    # === COVER ===
     story.append(Spacer(1, 6*mm))
     story.append(Paragraph("ALGO-LIFE", title_style))
     story.append(Paragraph(
@@ -648,28 +547,21 @@ def generate_algolife_pdf_premium(
         subtitle_style
     ))
     
-    # Meta card
     meta_data = [[
         Paragraph(f"<b>Date du rapport</b><br/>{datetime.now().strftime('%d/%m/%Y')}", small_style),
         Paragraph(f"<b>Version</b><br/>v7.0 Premium", small_style)
     ]]
-    meta_card = premium_card(meta_data, [85*mm, 85*mm],
-                            bg_color=PREMIUM_THEME["cloud"],
-                            border_color=PREMIUM_THEME["silver"])
-    story.append(meta_card)
+    story.append(premium_card(meta_data, [85*mm, 85*mm]))
     story.append(Spacer(1, 12*mm))
     
-    # ============================================================
-    # PATIENT INFO
-    # ============================================================
-    
+    # === PATIENT ===
     story.append(premium_section_title("Informations Patient", font_map))
     
     p_data = [
         [Paragraph("<b>PATIENT</b>", small_style), 
-         Paragraph(patient_info.get("nom", "—"), body_style)],
+         Paragraph(patient_info.get("nom", patient_info.get("name", "—")), body_style)],
         [Paragraph("<b>GENRE</b>", small_style),
-         Paragraph(patient_info.get("sexe", "—"), body_style)],
+         Paragraph(patient_info.get("sexe", patient_info.get("sex", "—")), body_style)],
         [Paragraph("<b>ÂGE</b>", small_style),
          Paragraph(f"{patient_info.get('age', '—')} ans", body_style)],
         [Paragraph("<b>TAILLE / POIDS</b>", small_style),
@@ -680,17 +572,12 @@ def generate_algolife_pdf_premium(
          Paragraph(patient_info.get("prelevement_date", "—"), body_style)],
     ]
     
-    p_card = premium_card(p_data, [45*mm, 125*mm])
-    story.append(p_card)
+    story.append(premium_card(p_data, [45*mm, 125*mm]))
     story.append(Spacer(1, 12*mm))
     
-    # ============================================================
-    # BIO AGE HERO ⭐
-    # ============================================================
-    
+    # === BIO AGE ===
     story.append(premium_section_title("Âge Biologique & Score Santé", font_map, size=18))
     
-    # Visuel âge biologique ultra premium
     if biological_age:
         hero_img = create_bioage_ultra_premium(
             biological_age.get("biological_age"),
@@ -700,7 +587,7 @@ def generate_algolife_pdf_premium(
     
     story.append(Spacer(1, 10*mm))
     
-    # Score santé card
+    # Score
     score_val = safe_float((health_score or {}).get("global_score"), 0)
     grade = (health_score or {}).get("grade", "—")
     
@@ -721,12 +608,19 @@ def generate_algolife_pdf_premium(
                  ParagraphStyle("Score", alignment=TA_CENTER, fontName=font_map["bold"]))
     ]]
     
-    score_card = premium_card(score_data, [170*mm],
-                             bg_color=score_bg, border_color=score_col)
-    story.append(score_card)
+    score_table = Table(score_data, colWidths=[170*mm])
+    score_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 0), score_bg),
+        ("BOX", (0, 0), (0, 0), 1.2, score_col),
+        ("LEFTPADDING", (0, 0), (0, 0), 12),
+        ("RIGHTPADDING", (0, 0), (0, 0), 12),
+        ("TOPPADDING", (0, 0), (0, 0), 12),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 12),
+    ]))
+    story.append(score_table)
     story.append(Spacer(1, 10*mm))
     
-    # Barres catégories
+    # Catégories
     if health_score and health_score.get("category_scores"):
         story.append(premium_section_title("Scores par Catégorie", font_map, size=14))
         bars_img = create_category_bars_premium(health_score["category_scores"])
@@ -734,18 +628,14 @@ def generate_algolife_pdf_premium(
     
     story.append(PageBreak())
     
-    # ============================================================
-    # BIOMARQUEURS AVEC JAUGES VERTICALES ⭐
-    # ============================================================
-    
+    # === BIOMARQUEURS ===
     story.append(premium_section_title("Biomarqueurs — Analyse Détaillée", font_map, size=18))
     story.append(Paragraph(
-        "Jauges verticales sophistiquées avec zones optimales et statuts colorimétriques",
+        "Jauges verticales sophistiquées avec zones optimales",
         small_style
     ))
     story.append(Spacer(1, 8*mm))
     
-    # Classification
     refs_db = biomarker_db.get_reference_ranges()
     normaux, abnormal = [], []
     
@@ -781,14 +671,11 @@ def generate_algolife_pdf_premium(
         else:
             abnormal.append(item)
     
-    # Summary
     summary_data = [[
         Paragraph(f"<b>Normaux</b><br/>{len(normaux)}", body_style),
         Paragraph(f"<b>Anormaux</b><br/>{len(abnormal)}", body_style),
     ]]
-    summary_card = premium_card(summary_data, [85*mm, 85*mm],
-                                bg_color=PREMIUM_THEME["cloud"])
-    story.append(summary_card)
+    story.append(premium_card(summary_data, [85*mm, 85*mm]))
     story.append(Spacer(1, 8*mm))
     story.append(divider_line())
     story.append(Spacer(1, 8*mm))
@@ -817,11 +704,9 @@ def generate_algolife_pdf_premium(
         if not items:
             return
         
-        story.append(premium_section_title(section_title, font_map, size=13,
-                                          color=PREMIUM_THEME["slate"]))
+        story.append(premium_section_title(section_title, font_map, size=13,))
         story.append(Spacer(1, 4*mm))
         
-        # Affichage en grille 4 colonnes
         for i in range(0, len(items), 4):
             batch = items[i:i+4]
             gauges = []
@@ -838,7 +723,6 @@ def generate_algolife_pdf_premium(
                 )
                 gauges.append(Image(gauge_img, width=40*mm, height=62*mm))
             
-            # Padding pour grille incomplète
             while len(gauges) < 4:
                 gauges.append(Paragraph("", body_style))
             
@@ -850,16 +734,12 @@ def generate_algolife_pdf_premium(
             story.append(gauge_row)
             story.append(Spacer(1, 4*mm))
     
-    # Afficher anormaux puis normaux
     render_biomarkers(abnormal[:20], "⚠️ Biomarqueurs Anormaux")
     render_biomarkers(normaux[:20], "✅ Biomarqueurs Normaux")
     
     story.append(PageBreak())
     
-    # ============================================================
-    # NUTRITION & RECOMMANDATIONS
-    # ============================================================
-    
+    # === NUTRITION ===
     if nutritional_needs:
         story.append(premium_section_title("Besoins Nutritionnels", font_map))
         
@@ -878,10 +758,10 @@ def generate_algolife_pdf_premium(
              Paragraph(f"{safe_float(nutritional_needs.get('carbs_g'), 0):.0f} g/j", body_style)],
         ]
         
-        nutri_card = premium_card(nutri_data, [70*mm, 100*mm])
-        story.append(nutri_card)
+        story.append(premium_card(nutri_data, [70*mm, 100*mm]))
         story.append(Spacer(1, 10*mm))
     
+    # === RECOMMANDATIONS ===
     if recommendations:
         story.append(premium_section_title("Recommandations Personnalisées", font_map))
         
@@ -908,21 +788,15 @@ def generate_algolife_pdf_premium(
             for a in recs["alimentation"][:10]:
                 story.append(Paragraph(f"• {a}", body_style))
     
-    # ============================================================
-    # FOOTER
-    # ============================================================
-    
+    # === FOOTER ===
     story.append(Spacer(1, 15*mm))
     story.append(divider_line())
     story.append(Spacer(1, 8*mm))
     
     footer_style = ParagraphStyle(
-        "Footer",
-        fontName=font_map["regular"],
-        fontSize=8.5,
+        "Footer", fontName=font_map["regular"], fontSize=8.5,
         textColor=PREMIUM_THEME["mist"],
-        alignment=TA_CENTER,
-        leading=12
+        alignment=TA_CENTER, leading=12
     )
     
     story.append(Paragraph(
@@ -935,7 +809,6 @@ def generate_algolife_pdf_premium(
     ))
     story.append(Paragraph("© 2026 — Document médical confidentiel", footer_style))
     
-    # BUILD
     try:
         doc.build(story)
         buffer.seek(0)
@@ -948,6 +821,8 @@ def generate_algolife_pdf_premium(
         return buffer
 
 
+__all__ = ["generate_algolife_pdf_report", "BiomarkerDatabase"]
+
 if __name__ == "__main__":
     print("✅ ALGO-LIFE PDF Generator v7.0 ULTRA PREMIUM")
-    print("🎨 Design sophistiqué - Jauges verticales - Âge bio hero card")
+    print("🔧 Compatible app.py - Fonction: generate_algolife_pdf_report()")
