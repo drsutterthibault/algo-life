@@ -1,13 +1,9 @@
 """
-ALGO-LIFE PDF Generator v7.2 ULTRA PREMIUM (LAYOUT+NORMAL+WATCH)
-✅ Mise en page améliorée (header/footer, cards, sections)
-✅ Ajout section "À surveiller" (dans la norme mais hors zone optimale)
-✅ Templates complets: Anormaux / À surveiller / Normaux+Optimaux
-✅ Robustesse biomarker_results: dict simple, dict structuré (value/unit/ref), liste
-✅ Fix matplotlib alpha clamp + close safe
-✅ ReportLab: couleurs hex HTML dans <font color="#RRGGBB">
-
-Compatible avec app.py existant - Garde le nom generate_algolife_pdf_report()
+ALGO-LIFE PDF Generator v7.2 ULTRA PREMIUM (LAYOUT SAFE + NORMAL TEMPLATE)
+✅ Fix: LayoutError (KeepTogether removed + fixed cell heights + safe page breaks)
+✅ Fix: fallback error Paragraph HTML escaping (avoids paraparser unclosed tags)
+✅ Includes templates for: abnormal + watch + normal/optimal (with same premium layout)
+✅ Compatible with app.py existing signature: generate_algolife_pdf_report()
 
 Auteur: Dr Thibault SUTTER
 Date: Janvier 2026
@@ -17,7 +13,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-    PageBreak, Image, KeepTogether
+    PageBreak, Image
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
@@ -28,13 +24,15 @@ from reportlab.pdfbase.ttfonts import TTFont
 from io import BytesIO
 from datetime import datetime
 import io
+import html
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, FancyBboxPatch, Rectangle
 
 
 # ============================================================
-# THEME
+# PALETTE ULTRA PREMIUM
 # ============================================================
 
 PREMIUM_THEME = {
@@ -53,21 +51,22 @@ PREMIUM_THEME = {
     "sapphire_subtle": colors.HexColor("#F0F9FF"),
     "gold_subtle": colors.HexColor("#FFFBEB"),
     "ruby_subtle": colors.HexColor("#FEF2F2"),
-    "shadow": colors.HexColor("#0B1220"),
+    "unknown": colors.HexColor("#64748B"),
+    "unknown_subtle": colors.HexColor("#F1F5F9"),
 }
 
 STATUS_COLORS = {
     "optimal": (PREMIUM_THEME["emerald"], PREMIUM_THEME["emerald_subtle"]),
     "normal": (PREMIUM_THEME["sapphire"], PREMIUM_THEME["sapphire_subtle"]),
-    "watch":  (PREMIUM_THEME["gold"], PREMIUM_THEME["gold_subtle"]),
-    "low":    (PREMIUM_THEME["gold"], PREMIUM_THEME["gold_subtle"]),
-    "high":   (PREMIUM_THEME["ruby"], PREMIUM_THEME["ruby_subtle"]),
-    "unknown": (PREMIUM_THEME["steel"], PREMIUM_THEME["cloud"]),
+    "watch": (PREMIUM_THEME["gold"], PREMIUM_THEME["gold_subtle"]),
+    "low": (PREMIUM_THEME["gold"], PREMIUM_THEME["gold_subtle"]),
+    "high": (PREMIUM_THEME["ruby"], PREMIUM_THEME["ruby_subtle"]),
+    "unknown": (PREMIUM_THEME["unknown"], PREMIUM_THEME["unknown_subtle"]),
 }
 
 
 # ============================================================
-# UTILS
+# UTILS SAFE
 # ============================================================
 
 def clamp01(x: float) -> float:
@@ -81,7 +80,11 @@ def clamp01(x: float) -> float:
         return 1.0
     return x
 
+
 def rl_color_to_hex(c) -> str:
+    """
+    Convertit une couleur ReportLab (0..1 floats) en "#RRGGBB" utilisable dans <font color="...">
+    """
     try:
         r = int(round(c.red * 255))
         g = int(round(c.green * 255))
@@ -93,24 +96,19 @@ def rl_color_to_hex(c) -> str:
     except Exception:
         return "#0A1628"
 
+
 def safe_float(x, default=None):
     try:
         return float(x) if x is not None else default
     except Exception:
         return default
 
-def canonicalize_key(raw_key: str) -> str:
-    k = (raw_key or "").strip().lower().replace(" ", "_")
-    return ALIASES.get(k, k)
 
-def now_str_fr() -> str:
-    return datetime.now().strftime("%d/%m/%Y")
-
-def _truncate(s: str, n: int = 34) -> str:
+def _truncate(s: str, n: int) -> str:
     s = (s or "").strip()
     if len(s) <= n:
         return s
-    return s[: n - 1].rstrip() + "…"
+    return s[: max(0, n - 1)].rstrip() + "…"
 
 
 # ============================================================
@@ -118,12 +116,6 @@ def _truncate(s: str, n: int = 34) -> str:
 # ============================================================
 
 def register_fonts():
-    """
-    Option: mets Inter dans /assets/fonts/
-    - Inter-Regular.ttf
-    - Inter-SemiBold.ttf
-    - Inter-Bold.ttf
-    """
     try:
         pdfmetrics.registerFont(TTFont("Inter", "assets/fonts/Inter-Regular.ttf"))
         pdfmetrics.registerFont(TTFont("InterSB", "assets/fonts/Inter-SemiBold.ttf"))
@@ -134,7 +126,7 @@ def register_fonts():
 
 
 # ============================================================
-# BIOMARKER DATABASE (exemple minimal)
+# BIOMARKER DATABASE (DEMO)
 # ============================================================
 
 class BiomarkerDatabase:
@@ -171,7 +163,6 @@ class BiomarkerDatabase:
         except Exception:
             return {"status": "unknown", "interpretation": "Valeur invalide"}
 
-        # normal/optimal sex-specific
         if sexe == "Masculin" and "normal_male" in ref:
             normal = ref["normal_male"]
             optimal = ref.get("optimal_male", ref.get("optimal"))
@@ -182,26 +173,20 @@ class BiomarkerDatabase:
             normal = ref.get("normal", [0, 100])
             optimal = ref.get("optimal")
 
-        unit = ref.get("unit", "")
-
-        # Status "optimal"
         if optimal and len(optimal) == 2 and optimal[0] <= val <= optimal[1]:
-            return {"status": "optimal", "interpretation": f"Valeur optimale ({val:.2f} {unit})"}
-
-        # Status "normal" (dans la norme)
-        if normal and len(normal) == 2 and normal[0] <= val <= normal[1]:
-            return {"status": "normal", "interpretation": f"Valeur normale ({val:.2f} {unit})"}
-
-        # low/high
-        if val < normal[0]:
+            return {"status": "optimal", "interpretation": f"Valeur optimale ({val:.2f} {ref['unit']})"}
+        elif normal[0] <= val <= normal[1]:
+            return {"status": "normal", "interpretation": f"Valeur normale ({val:.2f} {ref['unit']})"}
+        elif val < normal[0]:
             deficit = ((normal[0] - val) / normal[0]) * 100 if normal[0] else 0
-            return {"status": "low", "interpretation": f"Valeur basse ({val:.2f} {unit}). Déficit ~{deficit:.0f}%"}
-        excess = ((val - normal[1]) / normal[1]) * 100 if normal[1] else 0
-        return {"status": "high", "interpretation": f"Valeur élevée ({val:.2f} {unit}). Excès ~{excess:.0f}%"}
+            return {"status": "low", "interpretation": f"Valeur basse ({val:.2f} {ref['unit']}). Déficit ~{deficit:.0f}%"}
+        else:
+            excess = ((val - normal[1]) / normal[1]) * 100 if normal[1] else 0
+            return {"status": "high", "interpretation": f"Valeur élevée ({val:.2f} {ref['unit']}). Excès ~{excess:.0f}%"}
 
 
 # ============================================================
-# INPUT NORMALIZATION (robuste)
+# INPUT NORMALIZERS
 # ============================================================
 
 def normalize_patient(patient_data):
@@ -209,45 +194,15 @@ def normalize_patient(patient_data):
         return {}
     return patient_data.get("patient_info", patient_data)
 
+
 def normalize_biomarkers(biomarker_results):
     """
-    Supporte :
-      1) dict simple: {"crp": 1.2, "zinc": 90}
-      2) dict structuré: {"crp": {"value":1.2,"unit":"mg/L","ref_low":0,"ref_high":5}, ...}
-      3) list: [{"key":"crp","value":1.2,"unit":"mg/L"}, ...]
-    Retour:
-      mode, dict_simple, list_items
+    Supports:
+      - dict: {"crp": 1.2, ...}
+      - list: [{"key":"crp","value":1.2,"unit":"mg/L"}, ...]
     """
-    # dict
     if isinstance(biomarker_results, dict):
-        # détecte dict structuré
-        structured = False
-        for v in biomarker_results.values():
-            if isinstance(v, dict) and ("value" in v or "unit" in v or "ref_low" in v or "ref_high" in v):
-                structured = True
-                break
-
-        if not structured:
-            return "dict_simple", biomarker_results, []
-
-        # convert structuré -> liste
-        cleaned = []
-        for k, v in biomarker_results.items():
-            if isinstance(v, dict):
-                cleaned.append({
-                    "key": k,
-                    "name": v.get("name") or str(k).replace("_", " ").title(),
-                    "value": v.get("value"),
-                    "unit": v.get("unit", ""),
-                    "ref_low": v.get("ref_low"),
-                    "ref_high": v.get("ref_high"),
-                    "ref_type": v.get("ref_type"),
-                })
-            else:
-                cleaned.append({"key": k, "name": str(k).replace("_", " ").title(), "value": v, "unit": ""})
-        return "list", {}, cleaned
-
-    # list
+        return "dict", biomarker_results, []
     if isinstance(biomarker_results, list):
         cleaned = []
         for it in biomarker_results:
@@ -258,25 +213,29 @@ def normalize_biomarkers(biomarker_results):
                 "name": it.get("name") or (it.get("key") or "—").replace("_", " ").title(),
                 "value": it.get("value"),
                 "unit": it.get("unit", ""),
-                "ref_low": it.get("ref_low"),
-                "ref_high": it.get("ref_high"),
-                "ref_type": it.get("ref_type"),
             })
         return "list", {}, cleaned
-
     return "unknown", {}, []
 
 
 ALIASES = {
-    "crp_us": "crp", "hs_crp": "crp", "insulin": "insuline",
-    "homa": "homa_index", "quicki": "quicki_index",
-    "ferritin": "ferritine", "zn": "zinc", "se": "selenium",
-    "vit_d": "vitamine_d", "vitamin_d": "vitamine_d",
+    "crp_us": "crp", "hs_crp": "crp",
+    "insulin": "insuline",
+    "homa": "homa_index",
+    "quicki": "quicki_index",
+    "ferritin": "ferritine",
+    "zn": "zinc",
+    "se": "selenium",
 }
 
 
+def canonical_key(raw_key):
+    k = (raw_key or "").strip().lower().replace(" ", "_")
+    return ALIASES.get(k, k)
+
+
 # ============================================================
-# MATPLOTLIB VISUALS
+# MATPLOTLIB VISUALS (SAFE ALPHA)
 # ============================================================
 
 def create_bioage_ultra_premium(bio_age, chrono_age):
@@ -303,6 +262,7 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
 
     fig = plt.figure(figsize=(9.5, 4.2), facecolor="white")
 
+    # Cercle gauche
     ax1 = fig.add_axes([0.02, 0.08, 0.42, 0.84])
     ax1.set_aspect("equal")
     ax1.axis("off")
@@ -318,7 +278,8 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     for r in np.linspace(0.95, 1.05, 8):
         alpha_val = 0.15 + (1.05 - r) * 0.85 / 0.1
         alpha_val = clamp01(alpha_val)
-        ring = Circle((0, 0), r, fill=False, edgecolor=main_color, linewidth=2.5, alpha=alpha_val, zorder=3)
+        ring = Circle((0, 0), r, fill=False, edgecolor=main_color,
+                      linewidth=2.5, alpha=alpha_val, zorder=3)
         ax1.add_patch(ring)
 
     center = Circle((0, 0), 0.88, color="white", zorder=4)
@@ -338,6 +299,7 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     ax1.text(delta_x, delta_y - 0.18, f"{delta:+.1f}", ha="center", va="center",
              fontsize=9, fontweight="bold", color=main_color, zorder=6)
 
+    # Info droite
     ax2 = fig.add_axes([0.48, 0.08, 0.50, 0.84])
     ax2.axis("off")
     ax2.set_xlim(0, 1)
@@ -349,8 +311,10 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     box = FancyBboxPatch(
         (0, 0.72), 0.96, 0.10,
         boxstyle="round,pad=0.01",
-        edgecolor=main_color, facecolor=bg_color,
-        linewidth=1.5, alpha=0.6
+        edgecolor=main_color,
+        facecolor=bg_color,
+        linewidth=1.5,
+        alpha=0.6
     )
     ax2.add_patch(box)
     ax2.text(0.48, 0.77, sublabel, fontsize=11, fontweight="600",
@@ -371,6 +335,7 @@ def create_bioage_ultra_premium(bio_age, chrono_age):
     ax2.text(0.98, y_pos, f"{delta:+.1f} ans", fontsize=13, fontweight="bold",
              color=main_color, ha="right")
 
+    # Timeline
     y_pos -= 0.18
     timeline_y = y_pos
     ax2.plot([0.08, 0.92], [timeline_y, timeline_y], color="#CBD5E1",
@@ -414,18 +379,16 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
         main_col = "#059669"
     elif status == "normal":
         main_col = "#0284C7"
-    elif status == "watch":
-        main_col = "#F59E0B"
-    elif status == "low":
+    elif status in ("watch", "low"):
         main_col = "#F59E0B"
     elif status == "high":
         main_col = "#DC2626"
     else:
         main_col = "#64748B"
 
-    fig, ax = plt.subplots(figsize=(1.8, 3.55), facecolor="white")
-    ax.set_xlim(-0.58, 0.58)
-    ax.set_ylim(-0.12, 1.18)
+    fig, ax = plt.subplots(figsize=(1.8, 3.5), facecolor="white")
+    ax.set_xlim(-0.55, 0.55)
+    ax.set_ylim(-0.1, 1.15)
     ax.axis("off")
 
     track_width = 0.18
@@ -436,7 +399,7 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
     )
     ax.add_patch(track)
 
-    # zone optimale
+    # Optimal zone
     if opt_min is not None and opt_max is not None:
         omin = safe_float(opt_min, None)
         omax = safe_float(opt_max, None)
@@ -446,16 +409,15 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
             opt_zone = Rectangle(
                 (-track_width / 2, opt_start), track_width, opt_height,
                 facecolor="#D1FAE5", edgecolor="none",
-                alpha=0.45, zorder=2
+                alpha=0.5, zorder=2
             )
             ax.add_patch(opt_zone)
 
-    # segments
-    n_segments = 26
+    n_segments = 25
     for i in range(int(pos_norm * n_segments)):
         seg_y = i / n_segments
         seg_h = 1.0 / n_segments
-        alpha_val = clamp01(0.28 + (i / n_segments) * 0.72)
+        alpha_val = clamp01(0.3 + (i / n_segments) * 0.7)
         seg = Rectangle(
             (-track_width / 2, seg_y), track_width, seg_h,
             facecolor=main_col, edgecolor="none",
@@ -464,31 +426,29 @@ def create_gauge_vertical_premium(name, value, ref_min, ref_max,
         ax.add_patch(seg)
 
     marker = Circle((0, pos_norm), 0.12, facecolor=main_col,
-                    edgecolor="white", linewidth=2.5, zorder=6)
+                    edgecolor="white", linewidth=2.5, zorder=5)
     ax.add_patch(marker)
 
     pulse = Circle((0, pos_norm), 0.18, fill=False,
                    edgecolor=main_col, linewidth=2,
-                   alpha=0.35, zorder=5)
+                   alpha=0.4, zorder=4)
     ax.add_patch(pulse)
 
-    ax.text(0, 1.085, _truncate(name, 24), ha="center", va="bottom",
+    ax.text(0, 1.08, _truncate(name, 18), ha="center", va="bottom",
             fontsize=9, fontweight="bold", color="#0A1628")
-
     ax.text(0, pos_norm, f"{v:.1f}", ha="center", va="center",
-            fontsize=8.6, fontweight="bold", color="white", zorder=7)
-
+            fontsize=8.5, fontweight="bold", color="white", zorder=6)
     if unit:
-        ax.text(0.33, pos_norm, unit, ha="left", va="center",
-                fontsize=7.4, color=main_col, fontweight="600")
+        ax.text(0.32, pos_norm, _truncate(unit, 10), ha="left", va="center",
+                fontsize=7.5, color=main_col, fontweight="600")
 
-    ax.text(-0.37, 0, f"{rmin:.0f}", ha="right", va="center",
+    ax.text(-0.35, 0, f"{rmin:.0f}", ha="right", va="center",
             fontsize=7, color="#94A3B8")
-    ax.text(-0.37, 1.0, f"{rmax:.0f}", ha="right", va="center",
+    ax.text(-0.35, 1.0, f"{rmax:.0f}", ha="right", va="center",
             fontsize=7, color="#94A3B8")
 
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=220, bbox_inches="tight",
+    plt.savefig(buf, format="png", dpi=200, bbox_inches="tight",
                 facecolor="white", transparent=True)
     buf.seek(0)
     plt.close(fig)
@@ -501,6 +461,7 @@ def create_category_bars_premium(category_scores):
 
     cats = list(category_scores.keys())
     vals = [safe_float(category_scores[k], 0.0) for k in cats]
+
     cats = cats[::-1]
     vals = vals[::-1]
     y_pos = np.arange(len(cats))
@@ -526,7 +487,6 @@ def create_category_bars_premium(category_scores):
     ax.set_yticks(y_pos)
     ax.set_yticklabels([c.replace("_", " ").title() for c in cats],
                        fontsize=10, fontweight="600", color="#1E293B")
-
     ax.set_xlim(0, 108)
     ax.set_xlabel("Score (/100)", fontsize=11, fontweight="bold",
                   color="#0A1628", labelpad=10)
@@ -535,6 +495,7 @@ def create_category_bars_premium(category_scores):
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color("#E2E8F0")
     ax.spines["bottom"].set_color("#E2E8F0")
+
     ax.grid(axis="x", alpha=0.12, linestyle="--", linewidth=1, color="#CBD5E1")
     ax.tick_params(colors="#64748B", labelsize=9)
 
@@ -547,96 +508,59 @@ def create_category_bars_premium(category_scores):
 
 
 # ============================================================
-# REPORTLAB UI
+# REPORTLAB HELPERS
 # ============================================================
 
 def _make_styles(font_map):
-    base = getSampleStyleSheet()
+    styles = getSampleStyleSheet()
 
-    styles = {}
-    styles["title"] = ParagraphStyle(
-        "AL_Title",
-        fontName=font_map["bold"], fontSize=34,
+    title_style = ParagraphStyle(
+        "AL_Title", fontName=font_map["bold"], fontSize=34,
         textColor=PREMIUM_THEME["deep_navy"],
         alignment=TA_CENTER, spaceAfter=4, leading=40
     )
-    styles["subtitle"] = ParagraphStyle(
-        "AL_Subtitle",
-        fontName=font_map["regular"], fontSize=12,
+    subtitle_style = ParagraphStyle(
+        "AL_Subtitle", fontName=font_map["regular"], fontSize=12,
         textColor=PREMIUM_THEME["steel"],
         alignment=TA_CENTER, spaceAfter=16, leading=16
     )
-    styles["body"] = ParagraphStyle(
-        "AL_Body",
-        fontName=font_map["regular"], fontSize=10,
-        textColor=PREMIUM_THEME["slate"],
-        leading=15
+    body_style = ParagraphStyle(
+        "AL_Body", fontName=font_map["regular"], fontSize=10,
+        textColor=PREMIUM_THEME["slate"], leading=14.5
     )
-    styles["body_small"] = ParagraphStyle(
-        "AL_BodySmall",
-        fontName=font_map["regular"], fontSize=9,
-        textColor=PREMIUM_THEME["steel"],
-        leading=13
+    small_style = ParagraphStyle(
+        "AL_Small", fontName=font_map["regular"], fontSize=9,
+        textColor=PREMIUM_THEME["mist"], leading=12
     )
-    styles["micro"] = ParagraphStyle(
-        "AL_Micro",
-        fontName=font_map["regular"], fontSize=8.6,
-        textColor=PREMIUM_THEME["mist"],
-        leading=11.5
-    )
-    styles["kpi"] = ParagraphStyle(
-        "AL_KPI",
-        fontName=font_map["bold"], fontSize=18,
-        textColor=PREMIUM_THEME["deep_navy"],
-        alignment=TA_CENTER,
-        leading=20
-    )
-    styles["kpi_label"] = ParagraphStyle(
-        "AL_KPI_Label",
-        fontName=font_map["semibold"], fontSize=9,
-        textColor=PREMIUM_THEME["steel"],
-        alignment=TA_CENTER,
-        leading=11
-    )
-    styles["section"] = ParagraphStyle(
-        "AL_Section",
-        fontName=font_map["bold"],
-        fontSize=16,
-        textColor=PREMIUM_THEME["deep_navy"],
-        spaceBefore=14,
-        spaceAfter=10,
-        leading=20
-    )
-    styles["section_small"] = ParagraphStyle(
-        "AL_SectionSmall",
-        fontName=font_map["bold"],
-        fontSize=13,
-        textColor=PREMIUM_THEME["deep_navy"],
-        spaceBefore=10,
-        spaceAfter=8,
-        leading=16
-    )
-    return styles
+    return {
+        "base": styles,
+        "title": title_style,
+        "subtitle": subtitle_style,
+        "body": body_style,
+        "small": small_style,
+    }
 
 
 def premium_section_title(text, styles, size=16):
-    if size >= 16:
-        return Paragraph(text, styles["section"])
-    # clone léger
-    st = ParagraphStyle(
-        f"AL_Section_{size}_{abs(hash(text))}",
-        parent=styles["section_small"],
+    style = ParagraphStyle(
+        f"AL_Sec_{size}_{abs(hash(text))}",
+        fontName=styles["body"].fontName.replace("Regular", "").replace("AL_Body", styles["body"].fontName),
         fontSize=size,
+        textColor=PREMIUM_THEME["deep_navy"],
+        spaceBefore=12,
+        spaceAfter=8,
         leading=size * 1.25
     )
-    return Paragraph(text, st)
+    # Use bold if available
+    style.fontName = style.fontName if "Bold" in style.fontName else style.fontName
+    return Paragraph(text, style)
 
 
-def premium_card(content_rows, col_widths, bg=PREMIUM_THEME["pearl"], border=PREMIUM_THEME["silver"]):
+def premium_card(content_rows, col_widths):
     t = Table(content_rows, colWidths=col_widths)
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), bg),
-        ("BOX", (0, 0), (-1, -1), 1.15, border),
+        ("BACKGROUND", (0, 0), (-1, -1), PREMIUM_THEME["pearl"]),
+        ("BOX", (0, 0), (-1, -1), 1.1, PREMIUM_THEME["silver"]),
         ("LEFTPADDING", (0, 0), (-1, -1), 12),
         ("RIGHTPADDING", (0, 0), (-1, -1), 12),
         ("TOPPADDING", (0, 0), (-1, -1), 10),
@@ -646,86 +570,40 @@ def premium_card(content_rows, col_widths, bg=PREMIUM_THEME["pearl"], border=PRE
     return t
 
 
-def divider_line(width_mm=170):
-    t = Table([[""]], colWidths=[width_mm * mm], rowHeights=[0.55 * mm])
+def divider_line(width=170):
+    t = Table([[""]], colWidths=[width * mm], rowHeights=[0.6 * mm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 0), PREMIUM_THEME["silver"]),
     ]))
     return t
 
 
-def kpi_row(kpis, styles):
-    """
-    kpis: list of (label, value_str, status_key)
-    """
-    cells = []
-    colw = []
-    for label, val, stt in kpis:
-        col, bg = STATUS_COLORS.get(stt, STATUS_COLORS["unknown"])
-        cell = Table(
-            [[Paragraph(val, styles["kpi"])],
-             [Paragraph(label, styles["kpi_label"])]],
-            colWidths=[42.0 * mm]
-        )
-        cell.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), bg),
-            ("BOX", (0, 0), (-1, -1), 1.1, col),
-            ("TOPPADDING", (0, 0), (-1, -1), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        cells.append(cell)
-        colw.append(43.0 * mm)
-
-    row = Table([cells], colWidths=colw)
-    row.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-    ]))
-    return row
-
-
-# ============================================================
-# HEADER / FOOTER
-# ============================================================
-
 def _draw_header_footer(canvas, doc, font_map):
     canvas.saveState()
+    w, h = A4
 
-    # header line
+    # Header line
     canvas.setStrokeColor(PREMIUM_THEME["silver"])
-    canvas.setLineWidth(0.7)
-    canvas.line(doc.leftMargin, A4[1] - doc.topMargin + 6*mm, A4[0] - doc.rightMargin, A4[1] - doc.topMargin + 6*mm)
+    canvas.setLineWidth(0.8)
+    canvas.line(20*mm, h - 16*mm + 5*mm, w - 20*mm, h - 16*mm + 5*mm)
 
-    # header text
-    canvas.setFillColor(PREMIUM_THEME["steel"])
-    canvas.setFont(font_map["semibold"], 9)
-    canvas.drawString(doc.leftMargin, A4[1] - doc.topMargin + 9*mm, "ALGO-LIFE — Rapport Premium")
-    canvas.setFont(font_map["regular"], 8.5)
-    canvas.drawRightString(A4[0] - doc.rightMargin, A4[1] - doc.topMargin + 9*mm, now_str_fr())
-
-    # footer
+    # Footer
     canvas.setStrokeColor(PREMIUM_THEME["silver"])
-    canvas.setLineWidth(0.7)
-    canvas.line(doc.leftMargin, doc.bottomMargin - 6*mm, A4[0] - doc.rightMargin, doc.bottomMargin - 6*mm)
+    canvas.setLineWidth(0.8)
+    canvas.line(20*mm, 16*mm - 6*mm, w - 20*mm, 16*mm - 6*mm)
 
     canvas.setFillColor(PREMIUM_THEME["mist"])
-    canvas.setFont(font_map["regular"], 8.2)
-    canvas.drawString(doc.leftMargin, doc.bottomMargin - 10*mm, "© 2026 — Document médical confidentiel")
-    canvas.drawRightString(A4[0] - doc.rightMargin, doc.bottomMargin - 10*mm, f"Page {doc.page}")
+    canvas.setFont(font_map["regular"], 8.5)
+    canvas.drawCentredString(w/2, 11*mm, f"ALGO-LIFE — Rapport Premium • Page {doc.page}")
 
     canvas.restoreState()
 
 
 # ============================================================
-# BIOMARKERS: bounds & watch logic
+# BIOMARKER GRID (LAYOUT SAFE)
 # ============================================================
 
 def get_bounds(ref_data, sexe):
-    # normal bounds
     if isinstance(ref_data.get("normal"), (list, tuple)):
         rmin, rmax = ref_data["normal"]
     elif sexe == "Masculin" and isinstance(ref_data.get("normal_male"), (list, tuple)):
@@ -746,48 +624,26 @@ def get_bounds(ref_data, sexe):
     return rmin, rmax, omin, omax
 
 
-def compute_watch_status(classification_status: str, value: float, ref_data: dict, sexe: str) -> str:
-    """
-    Règle simple:
-      - optimal -> optimal
-      - low/high -> low/high
-      - normal mais hors optimal -> watch
-      - normal et dans optimal -> optimal (si DB l'a pas déjà classé)
-    """
-    stt = (classification_status or "unknown").lower()
-    if stt in ("low", "high", "unknown"):
-        return stt
-    if stt == "optimal":
-        return "optimal"
-
-    # stt == "normal" -> check optimal zone
-    rmin, rmax, omin, omax = get_bounds(ref_data, sexe)
-    if omin is not None and omax is not None:
-        if omin <= value <= omax:
-            return "optimal"
-        return "watch"
-    # pas d'optimal => normal classique
-    return "normal"
-
-
-def biomarker_sort_key(item):
-    # ordre: high/low -> watch -> normal -> optimal
-    st = item.get("status_final", "unknown")
-    order = {"high": 0, "low": 0, "watch": 1, "normal": 2, "optimal": 3, "unknown": 4}
-    return (order.get(st, 9), item.get("name", ""))
-
-
-def render_biomarker_grid(story, items, title, styles, font_map, sexe, max_items=24):
+def render_biomarker_grid(story, items, section_title, styles, font_map, sexe, max_items=24):
     if not items:
         return
 
-    story.append(premium_section_title(title, styles, size=13))
+    body_style = styles["body"]
+    small_style = styles["small"]
+
+    story.append(premium_section_title(section_title, styles, size=13))
     story.append(Spacer(1, 3.5 * mm))
 
-    # 4 gauges per row
     items = items[:max_items]
-    for i in range(0, len(items), 4):
-        batch = items[i:i+4]
+
+    # Layout constants (fixed -> prevents LayoutError)
+    COL_W = 42.5 * mm
+    ROW_H = 86 * mm
+    IMG_W = 40 * mm
+    IMG_H = 62 * mm
+
+    for idx in range(0, len(items), 4):
+        batch = items[idx:idx + 4]
         cells = []
 
         for it in batch:
@@ -801,52 +657,67 @@ def render_biomarker_grid(story, items, title, styles, font_map, sexe, max_items
             )
 
             stt = it["status_final"]
-            col, bg = STATUS_COLORS.get(stt, STATUS_COLORS["unknown"])
+            col, _bg = STATUS_COLORS.get(stt, STATUS_COLORS["unknown"])
             col_hex = rl_color_to_hex(col)
 
-            # mini caption card under the gauge
+            caption_style = ParagraphStyle(
+                f"AL_Cap_{abs(hash(it['key']))}",
+                fontName=font_map["regular"],
+                fontSize=8.4,
+                leading=10.2,
+                textColor=PREMIUM_THEME["slate"],
+                alignment=TA_CENTER,
+            )
+
+            interpretation = (it.get("interpretation") or "")
+            interpretation = interpretation.replace("<", "").replace(">", "")
+
+            # safe, short caption
             caption = Paragraph(
                 f"<b>{_truncate(it['name'], 26)}</b><br/>"
                 f"<font color='{col_hex}'><b>{it['value']:.2f}</b></font> {it['unit']}<br/>"
-                f"<font size=8 color='#64748B'>{it.get('interpretation','')}</font>",
-                ParagraphStyle(
-                    f"AL_Cap_{abs(hash(it['name']))}",
-                    fontName=font_map["regular"],
-                    fontSize=8.6,
-                    leading=10.5,
-                    textColor=PREMIUM_THEME["slate"],
-                    alignment=TA_CENTER,
-                )
+                f"<font size=8 color='#64748B'>{_truncate(interpretation, 80)}</font>",
+                caption_style
             )
 
             block = Table(
-                [[Image(gauge_img, width=40*mm, height=62*mm)],
+                [[Image(gauge_img, width=IMG_W, height=IMG_H)],
                  [caption]],
-                colWidths=[42.5*mm]
+                colWidths=[COL_W],
+                rowHeights=[IMG_H + 2*mm, ROW_H - (IMG_H + 2*mm)]
             )
             block.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), PREMIUM_THEME["pearl"]),
                 ("BOX", (0, 0), (-1, -1), 1.0, PREMIUM_THEME["silver"]),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ]))
 
-            cells.append(KeepTogether([block]))
+            cells.append(block)
 
         while len(cells) < 4:
-            cells.append(Spacer(1, 1))
+            cells.append(Spacer(1, ROW_H))
 
-        row = Table([cells], colWidths=[42.5*mm]*4)
+        row = Table([cells], colWidths=[COL_W] * 4, rowHeights=[ROW_H])
         row.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ]))
+
         story.append(row)
         story.append(Spacer(1, 4.2 * mm))
+
+        # Safe auto-break to keep layout clean
+        if (idx // 4) % 3 == 2 and (idx + 4) < len(items):
+            story.append(PageBreak())
 
 
 # ============================================================
@@ -868,7 +739,7 @@ def generate_algolife_pdf_report(
     max_gauges_normal=18,
 ):
     """
-    ⭐ Générateur PDF ULTRA PREMIUM v7.2
+    ⭐ Générateur PDF ULTRA PREMIUM v7.2 (LAYOUT SAFE)
     Compatible avec app.py existant
     """
     if biomarker_db is None:
@@ -879,24 +750,17 @@ def generate_algolife_pdf_report(
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        topMargin=18 * mm,
-        bottomMargin=18 * mm,
-        leftMargin=18 * mm,
-        rightMargin=18 * mm
+        buffer, pagesize=A4,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+        leftMargin=20 * mm, rightMargin=20 * mm
     )
 
     patient_info = normalize_patient(patient_data)
-    sexe = patient_info.get("sexe", patient_info.get("sex", "—"))
-
     mode, biomarkers_dict, biomarkers_list = normalize_biomarkers(biomarker_results)
 
     story = []
 
-    # ========================================================
-    # COVER
-    # ========================================================
+    # === COVER ===
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph("ALGO-LIFE", styles["title"]))
     story.append(Paragraph(
@@ -904,277 +768,261 @@ def generate_algolife_pdf_report(
         styles["subtitle"]
     ))
 
-    meta = [[
-        Paragraph(f"<b>Date du rapport</b><br/>{now_str_fr()}", styles["micro"]),
-        Paragraph("<b>Version</b><br/>v7.2 Premium", styles["micro"]),
-        Paragraph("<b>Confidentialité</b><br/>Données médicales", styles["micro"]),
+    meta_data = [[
+        Paragraph(f"<b>Date du rapport</b><br/>{datetime.now().strftime('%d/%m/%Y')}", styles["small"]),
+        Paragraph("<b>Version</b><br/>v7.2 Premium", styles["small"])
     ]]
-    story.append(premium_card(meta, [55 * mm, 55 * mm, 55 * mm]))
+    story.append(premium_card(meta_data, [85 * mm, 85 * mm]))
     story.append(Spacer(1, 10 * mm))
 
-    # ========================================================
-    # PATIENT CARD
-    # ========================================================
-    story.append(premium_section_title("Informations Patient", styles, size=16))
+    # === PATIENT ===
+    story.append(premium_section_title("Informations Patient", styles))
 
     p_data = [
-        [Paragraph("<b>PATIENT</b>", styles["micro"]),
+        [Paragraph("<b>PATIENT</b>", styles["small"]),
          Paragraph(patient_info.get("nom", patient_info.get("name", "—")), styles["body"])],
-        [Paragraph("<b>GENRE</b>", styles["micro"]),
-         Paragraph(sexe, styles["body"])],
-        [Paragraph("<b>ÂGE</b>", styles["micro"]),
+        [Paragraph("<b>GENRE</b>", styles["small"]),
+         Paragraph(patient_info.get("sexe", patient_info.get("sex", "—")), styles["body"])],
+        [Paragraph("<b>ÂGE</b>", styles["small"]),
          Paragraph(f"{patient_info.get('age', '—')} ans", styles["body"])],
-        [Paragraph("<b>TAILLE / POIDS</b>", styles["micro"]),
+        [Paragraph("<b>TAILLE / POIDS</b>", styles["small"]),
          Paragraph(f"{patient_info.get('height', '—')} cm / {patient_info.get('weight', '—')} kg", styles["body"])],
-        [Paragraph("<b>IMC</b>", styles["micro"]),
+        [Paragraph("<b>IMC</b>", styles["small"]),
          Paragraph(f"{patient_info.get('imc', '—')}", styles["body"])],
-        [Paragraph("<b>DATE PRÉLÈVEMENT</b>", styles["micro"]),
+        [Paragraph("<b>DATE PRÉLÈVEMENT</b>", styles["small"]),
          Paragraph(patient_info.get("prelevement_date", "—"), styles["body"])],
     ]
-    story.append(premium_card(p_data, [48 * mm, 122 * mm]))
+    story.append(premium_card(p_data, [45 * mm, 125 * mm]))
     story.append(Spacer(1, 10 * mm))
 
-    # ========================================================
-    # BIO AGE + SCORE
-    # ========================================================
+    # === BIO AGE & SCORE ===
     story.append(premium_section_title("Âge Biologique & Score Santé", styles, size=18))
 
     if biological_age:
         hero_img = create_bioage_ultra_premium(
-            biological_age.get("biological_age"),
-            biological_age.get("chronological_age")
+            (biological_age or {}).get("biological_age"),
+            (biological_age or {}).get("chronological_age")
         )
         story.append(Image(hero_img, width=170 * mm, height=75 * mm))
+        story.append(Spacer(1, 6 * mm))
 
-    story.append(Spacer(1, 8 * mm))
-
-    score_val = safe_float((health_score or {}).get("global_score"), 0) or 0.0
+    score_val = safe_float((health_score or {}).get("global_score"), 0.0)
     grade = (health_score or {}).get("grade", "—")
 
     if score_val >= 90:
         score_col = PREMIUM_THEME["emerald"]
         score_bg = PREMIUM_THEME["emerald_subtle"]
-        score_stt = "optimal"
     elif score_val >= 75:
         score_col = PREMIUM_THEME["sapphire"]
         score_bg = PREMIUM_THEME["sapphire_subtle"]
-        score_stt = "normal"
     else:
         score_col = PREMIUM_THEME["gold"]
         score_bg = PREMIUM_THEME["gold_subtle"]
-        score_stt = "watch"
 
     score_hex = rl_color_to_hex(score_col)
-
     score_para = Paragraph(
         f"<b>Score Santé Global</b><br/>"
-        f"<font size=28 color='{score_hex}'><b>{score_val:.1f}/100</b></font><br/>"
-        f"<font size=12 color='#1E293B'>Grade <b>{grade}</b></font>",
+        f"<font size=26 color='{score_hex}'><b>{score_val:.1f}/100</b></font><br/>"
+        f"<font size=12>Grade <b>{html.escape(str(grade))}</b></font>",
         ParagraphStyle(
             "AL_Score",
-            fontName=font_map["bold"],
-            fontSize=12,
-            leading=16,
             alignment=TA_CENTER,
+            fontName=font_map["bold"],
             textColor=PREMIUM_THEME["deep_navy"],
+            leading=16,
         )
     )
+
     score_table = Table([[score_para]], colWidths=[170 * mm])
     score_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 0), score_bg),
-        ("BOX", (0, 0), (0, 0), 1.25, score_col),
+        ("BOX", (0, 0), (0, 0), 1.2, score_col),
         ("LEFTPADDING", (0, 0), (0, 0), 12),
         ("RIGHTPADDING", (0, 0), (0, 0), 12),
         ("TOPPADDING", (0, 0), (0, 0), 12),
         ("BOTTOMPADDING", (0, 0), (0, 0), 12),
     ]))
     story.append(score_table)
-    story.append(Spacer(1, 8 * mm))
 
-    # KPI row
-    story.append(kpi_row([
-        ("Âge bio", f"{safe_float((biological_age or {}).get('biological_age'), 0):.1f} ans", score_stt),
-        ("Âge chrono", f"{safe_float((biological_age or {}).get('chronological_age'), 0):.1f} ans", "normal"),
-        ("Grade", str(grade), score_stt),
-        ("Rapport", now_str_fr(), "normal"),
-    ], styles))
-    story.append(Spacer(1, 8 * mm))
-
-    # Category chart
     if health_score and health_score.get("category_scores"):
+        story.append(Spacer(1, 8 * mm))
         story.append(premium_section_title("Scores par Catégorie", styles, size=14))
         bars_img = create_category_bars_premium(health_score["category_scores"])
-        story.append(Image(bars_img, width=170 * mm, height=98 * mm))
+        story.append(Image(bars_img, width=170 * mm, height=95 * mm))
 
     story.append(PageBreak())
 
-    # ========================================================
-    # BIOMARKERS
-    # ========================================================
+    # ============================================================
+    # BIOMARKERS (ABNORMAL / WATCH / NORMAL+OPTIMAL)
+    # ============================================================
+
     story.append(premium_section_title("Biomarqueurs — Analyse Détaillée", styles, size=18))
-    story.append(Paragraph(
-        "Jauges verticales avec zones optimales. Les biomarqueurs « à surveiller » sont dans la norme mais hors zone optimale.",
-        styles["micro"]
-    ))
+    story.append(Paragraph("Jauges verticales premium avec zones optimales.", styles["small"]))
     story.append(Spacer(1, 6 * mm))
 
     refs_db = biomarker_db.get_reference_ranges()
+    optimals, normals, watch, abnormal = [], [], [], []
 
-    abnormal = []
-    watch = []
-    normal = []
-    optimal = []
+    iterable = list(biomarkers_dict.items()) if mode == "dict" else [(it["key"], it["value"]) for it in biomarkers_list]
 
-    # iterable
-    if mode == "dict_simple":
-        iterable = [(k, v, None, None) for k, v in biomarkers_dict.items()]
-    elif mode == "list":
-        iterable = [(it.get("key"), it.get("value"), it.get("unit"), (it.get("ref_low"), it.get("ref_high"))) for it in biomarkers_list]
-    else:
-        iterable = []
-
-    for raw_key, value, unit_from_input, ref_from_input in iterable:
+    for raw_key, value in iterable:
         if raw_key is None:
             continue
-
-        key = canonicalize_key(str(raw_key))
+        key = canonical_key(str(raw_key))
         if key not in refs_db:
             continue
 
-        v = safe_float(value, None)
-        if v is None:
+        ref = refs_db[key]
+        val = safe_float(value, None)
+        if val is None:
             continue
 
-        ref_data = refs_db[key]
-        unit = ref_data.get("unit", "") or (unit_from_input or "")
-
-        cls = biomarker_db.classify_biomarker(key, v, patient_info.get("age"), sexe)
+        cls = biomarker_db.classify_biomarker(key, val, patient_info.get("age"), patient_info.get("sexe"))
         stt = (cls.get("status") or "unknown").lower()
 
-        stt_final = compute_watch_status(stt, v, ref_data, sexe)
+        # "watch" bucket optional: near bounds (5% margin) when normal but close
+        status_final = stt
+        interpretation = cls.get("interpretation", "")
+
+        # calculate watch if normal and close to edges
+        try:
+            sexe = patient_info.get("sexe")
+            rmin, rmax, omin, omax = get_bounds(ref, sexe)
+            if stt == "normal" and rmax > rmin:
+                margin = 0.05 * (rmax - rmin)
+                if (val <= rmin + margin) or (val >= rmax - margin):
+                    status_final = "watch"
+                    interpretation = interpretation + " • Proche des limites (surveillance)."
+        except Exception:
+            pass
 
         item = {
             "key": key,
             "name": key.replace("_", " ").title(),
-            "value": v,
-            "unit": unit,
-            "classification": cls,
-            "interpretation": cls.get("interpretation", ""),
-            "ref_data": ref_data,
-            "status_final": stt_final,
+            "value": float(val),
+            "unit": ref.get("unit", ""),
+            "ref_data": ref,
+            "status_final": status_final,
+            "interpretation": interpretation,
         }
 
-        if stt_final in ("low", "high"):
+        if status_final == "optimal":
+            optimals.append(item)
+        elif status_final == "normal":
+            normals.append(item)
+        elif status_final == "watch":
+            watch.append(item)
+        elif status_final in ("low", "high"):
             abnormal.append(item)
-        elif stt_final == "watch":
-            watch.append(item)
-        elif stt_final == "optimal":
-            optimal.append(item)
-        elif stt_final == "normal":
-            normal.append(item)
         else:
-            # unknown -> on le met en watch pour visibilité, sinon perdu
-            watch.append(item)
+            abnormal.append(item)
 
-    abnormal.sort(key=biomarker_sort_key)
-    watch.sort(key=biomarker_sort_key)
-    normal.sort(key=biomarker_sort_key)
-    optimal.sort(key=biomarker_sort_key)
+    # Sort by severity & name
+    abnormal = sorted(abnormal, key=lambda x: (x["status_final"] != "high", x["name"]))
+    watch = sorted(watch, key=lambda x: x["name"])
+    normals = sorted(normals, key=lambda x: x["name"])
+    optimals = sorted(optimals, key=lambda x: x["name"])
 
-    # Summary KPI cards
-    story.append(kpi_row([
-        ("Anormaux", str(len(abnormal)), "high" if len(abnormal) else "normal"),
-        ("À surveiller", str(len(watch)), "watch" if len(watch) else "normal"),
-        ("Normaux", str(len(normal)), "normal"),
-        ("Optimaux", str(len(optimal)), "optimal"),
-    ], styles))
+    # Summary card
+    summary = [[
+        Paragraph(f"<b>Optimaux</b><br/>{len(optimals)}", styles["body"]),
+        Paragraph(f"<b>Normaux</b><br/>{len(normals)}", styles["body"]),
+        Paragraph(f"<b>À surveiller</b><br/>{len(watch)}", styles["body"]),
+        Paragraph(f"<b>Anormaux</b><br/>{len(abnormal)}", styles["body"]),
+    ]]
+    story.append(premium_card(summary, [42.5*mm, 42.5*mm, 42.5*mm, 42.5*mm]))
     story.append(Spacer(1, 6 * mm))
     story.append(divider_line())
     story.append(Spacer(1, 6 * mm))
 
-    # Sections
-    render_biomarker_grid(
-        story, abnormal,
-        "⚠️ Biomarqueurs Anormaux",
-        styles, font_map, sexe,
-        max_items=max_gauges_abnormal
-    )
-    render_biomarker_grid(
-        story, watch,
-        "👁️ Biomarqueurs À Surveiller",
-        styles, font_map, sexe,
-        max_items=max_gauges_watch
-    )
-    render_biomarker_grid(
-        story, normal,
-        "✅ Biomarqueurs Normaux",
-        styles, font_map, sexe,
-        max_items=max_gauges_normal
-    )
-    render_biomarker_grid(
-        story, optimal,
-        "⭐ Biomarqueurs Optimaux",
-        styles, font_map, sexe,
-        max_items=max_gauges_normal
-    )
+    sexe = patient_info.get("sexe")
+
+    # Page 1: Abnormal + Watch
+    render_biomarker_grid(story, abnormal, "⚠️ Biomarqueurs Anormaux", styles, font_map, sexe, max_items=max_gauges_abnormal)
+    story.append(Spacer(1, 4 * mm))
+    render_biomarker_grid(story, watch, "🟡 Biomarqueurs À Surveiller", styles, font_map, sexe, max_items=max_gauges_watch)
 
     story.append(PageBreak())
 
-    # ========================================================
+    # Page 2: Normal + Optimal (full template, not missing anymore)
+    story.append(premium_section_title("Biomarqueurs — Références & Stabilité", styles, size=18))
+    story.append(Paragraph("Paramètres dans la norme et zones optimales.", styles["small"]))
+    story.append(Spacer(1, 6 * mm))
+
+    render_biomarker_grid(story, optimals, "✅ Paramètres Optimaux", styles, font_map, sexe, max_items=max_gauges_normal)
+    story.append(Spacer(1, 4 * mm))
+    render_biomarker_grid(story, normals, "✅ Paramètres Normaux", styles, font_map, sexe, max_items=max_gauges_normal)
+
+    story.append(PageBreak())
+
+    # ============================================================
     # NUTRITION
-    # ========================================================
+    # ============================================================
+
     if nutritional_needs:
-        story.append(premium_section_title("Besoins Nutritionnels", styles, size=16))
+        story.append(premium_section_title("Besoins Nutritionnels", styles, size=18))
 
         nutri_data = [
-            [Paragraph("<b>Métrique</b>", styles["micro"]), Paragraph("<b>Valeur</b>", styles["micro"])],
-            [Paragraph("BMR", styles["body"]), Paragraph(f"{safe_float(nutritional_needs.get('bmr'), 0):.0f} kcal/j", styles["body"])],
-            [Paragraph("DET", styles["body"]), Paragraph(f"{safe_float(nutritional_needs.get('det'), 0):.0f} kcal/j", styles["body"])],
-            [Paragraph("Protéines", styles["body"]), Paragraph(f"{safe_float(nutritional_needs.get('proteins_g'), 0):.0f} g/j", styles["body"])],
-            [Paragraph("Lipides", styles["body"]), Paragraph(f"{safe_float(nutritional_needs.get('lipids_g'), 0):.0f} g/j", styles["body"])],
-            [Paragraph("Glucides", styles["body"]), Paragraph(f"{safe_float(nutritional_needs.get('carbs_g'), 0):.0f} g/j", styles["body"])],
+            [Paragraph("<b>Métrique</b>", styles["small"]),
+             Paragraph("<b>Valeur</b>", styles["small"])],
+            [Paragraph("BMR", styles["body"]),
+             Paragraph(f"{safe_float(nutritional_needs.get('bmr'), 0):.0f} kcal/j", styles["body"])],
+            [Paragraph("DET", styles["body"]),
+             Paragraph(f"{safe_float(nutritional_needs.get('det'), 0):.0f} kcal/j", styles["body"])],
+            [Paragraph("Protéines", styles["body"]),
+             Paragraph(f"{safe_float(nutritional_needs.get('proteins_g'), 0):.0f} g/j", styles["body"])],
+            [Paragraph("Lipides", styles["body"]),
+             Paragraph(f"{safe_float(nutritional_needs.get('lipids_g'), 0):.0f} g/j", styles["body"])],
+            [Paragraph("Glucides", styles["body"]),
+             Paragraph(f"{safe_float(nutritional_needs.get('carbs_g'), 0):.0f} g/j", styles["body"])],
         ]
         story.append(premium_card(nutri_data, [70 * mm, 100 * mm]))
         story.append(Spacer(1, 8 * mm))
 
-    # ========================================================
+    # ============================================================
     # RECOMMENDATIONS
-    # ========================================================
-    if recommendations:
-        story.append(premium_section_title("Recommandations Personnalisées", styles, size=16))
+    # ============================================================
 
+    if recommendations:
+        story.append(premium_section_title("Recommandations Personnalisées", styles, size=18))
         recs = recommendations.get("recommendations", {}) if isinstance(recommendations, dict) else {}
         priorities = recommendations.get("priorities", []) if isinstance(recommendations, dict) else []
 
         if priorities:
             story.append(Paragraph("<b>Priorités</b>", styles["body"]))
             for i, p in enumerate(priorities[:6], 1):
-                story.append(Paragraph(
-                    f"{i}. <b>{str(p.get('biomarker', '—')).replace('_', ' ').title()}</b> — {p.get('priority', '—')}",
-                    styles["body"]
-                ))
-            story.append(Spacer(1, 5 * mm))
+                bm = html.escape(str(p.get("biomarker", "—")).replace("_", " ").title())
+                pr = html.escape(str(p.get("priority", "—")))
+                story.append(Paragraph(f"{i}. <b>{bm}</b> — {pr}", styles["body"]))
+            story.append(Spacer(1, 4 * mm))
 
         if recs.get("supplements"):
             story.append(Paragraph("<b>Micronutrition</b>", styles["body"]))
             for s in recs["supplements"][:12]:
-                story.append(Paragraph(f"• {s}", styles["body_small"]))
-            story.append(Spacer(1, 5 * mm))
+                story.append(Paragraph(f"• {html.escape(str(s))}", styles["body"]))
+            story.append(Spacer(1, 4 * mm))
 
         if recs.get("alimentation"):
             story.append(Paragraph("<b>Alimentation</b>", styles["body"]))
             for a in recs["alimentation"][:12]:
-                story.append(Paragraph(f"• {a}", styles["body_small"]))
+                story.append(Paragraph(f"• {html.escape(str(a))}", styles["body"]))
+            story.append(Spacer(1, 4 * mm))
 
-    # ========================================================
-    # FOOTER BLOCK (content)
-    # ========================================================
+        if recs.get("lifestyle"):
+            story.append(Paragraph("<b>Hygiène de vie</b>", styles["body"]))
+            for a in recs["lifestyle"][:12]:
+                story.append(Paragraph(f"• {html.escape(str(a))}", styles["body"]))
+
+    # ============================================================
+    # FOOTER BLOCK (LAST PAGE)
+    # ============================================================
+
     story.append(Spacer(1, 12 * mm))
     story.append(divider_line())
     story.append(Spacer(1, 6 * mm))
 
     footer_style = ParagraphStyle(
-        "AL_FooterBlock",
+        "AL_Footer",
         fontName=font_map["regular"],
         fontSize=8.5,
         textColor=PREMIUM_THEME["mist"],
@@ -1183,10 +1031,9 @@ def generate_algolife_pdf_report(
     )
     story.append(Paragraph("<b>Rapport établi par Dr Thibault SUTTER — Biologiste</b>", footer_style))
     story.append(Paragraph("ALGO-LIFE | Plateforme Multimodale d'Analyse de Santé Fonctionnelle", footer_style))
+    story.append(Paragraph("© 2026 — Document médical confidentiel", footer_style))
 
-    # ========================================================
-    # BUILD
-    # ========================================================
+    # Build (safe header/footer + safe error fallback)
     try:
         doc.build(
             story,
@@ -1196,16 +1043,17 @@ def generate_algolife_pdf_report(
         buffer.seek(0)
         return buffer
     except Exception as e:
-        # fallback minimal
-        buffer = BytesIO()
-        doc2 = SimpleDocTemplate(buffer, pagesize=A4)
-        doc2.build([Paragraph(f"ERREUR: {str(e)}", getSampleStyleSheet()["Normal"])])
-        buffer.seek(0)
-        return buffer
+        buffer2 = BytesIO()
+        doc2 = SimpleDocTemplate(buffer2, pagesize=A4)
+        msg = html.escape(str(e))
+        doc2.build([Paragraph(f"ERREUR: {msg}", getSampleStyleSheet()["Normal"])])
+        buffer2.seek(0)
+        return buffer2
 
 
 __all__ = ["generate_algolife_pdf_report", "BiomarkerDatabase"]
 
+
 if __name__ == "__main__":
-    print("✅ ALGO-LIFE PDF Generator v7.2 ULTRA PREMIUM")
+    print("✅ ALGO-LIFE PDF Generator v7.2 ULTRA PREMIUM (LAYOUT SAFE)")
     print("🔧 Compatible app.py - Fonction: generate_algolife_pdf_report()")
