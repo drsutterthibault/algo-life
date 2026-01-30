@@ -1,12 +1,11 @@
 """
-ALGO-LIFE - Universal Extractor v2.3.2 (STRICT VALUES ONLY)
-✅ Extraction biomarqueurs uniquement (mode STRICT par défaut)
-✅ Anti-parasites renforcé: rejette phrases, commentaires, conclusions, headers, etc.
-✅ Parse unités + références: (low–high), >x, <x, "x - y", "x à y"
-✅ SYNLAB patch robuste (lignes tabulées + méthodes entre parenthèses)
-✅ Sortie structurée prête pour rules engine Excel
-✅ Sécurisé: anti-années/codes, anti-lignes texte, anti-faux positifs
-✅ IMPORTANT: extract_from_pdf_file() ne renvoie plus le texte brut par défaut
+ALGO-LIFE - Universal Extractor v2.4.0 (ULTRA CLEAN + STRICT RESULT LINES)
+✅ Objectif: EXTRAIRE UNIQUEMENT des lignes "résultat biomarqueur" (pas de phrases/paragraphes)
+✅ Fix: filtre candidat renforcé + parse strict "valeur en FIN de ligne"
+✅ Fix: split des lignes collées multi-colonnes (pdfplumber) si plusieurs refs "(...)"
+✅ Option: suppression totale de raw_text dans la sortie (keep_raw_text_field=False)
+✅ SYNLAB parser conservé + strictifié
+✅ API compatible: extract_from_pdf_file() retourne (known, all_data, text?) selon return_raw_text
 
 Author: Dr Thibault SUTTER
 Date: Jan 2026
@@ -33,10 +32,9 @@ class UniversalPDFExtractor:
     """
     Extracteur PDF universel avec 2 passes:
       1) TARGETED: biomarqueurs connus (clé canonique) -> value
-      2) OPEN CLEAN STRICT: extraction stricte des lignes "biomarqueur | valeur | unité/ref"
+      2) OPEN CLEAN STRICT: extraction stricte "nom + valeur + unité/ref" (valeur en fin de ligne)
     """
 
-    # unités "biomédicales" courantes
     _UNIT_HINTS = {
         "mg", "g", "kg", "ug", "µg", "ng", "pg",
         "l", "dl", "ml", "ul", "µl",
@@ -49,28 +47,17 @@ class UniversalPDFExtractor:
         "/l", "/ml", "/dl",
         "kpa", "mmhg",
         "u/g", "u/ghb", "u/ghb", "u/ghb",
-        "u/ghb", "u/g hb", "u/ghb",
     }
 
-    # tokens parasites fréquents (footers, intitulés, méthodes, etc.)
     _BAD_TOKENS = {
         "edition", "page", "dossier", "adresse", "telephone", "tél", "fax",
-        "laboratoire", "biologie", "biologiste", "validation", "validé", "valide",
+        "laboratoire", "biologie", "biologiste", "validation", "validé",
         "patient", "docteur", "médecin", "prescripteur",
         "commentaire", "interpretation", "interprétation", "conclusion",
         "methode", "méthode", "technique", "instrument", "automate",
         "signature", "service", "site", "centre", "imprimé", "imprime",
-        "renseignements", "identité", "identite", "adresse", "telephone",
-        "facture", "cotation", "code", "nomenclature",
-    }
-
-    # stopwords qui indiquent une phrase (donc pas une ligne résultat)
-    _SENTENCE_STOPWORDS = {
-        "avec", "sans", "pour", "chez", "vous", "nous", "afin", "selon",
-        "en raison", "ceci", "cela", "peut", "doit", "recommande", "recommandé",
-        "interprétation", "interpretation", "commentaire", "conclusion",
-        "valeurs", "résultats", "resultats", "référence", "reference",
-        "méthode", "methode", "principe", "technique",
+        "recommandation", "résumé", "compte rendu", "compte-rendu",
+        "analyse", "analyses", "bilan", "examen", "valeur cible",
     }
 
     def __init__(self, known_biomarkers: Optional[Dict] = None):
@@ -111,31 +98,45 @@ class UniversalPDFExtractor:
 
     def _build_targeted_patterns(self) -> Dict[str, List[str]]:
         patterns: Dict[str, List[str]] = {}
+
         for biomarker_key, ref_data in self.known_biomarkers.items():
             lab_names = ref_data.get("lab_names", [biomarker_key])
             pattern_list: List[str] = []
+
             for name in lab_names:
                 name_norm = self._normalize_for_regex(name)
+
+                # label -> valeur (classique)
                 pattern_list.append(rf"{name_norm}\s*[:\s]\s*(\d+[.,]?\d*)")
+
+                # label ... valeur unité
                 pattern_list.append(rf"{name_norm}\s+(\d+[.,]?\d*)\s*[a-zµμ°/%A-Z]{{0,12}}")
+
+                # valeur -> label (rare)
                 pattern_list.append(rf"(\d+[.,]?\d*)\s+{name_norm}")
+
+                # label * + - valeur
                 pattern_list.append(rf"{name_norm}\s*[*+\-]?\s*(\d+[.,]?\d*)")
+
             patterns[biomarker_key] = pattern_list
+
         return patterns
 
     def _normalize_for_regex(self, s: str) -> str:
         s = s.lower().strip()
         s = re.escape(s)
+
         s = s.replace("e", "[eéèêë]")
         s = s.replace("a", "[aàâä]")
         s = s.replace("i", "[iîï]")
         s = s.replace("o", "[oôö]")
         s = s.replace("u", "[uùûü]")
         s = s.replace("c", "[cç]")
+
         return s
 
     # ============================================================
-    # PASS 2: Extraction ouverte STRICT (uniquement lignes résultat)
+    # PASS 2: Extraction ouverte CLEAN STRICT
     # ============================================================
 
     def extract_all_biomarkers(
@@ -145,30 +146,37 @@ class UniversalPDFExtractor:
         min_value: float = 0.0001,
         max_value: float = 100000,
         strict: bool = True,
-        keep_raw_text_field: bool = True,
+        keep_raw_text_field: bool = False,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Retour:
           Dict[key, {
               name, value, unit,
               ref_low, ref_high, ref_type,
-              raw_text, line_number,
-              is_known, canonical_key
+              line_number,
+              is_known, canonical_key,
+              (optionnel) raw_text si keep_raw_text_field=True
           }]
         """
         data: Dict[str, Dict[str, Any]] = {}
+
         lines = self._preclean_lines(text)
 
         # SYNLAB prioritaire
         if self._is_synlab_format(text):
             if debug:
-                print("🔍 SYNLAB détecté -> parser Synlab CLEAN")
+                print("🔍 SYNLAB détecté -> parser Synlab CLEAN STRICT")
             syn = self._extract_synlab_specific(
-                lines, debug=debug, min_value=min_value, max_value=max_value, keep_raw_text_field=keep_raw_text_field
+                lines,
+                debug=debug,
+                min_value=min_value,
+                max_value=max_value,
+                strict=strict,
+                keep_raw_text_field=keep_raw_text_field,
             )
             data.update(syn)
 
-        # OPEN STRICT
+        # OPEN CLEAN STRICT
         for i, line in enumerate(lines):
             if not self._is_candidate_biomarker_line(line, strict=strict):
                 continue
@@ -185,11 +193,8 @@ class UniversalPDFExtractor:
             key = self._normalize_key(name)
             is_known = self._is_known_name_or_key(name, key)
 
-            has_unit = self._looks_like_unit(unit)
-            has_ref = ref is not None
-
-            # si pas connu, exige unit OU ref
-            if not (is_known or has_unit or has_ref):
+            # strict: si pas connu, unit/ref déjà exigés au parse, donc ici juste garde-fou
+            if strict and not is_known and not (self._looks_like_unit(unit) or ref is not None):
                 continue
 
             if self._is_header_or_footer(name):
@@ -204,7 +209,7 @@ class UniversalPDFExtractor:
                     "value": value,
                     "unit": unit,
                     "line_number": i,
-                    "pattern_used": "generic_strict",
+                    "pattern_used": "generic_strict_tail",
                     "ref_low": None,
                     "ref_high": None,
                     "ref_type": None,
@@ -229,7 +234,7 @@ class UniversalPDFExtractor:
                 if debug:
                     rl = entry["ref_low"]
                     rh = entry["ref_high"]
-                    print(f"✅ [STRICT] {name} = {value} {unit} | ref=({rl},{rh})")
+                    print(f"✅ [OPEN STRICT] {name} = {value} {unit} | ref=({rl},{rh})")
 
         return data
 
@@ -243,11 +248,14 @@ class UniversalPDFExtractor:
         debug: bool = False,
         prioritize_known: bool = True,
         strict: bool = True,
-        keep_raw_text_field: bool = True,
+        keep_raw_text_field: bool = False,
     ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]]]:
         known = self.extract_known_biomarkers(text, debug=debug)
         all_data = self.extract_all_biomarkers(
-            text, debug=debug, strict=strict, keep_raw_text_field=keep_raw_text_field
+            text,
+            debug=debug,
+            strict=strict,
+            keep_raw_text_field=keep_raw_text_field,
         )
 
         if prioritize_known and known:
@@ -284,7 +292,7 @@ class UniversalPDFExtractor:
         return known, all_data
 
     # ============================================================
-    # SYNLAB parser CLEAN
+    # SYNLAB parser CLEAN STRICT
     # ============================================================
 
     def _is_synlab_format(self, text: str) -> bool:
@@ -294,7 +302,7 @@ class UniversalPDFExtractor:
             "dossier validé biologiquement",
             "biologistes médicaux",
         ]
-        t = (text or "").lower()
+        t = text.lower()
         return any(m in t for m in markers)
 
     def _extract_synlab_specific(
@@ -303,8 +311,15 @@ class UniversalPDFExtractor:
         debug: bool = False,
         min_value: float = 0.0001,
         max_value: float = 100000,
-        keep_raw_text_field: bool = True,
+        strict: bool = True,
+        keep_raw_text_field: bool = False,
     ) -> Dict[str, Dict[str, Any]]:
+        """
+        Pattern SYNLAB typique:
+          Fer serique   18.0  µmol/l   (12.5−32.2)
+          FERRITINE     187.5 ng/ml    (22.0−322.0)
+          Folates ...   42.90 nmol/l   (>12.19)
+        """
         data: Dict[str, Dict[str, Any]] = {}
 
         pat = re.compile(
@@ -318,7 +333,7 @@ class UniversalPDFExtractor:
             if line.startswith("(") and line.endswith(")"):
                 continue
 
-            if not self._is_candidate_biomarker_line(line, strict=True):
+            if not self._is_candidate_biomarker_line(line, strict=strict):
                 continue
 
             m = pat.match(line)
@@ -341,7 +356,15 @@ class UniversalPDFExtractor:
             if not (min_value <= value <= max_value) or not self._is_value_plausible(value):
                 continue
 
+            # parse ref
             ref = self._parse_reference(ref_raw) if ref_raw else None
+
+            # strict: si pas de ref et unité bizarre, on coupe (sauf known)
+            is_known = self._canonical_key_from_name(name) is not None
+            if strict and not is_known:
+                if not self._looks_like_unit(unit) and ref is None:
+                    continue
+
             key = self._normalize_key(name)
 
             if key not in data:
@@ -350,7 +373,7 @@ class UniversalPDFExtractor:
                     "value": value,
                     "unit": unit,
                     "line_number": i,
-                    "pattern_used": "synlab_clean",
+                    "pattern_used": "synlab_strict",
                     "ref_low": None,
                     "ref_high": None,
                     "ref_type": None,
@@ -372,78 +395,67 @@ class UniversalPDFExtractor:
 
                 data[key] = entry
                 if debug:
-                    print(f"✅ [SYNLAB CLEAN] {name} = {value} {unit} ref=({ref_raw})")
+                    print(f"✅ [SYNLAB STRICT] {name} = {value} {unit} ref=({ref_raw})")
 
         return data
 
     # ============================================================
-    # Generic STRICT parsing
+    # Generic STRICT parsing (valeur en fin de ligne)
     # ============================================================
 
     def _parse_line_generic(self, line: str, strict: bool = True) -> Optional[Dict[str, Any]]:
         """
-        STRICT:
-          - exige une valeur
-          - ET (une unité valide OU une référence valide) si pas biomarqueur connu
-          - limite la "queue" textuelle
+        Parse STRICT: on garde uniquement les lignes où la FIN ressemble à un résultat labo :
+          <NAME> <VALUE> <UNIT?> (<REF?>)
+        Et on refuse si du texte traine après la valeur (car valeur forcée en fin de ligne).
         """
-        # On refuse les lignes où il y a du texte après la valeur qui ressemble à une phrase
-        if strict and re.search(r"\d+[.,]?\d*\s+[A-Za-zÀ-ÿ]{4,}\s+[A-Za-zÀ-ÿ]{4,}", line):
+        tail_pat = re.compile(
+            r"^(?P<name>.+?)\s{1,}"
+            r"(?P<value>\d+[.,]?\d*)\s*"
+            r"(?P<unit>[a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?\s*"
+            r"(?P<ref>\([^)]{1,60}\))?\s*$"
+        )
+
+        m = tail_pat.match(line)
+        if not m:
             return None
 
-        tab = re.compile(
-            r"^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s*[\.:\s]{2,}\s*"
-            r"(\d+[.,]?\d*)\s*"
-            r"([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?\s*"
-            r"(?:\(([^)]{1,60})\))?\s*$"
-        )
-        colon = re.compile(
-            r"^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s*:\s*"
-            r"(\d+[.,]?\d*)\s*"
-            r"([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?\s*"
-            r"(?:\(([^)]{1,60})\))?\s*$"
-        )
-        space = re.compile(
-            r"^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s+"
-            r"(\d+[.,]?\d*)\s*"
-            r"([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?\s*"
-            r"(?:\(([^)]{1,60})\))?\s*$"
-        )
+        name = self._clean_biomarker_name(m.group("name"))
+        value_str = (m.group("value") or "").replace(",", ".").strip()
+        unit = (m.group("unit") or "").strip()
+        ref_raw = (m.group("ref") or "").strip()
 
-        for pat in (tab, colon, space):
-            m = pat.match(line)
-            if not m:
-                continue
+        if len(name) < 3 or len(name) > 65:
+            return None
+        if self._is_header_or_footer(name):
+            return None
 
-            name = self._clean_biomarker_name(m.group(1))
-            value_str = m.group(2).replace(",", ".").strip()
-            unit = (m.group(3) or "").strip()
-            ref_raw = (m.group(4) or "").strip()
+        # phrase-like -> out (sauf connu)
+        is_known = self._canonical_key_from_name(name) is not None
+        if not self._looks_like_biomarker_name(name) and not is_known:
+            return None
 
-            if len(name) < 3 or len(name) > 70:
-                return None
-            if self._is_header_or_footer(name):
-                return None
+        try:
+            value = float(value_str)
+        except ValueError:
+            return None
 
-            try:
-                value = float(value_str)
-            except ValueError:
+        if not self._is_value_plausible(value):
+            return None
+
+        ref = None
+        if ref_raw:
+            rr = ref_raw.strip()
+            if rr.startswith("(") and rr.endswith(")"):
+                rr = rr[1:-1].strip()
+            ref = self._parse_reference(rr) if rr else None
+
+        # strict: si pas connu -> exige unité OU ref parsée
+        if strict and not is_known:
+            if not self._looks_like_unit(unit) and ref is None:
                 return None
 
-            if not self._is_value_plausible(value):
-                return None
-
-            ref = self._parse_reference(ref_raw) if ref_raw else None
-            is_known = self._canonical_key_from_name(name) is not None
-
-            if strict and not is_known:
-                # en strict, si pas connu -> il faut unit OU ref
-                if not self._looks_like_unit(unit) and ref is None:
-                    return None
-
-            return {"name": name, "value": value, "unit": unit, "ref": ref}
-
-        return None
+        return {"name": name, "value": value, "unit": unit, "ref": ref}
 
     def _parse_reference(self, ref_raw: str) -> Optional[Dict[str, Any]]:
         if not ref_raw:
@@ -451,7 +463,7 @@ class UniversalPDFExtractor:
 
         s = ref_raw.strip()
         s = s.replace("−", "-").replace("–", "-")
-        s = s.replace("à", "-").replace("a", "-")
+        s = s.replace("à", "-").replace("A", "-")
         s = s.replace(",", ".")
         s = re.sub(r"\s+", "", s)
         s = re.sub(r"[a-zA-Zµμ/%°]+$", "", s)
@@ -480,52 +492,71 @@ class UniversalPDFExtractor:
 
     def _preclean_lines(self, text: str) -> List[str]:
         lines: List[str] = []
-        for raw in (text or "").split("\n"):
+        for raw in text.split("\n"):
             line = raw.strip()
             if not line:
                 continue
+
             line = line.replace("\u00a0", " ").strip()
             line = re.sub(r"\s{2,}", "  ", line)
+
+            # ✅ split lignes collées multi-colonnes si plusieurs refs
+            # ex: "... (0-3)   ... (12-30)"
+            if line.count("(") >= 2 and len(line) > 120:
+                parts = re.split(r"(?<=\))\s{2,}", line)
+                for p in parts:
+                    p = p.strip()
+                    if p:
+                        lines.append(re.sub(r"\s{2,}", "  ", p))
+                continue
+
             lines.append(line)
+
         return lines
 
     def _is_candidate_biomarker_line(self, line: str, strict: bool = True) -> bool:
-        if len(line) < 5 or len(line) > (120 if strict else 160):
+        """
+        Filtre ultra fort:
+          - longueur contrôlée
+          - contient chiffre
+          - rejette tokens parasites (même si chiffre)
+          - impose une FIN qui ressemble à: <value> <unit?> (<ref?>)
+        """
+        if not line:
             return False
-        if not re.search(r"\d", line):
+
+        if len(line) < 6 or len(line) > (110 if strict else 140):
             return False
 
         low = line.lower()
+
         if "http" in low or "www" in low or "@" in low:
             return False
 
-        # rejette gros paragraphes (trop de mots)
-        words = re.findall(r"[A-Za-zÀ-ÿ]+", line)
-        if len(words) >= (14 if strict else 20):
-            return False
-
-        # rejette si stopwords de phrase présents
-        if strict:
-            for sw in self._SENTENCE_STOPWORDS:
-                if sw in low:
-                    return False
-
-        # blacklist headers
-        if re.search(r"^(page|edition|dossier|adresse|t[eé]l|fax|conclusion|commentaire)\b", low):
-            return False
-
-        # ratio lettres/chiffres: si beaucoup de lettres => souvent phrase
-        if strict:
-            letters = len(re.findall(r"[A-Za-zÀ-ÿ]", line))
-            digits = len(re.findall(r"\d", line))
-            if letters >= 45 and digits <= 3:
-                return False
-
-        # tokens parasites
+        # rejette stop-tokens (même si valeurs)
         for tok in self._BAD_TOKENS:
             if tok in low:
-                # si tok présent, on rejette (même si chiffre) car ce sont souvent des sections
                 return False
+
+        if not re.search(r"\d", line):
+            return False
+
+        # phrase-like: trop de mots alpha
+        words = re.findall(r"[A-Za-zÀ-ÿ]{2,}", line)
+        if len(words) >= (12 if strict else 18):
+            return False
+
+        # impose une structure "result tail" à la fin de ligne
+        # valeur + (unité?) + (ref?) EN FIN
+        if not re.search(
+            r"(\d+[.,]?\d*)\s*([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?\s*(\([^)]{1,60}\))?\s*$",
+            line
+        ):
+            return False
+
+        # rejette headers simples
+        if re.search(r"^(page|edition|dossier|adresse|t[eé]l|fax)\b", low):
+            return False
 
         return True
 
@@ -557,12 +588,9 @@ class UniversalPDFExtractor:
         if not re.search(r"[A-Za-zÀ-ÿ]", n):
             return False
         words = re.findall(r"[A-Za-zÀ-ÿ0-9]+", n)
-        if not (1 <= len(words) <= 7):
+        if not (1 <= len(words) <= 8):
             return False
-        if re.search(r"\b(avec|sans|pour|chez|vous|nous|afin|selon|dossier|page|commentaire|conclusion)\b", n.lower()):
-            return False
-        # rejette noms trop "phrase"
-        if len(n) > 55 and len(words) >= 6:
+        if re.search(r"\b(avec|sans|pour|chez|vous|nous|afin|selon|dossier|page)\b", n.lower()):
             return False
         return True
 
@@ -630,7 +658,7 @@ class UniversalPDFExtractor:
         return None
 
     # ============================================================
-    # Extraction PDF texte
+    # Extraction PDF complète
     # ============================================================
 
     @staticmethod
@@ -669,25 +697,31 @@ class UniversalPDFExtractor:
         self,
         pdf_file,
         debug: bool = False,
-        return_raw_text: bool = False,          # ✅ NEW: default False
-        strict: bool = True,                   # ✅ NEW: default True
-        keep_raw_text_field: bool = True,      # ✅ NEW
-    ):
+        prioritize_known: bool = True,
+        strict: bool = True,
+        keep_raw_text_field: bool = False,
+        return_raw_text: bool = False,
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], str]:
         """
-        Retour:
-          known, all_data, (optionnel) raw_text
+        Retourne:
+          known (Dict[canonical_key, float]),
+          all_data (dict struct),
+          text (str) -> vide si return_raw_text=False
         """
         text = self.extract_text_from_pdf(pdf_file)
         known, all_data = self.extract_complete(
             text,
             debug=debug,
-            prioritize_known=True,
+            prioritize_known=prioritize_known,
             strict=strict,
             keep_raw_text_field=keep_raw_text_field,
         )
-        if return_raw_text:
-            return known, all_data, text
-        return known, all_data
+
+        # optionnel: ne pas renvoyer le texte brut à l'app
+        if not return_raw_text:
+            return known, all_data, ""
+
+        return known, all_data, text
 
 
 __all__ = ["UniversalPDFExtractor"]
