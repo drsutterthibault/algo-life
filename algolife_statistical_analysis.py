@@ -1,1053 +1,877 @@
 """
-ALGO-LIFE - Module de Génération de Rapports Statistiques Avancés
+ALGO-LIFE - Module d'Analyse Statistique & Rapports
 Auteur: Thibault - Product Manager Functional Biology
-Version: 2.0
+Version: 3.0 (refactor robuste & testable)
 """
 
-import pandas as pd
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, List, Tuple, Iterable
+
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
+
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from scipy import stats
 from datetime import datetime
 from io import BytesIO
-import warnings
-warnings.filterwarnings('ignore')
+import logging
 
-# Configuration du style
-plt.style.use('seaborn-v0_8-whitegrid')
-sns.set_palette("husl")
+
+# ============================================================
+# Logging
+# ============================================================
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+Number = float | int
+
+
+def to_float(x: Any) -> Optional[float]:
+    """Convertit en float si possible, sinon None. (Attention: bool)"""
+    if x is None or isinstance(x, bool):
+        return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def mean_or_none(values: Iterable[Optional[float]]) -> Optional[float]:
+    vals = [v for v in values if isinstance(v, (int, float))]
+    return round(float(np.mean(vals)), 1) if vals else None
+
+
+def now_str() -> str:
+    return datetime.now().strftime("%d/%m/%Y %H:%M")
+
+
+def safe_get(d: Dict[str, Any], key: str) -> Optional[float]:
+    """Récupère un marqueur simple (flat dict) en float."""
+    return to_float(d.get(key))
+
+
+def score_linear(value: Optional[float], low: float, high: float, reverse: bool = False) -> Optional[float]:
+    """
+    Normalise une valeur vers un score 0-100 (linéaire) entre [low, high].
+    reverse=True inverse le sens (plus haut = pire).
+    """
+    v = to_float(value)
+    if v is None or high == low:
+        return None
+    ratio = (v - low) / (high - low)
+    ratio = clamp(ratio, 0.0, 1.0)
+    if reverse:
+        ratio = 1.0 - ratio
+    return round(ratio * 100.0, 1)
+
+
+# ============================================================
+# Config (seuils, recommandations)
+# ============================================================
+
+@dataclass(frozen=True)
+class Rule:
+    """Règle simple basée sur un score ou une valeur."""
+    key: str
+    condition: str
+    message: str
+    priority: int = 2
+
+
+@dataclass
+class ModelResult:
+    success: bool
+    r2_score: float = 0.0
+    prediction: Optional[float] = None
+    n_features: int = 0
+    feature_importance: Dict[str, float] = field(default_factory=dict)
+    correlations: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    coefficients: Optional[pd.DataFrame] = None
+    message: Optional[str] = None
+
+
+# ============================================================
+# Main Class
+# ============================================================
 
 class AlgoLifeStatisticalAnalysis:
     """
-    Classe principale pour l'analyse statistique multi-dimensionnelle
-    des données biologiques et épigénétiques
+    Analyse statistique (indices composites) + modélisation (optionnelle) + visualisation.
+    - 'biological_markers' = dict flat pour certains modules (cortisol_22h, dopamine, etc.)
+    - 'bio_data' = dict structuré (metabolisme_glucidique, lipides, etc.) pour metabolism_index
     """
-    
-    def __init__(self, patient_data):
-        """
-        Initialise l'analyse avec les données patient
-        
-        Args:
-            patient_data (dict): Dictionnaire contenant toutes les données du patient
-                - biological_markers: dict des biomarqueurs biologiques
-                - epigenetic_data: dict des données épigénétiques (optionnel)
-                - lifestyle_scores: dict des scores lifestyle (optionnel)
-                - patient_info: dict des infos patient (nom, âge, sexe, etc.)
-        """
-        self.patient_data = patient_data
-        self.biological_markers = patient_data.get('biological_markers', {})
-        self.epigenetic_data = patient_data.get('epigenetic_data', {})
-        self.lifestyle_scores = patient_data.get('lifestyle_scores', {})
-        self.patient_info = patient_data.get('patient_info', {})
-        
-        # Résultats des analyses
-        self.composite_indices = {}
-        self.statistical_model = None
-        self.predictions = {}
-        self.correlations = {}
-    
-    def calculate_metabolism_index(self, bio_data):
-        """
-        Calcule un indice métabolique composite basé sur plusieurs biomarqueurs.
-        
-        Args:
-            bio_data (dict): Données biologiques structurées par catégories
-        
-        Returns:
-            dict: Score métabolique et détails
-        """
-        if not bio_data:
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'details': {}}
-        
-        indices = []
-        details = {}
-        
-        # HOMA-IR (insulino-résistance)
-        if "metabolisme_glucidique" in bio_data:
-            homa = bio_data["metabolisme_glucidique"].get("homa")
-            if homa is not None:
-                # Score inversé : plus bas = meilleur (optimal < 2.0)
-                homa_score = max(0, 100 - (homa / 4.0) * 100)
-                indices.append(homa_score)
-                details['homa'] = {
-                    'value': homa,
-                    'score': homa_score,
-                    'status': 'Optimal' if homa < 2.0 else 'Résistance insulinique'
-                }
-        
-        # Triglycérides
-        if "lipides" in bio_data:
-            tg = bio_data["lipides"].get("triglycerides")
-            if tg is not None:
-                # Optimal < 150 mg/dL
-                tg_score = max(0, 100 - (tg / 200.0) * 100)
-                indices.append(tg_score)
-                details['triglycerides'] = {
-                    'value': tg,
-                    'score': tg_score,
-                    'status': 'Optimal' if tg < 150 else 'Élevé'
-                }
-        
-        # HDL Cholesterol
-        if "lipides" in bio_data:
-            hdl = bio_data["lipides"].get("hdl")
-            if hdl is not None:
-                # Optimal > 60 mg/dL pour homme, > 50 pour femme
-                hdl_score = min(100, (hdl / 80.0) * 100)
-                indices.append(hdl_score)
-                details['hdl'] = {
-                    'value': hdl,
-                    'score': hdl_score,
-                    'status': 'Optimal' if hdl > 50 else 'Bas'
-                }
-        
-        # Glycémie à jeun
-        if "metabolisme_glucidique" in bio_data:
-            glycemie = bio_data["metabolisme_glucidique"].get("glycemie")
-            if glycemie is not None:
-                # Optimal < 100 mg/dL
-                glycemie_score = max(0, 100 - ((glycemie - 70) / 50) * 100)
-                indices.append(glycemie_score)
-                details['glycemie'] = {
-                    'value': glycemie,
-                    'score': glycemie_score,
-                    'status': 'Optimal' if glycemie < 100 else 'Élevée'
-                }
-        
-        # Insuline à jeun
-        if "metabolisme_glucidique" in bio_data:
-            insuline = bio_data["metabolisme_glucidique"].get("insuline")
-            if insuline is not None:
-                # Optimal < 10 µU/mL
-                insuline_score = max(0, 100 - (insuline / 20.0) * 100)
-                indices.append(insuline_score)
-                details['insuline'] = {
-                    'value': insuline,
-                    'score': insuline_score,
-                    'status': 'Optimal' if insuline < 10 else 'Élevée'
-                }
-        
-        # Calculer la moyenne si des indices sont disponibles
-        if indices:
-            metabolism_score = round(sum(indices) / len(indices), 1)
-        else:
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'details': {}}
-        
-        # Stocker dans composite_indices
-        self.composite_indices['metabolism_index'] = metabolism_score
-        
+
+    def __init__(self, patient_data: Dict[str, Any]):
+        self.patient_data = patient_data or {}
+
+        self.biological_markers: Dict[str, Any] = self.patient_data.get("biological_markers", {}) or {}
+        self.epigenetic_data: Dict[str, Any] = self.patient_data.get("epigenetic_data", {}) or {}
+        self.lifestyle_scores: Dict[str, Any] = self.patient_data.get("lifestyle_scores", {}) or {}
+        self.patient_info: Dict[str, Any] = self.patient_data.get("patient_info", {}) or {}
+
+        self.composite_indices: Dict[str, float] = {}
+        self.statistical_model: Dict[str, Any] = {}
+        self.predictions: Dict[str, Dict[str, Any]] = {}
+
+    # ============================================================
+    # 1) Indice métabolique (à partir de bio_data structuré)
+    # ============================================================
+
+    def calculate_metabolism_index(self, bio_data: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(bio_data, dict) or not bio_data:
+            return {"score": None, "interpretation": "Données insuffisantes", "details": {}, "risk_level": "–"}
+
+        details: Dict[str, Dict[str, Any]] = {}
+        scores: List[Optional[float]] = []
+
+        # HOMA
+        homa = to_float(((bio_data.get("metabolisme_glucidique") or {}).get("homa")))
+        homa_score = score_linear(homa, low=1.0, high=4.0, reverse=True)
+        if homa_score is not None:
+            scores.append(homa_score)
+            details["homa"] = {
+                "value": homa,
+                "score": homa_score,
+                "status": "Optimal" if homa is not None and homa < 2.0 else "Résistance insulinique",
+            }
+
+        # TG
+        tg = to_float(((bio_data.get("lipides") or {}).get("triglycerides")))
+        tg_score = score_linear(tg, low=50.0, high=200.0, reverse=True)
+        if tg_score is not None:
+            scores.append(tg_score)
+            details["triglycerides"] = {
+                "value": tg,
+                "score": tg_score,
+                "status": "Optimal" if tg is not None and tg < 150 else "Élevé",
+            }
+
+        # HDL (score direct)
+        hdl = to_float(((bio_data.get("lipides") or {}).get("hdl")))
+        # Score 0 à 100 entre 30 et 80 (cap)
+        hdl_score = score_linear(hdl, low=30.0, high=80.0, reverse=False)
+        if hdl_score is not None:
+            scores.append(hdl_score)
+            details["hdl"] = {
+                "value": hdl,
+                "score": hdl_score,
+                "status": "Optimal" if hdl is not None and hdl > 50 else "Bas",
+            }
+
+        # Glycémie à jeun (70->100 ok, >110 moins bon)
+        gly = to_float(((bio_data.get("metabolisme_glucidique") or {}).get("glycemie")))
+        gly_score = score_linear(gly, low=70.0, high=120.0, reverse=True)
+        if gly_score is not None:
+            scores.append(gly_score)
+            details["glycemie"] = {
+                "value": gly,
+                "score": gly_score,
+                "status": "Optimal" if gly is not None and gly < 100 else "Élevée",
+            }
+
+        # Insuline
+        ins = to_float(((bio_data.get("metabolisme_glucidique") or {}).get("insuline")))
+        ins_score = score_linear(ins, low=2.0, high=20.0, reverse=True)
+        if ins_score is not None:
+            scores.append(ins_score)
+            details["insuline"] = {
+                "value": ins,
+                "score": ins_score,
+                "status": "Optimal" if ins is not None and ins < 10 else "Élevée",
+            }
+
+        score = mean_or_none(scores)
+        if score is None:
+            return {"score": None, "interpretation": "Données insuffisantes", "details": details, "risk_level": "–"}
+
+        self.composite_indices["metabolism_index"] = score
+
         return {
-            'score': metabolism_score,
-            'interpretation': self._interpret_metabolism(metabolism_score),
-            'details': details,
-            'risk_level': self._get_metabolic_risk(metabolism_score)
+            "score": score,
+            "interpretation": self._interpret_metabolism(score),
+            "details": details,
+            "risk_level": self._risk_band(score, good_high=True),
         }
-    
-    def _interpret_metabolism(self, score):
-        """Interprète le score métabolique"""
+
+    def _interpret_metabolism(self, score: float) -> str:
         if score >= 80:
             return "Métabolisme optimal"
-        elif score >= 60:
+        if score >= 60:
             return "Métabolisme correct"
-        elif score >= 40:
+        if score >= 40:
             return "Dysrégulation métabolique modérée"
-        elif score >= 20:
+        if score >= 20:
             return "Dysrégulation métabolique importante"
-        else:
-            return "Syndrome métabolique"
-    
-    def _get_metabolic_risk(self, score):
-        """Évalue le risque métabolique"""
-        if score >= 70:
-            return "Faible"
-        elif score >= 50:
-            return "Modéré"
-        elif score >= 30:
-            return "Élevé"
-        else:
-            return "Très élevé"
-        
-    def calculate_stress_index(self):
-        """
-        Calcule l'indice de stress basé sur le profil cortisol/DHEA
-        """
-        try:
-            cortisol_car = self.biological_markers.get('cortisol_car_30', 
-                                                       self.biological_markers.get('cortisol_car+30', 0))
-            cortisol_22h = self.biological_markers.get('cortisol_22h', 0)
-            dhea = self.biological_markers.get('dhea', 0)
-            
-            stress_score = 0
-            
-            # CAR diminué (signature burnout)
-            if cortisol_car < 7.5:
-                stress_score += 40
-            
-            # Cortisol nocturne bas
-            if cortisol_22h < 0.3:
-                stress_score += 30
-                
-            # DHEA préservée (réserve adaptative)
-            if dhea > 1.5:
-                stress_score -= 10
-            
-            # Cortisol réveil élevé (hyperactivation)
-            cortisol_reveil = self.biological_markers.get('cortisol_reveil', 0)
-            if cortisol_reveil > 17:
-                stress_score += 20
-                
-            stress_score = min(100, max(0, stress_score))
-            
-            self.composite_indices['stress_index'] = stress_score
-            
-            return {
-                'score': stress_score,
-                'interpretation': self._interpret_stress(stress_score),
-                'phase': self._get_stress_phase(cortisol_car, cortisol_22h, dhea)
-            }
-        except Exception as e:
-            print(f"Erreur calcul stress index: {e}")
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'phase': 'Indéterminé'}
-    
-    def _interpret_stress(self, score):
-        """Interprète le score de stress"""
+        return "Syndrome métabolique"
+
+    # ============================================================
+    # 2) Stress index (flat markers)
+    # ============================================================
+
+    def calculate_stress_index(self) -> Dict[str, Any]:
+        # On traite None vs 0 correctement
+        cortisol_car = safe_get(self.biological_markers, "cortisol_car_30")
+        if cortisol_car is None:
+            cortisol_car = safe_get(self.biological_markers, "cortisol_car+30")
+
+        cortisol_22h = safe_get(self.biological_markers, "cortisol_22h")
+        dhea = safe_get(self.biological_markers, "dhea")
+        cortisol_reveil = safe_get(self.biological_markers, "cortisol_reveil")
+
+        # si aucune donnée, on sort
+        if all(v is None for v in [cortisol_car, cortisol_22h, dhea, cortisol_reveil]):
+            return {"score": None, "interpretation": "Données insuffisantes", "phase": "Indéterminé"}
+
+        score = 0.0
+
+        # règles simples (documentées)
+        if cortisol_car is not None and cortisol_car < 7.5:
+            score += 40
+        if cortisol_22h is not None and cortisol_22h < 0.3:
+            score += 30
+        if dhea is not None and dhea > 1.5:
+            score -= 10
+        if cortisol_reveil is not None and cortisol_reveil > 17:
+            score += 20
+
+        score = clamp(score, 0.0, 100.0)
+        score = round(score, 1)
+
+        self.composite_indices["stress_index"] = score
+
+        return {
+            "score": score,
+            "interpretation": self._interpret_stress(score),
+            "phase": self._stress_phase(cortisol_car, cortisol_22h, dhea),
+        }
+
+    def _interpret_stress(self, score: float) -> str:
         if score < 20:
             return "Adaptation normale au stress"
-        elif score < 40:
+        if score < 40:
             return "Stress modéré gérable"
-        elif score < 60:
+        if score < 60:
             return "Épuisement surrénalien débutant"
-        elif score < 80:
+        if score < 80:
             return "Épuisement surrénalien modéré"
-        else:
-            return "Épuisement surrénalien sévère"
-    
-    def _get_stress_phase(self, car, cortisol_22h, dhea):
-        """Détermine la phase d'épuisement"""
+        return "Épuisement surrénalien sévère"
+
+    def _stress_phase(self, car: Optional[float], cortisol_22h: Optional[float], dhea: Optional[float]) -> str:
+        if car is None or dhea is None:
+            return "Phase indéterminée"
         if car > 7.5 and dhea > 1.5:
             return "Phase 1: Alarme (hyperactivation)"
-        elif car < 7.5 and dhea > 1.5:
+        if car < 7.5 and dhea > 1.5:
             return "Phase 2: Résistance (épuisement débutant)"
-        elif car < 7.5 and dhea < 1.0:
+        if car < 7.5 and dhea < 1.0:
             return "Phase 3: Épuisement (burnout)"
-        else:
-            return "Phase intermédiaire"
-    
-    def calculate_metabolic_health_score(self):
-        """
-        Calcule le score de santé métabolique
-        """
-        try:
-            homa = self.biological_markers.get('homa_index', 0)
-            quicki = self.biological_markers.get('quicki_index', 1)
-            crp = self.biological_markers.get('crp', 0)
-            vit_d = self.biological_markers.get('vit_d', 0)
-            glycemie = self.biological_markers.get('glycemie', 0)
-            insuline = self.biological_markers.get('insuline', 0)
-            
-            score = 100
-            issues = []
-            
-            # Résistance insulinique
-            if homa > 2.4:
-                penalty = min(30, (homa - 2.4) * 10)
-                score -= penalty
-                issues.append(f"Résistance insulinique (HOMA: {homa:.2f})")
-            
-            if quicki < 0.34:
-                score -= 20
-                issues.append(f"Sensibilité insulinique diminuée (QUICKI: {quicki:.2f})")
-            
-            # Inflammation
-            if crp > 1.0:
-                penalty = min(25, (crp - 1.0) * 8)
-                score -= penalty
-                issues.append(f"Inflammation systémique (CRP: {crp:.2f} mg/L)")
-            
-            # Vitamine D
-            if vit_d < 75:
-                penalty = (75 - vit_d) / 5
-                score -= min(15, penalty)
-                if vit_d < 30:
-                    issues.append(f"Carence vitamine D sévère ({vit_d:.1f} nmol/L)")
-                elif vit_d < 50:
-                    issues.append(f"Insuffisance vitamine D ({vit_d:.1f} nmol/L)")
-            
-            # Glycémie
-            if glycemie > 100:
-                score -= 10
-                if glycemie > 110:
-                    issues.append(f"Hyperglycémie modérée ({glycemie:.1f} mg/dL)")
-            
-            score = max(0, score)
-            
-            self.composite_indices['metabolic_score'] = score
-            
-            return {
-                'score': score,
-                'interpretation': self._interpret_metabolic(score),
-                'issues': issues,
-                'risk_level': self._get_metabolic_risk(score)
-            }
-        except Exception as e:
-            print(f"Erreur calcul metabolic score: {e}")
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'issues': [], 'risk_level': 'Indéterminé'}
-    
-    def _interpret_metabolic(self, score):
-        """Interprète le score métabolique"""
+        return "Phase intermédiaire"
+
+    # ============================================================
+    # 3) Metabolic health score (flat markers)
+    # ============================================================
+
+    def calculate_metabolic_health_score(self) -> Dict[str, Any]:
+        homa = safe_get(self.biological_markers, "homa_index")
+        quicki = safe_get(self.biological_markers, "quicki_index")
+        crp = safe_get(self.biological_markers, "crp")
+        vit_d = safe_get(self.biological_markers, "vit_d")
+        gly = safe_get(self.biological_markers, "glycemie")
+
+        if all(v is None for v in [homa, quicki, crp, vit_d, gly]):
+            return {"score": None, "interpretation": "Données insuffisantes", "issues": [], "risk_level": "–"}
+
+        score = 100.0
+        issues: List[str] = []
+
+        # HOMA
+        if homa is not None and homa > 2.4:
+            penalty = min(30.0, (homa - 2.4) * 10.0)
+            score -= penalty
+            issues.append(f"Résistance insulinique (HOMA: {homa:.2f})")
+
+        # QUICKI
+        if quicki is not None and quicki < 0.34:
+            score -= 20.0
+            issues.append(f"Sensibilité insulinique diminuée (QUICKI: {quicki:.2f})")
+
+        # CRP
+        if crp is not None and crp > 1.0:
+            penalty = min(25.0, (crp - 1.0) * 8.0)
+            score -= penalty
+            issues.append(f"Inflammation systémique (CRP: {crp:.2f} mg/L)")
+
+        # Vit D (nmol/L)
+        if vit_d is not None and vit_d < 75:
+            penalty = min(15.0, (75.0 - vit_d) / 5.0)
+            score -= penalty
+            if vit_d < 30:
+                issues.append(f"Carence vitamine D sévère ({vit_d:.1f} nmol/L)")
+            elif vit_d < 50:
+                issues.append(f"Insuffisance vitamine D ({vit_d:.1f} nmol/L)")
+
+        # Gly
+        if gly is not None and gly > 100:
+            score -= 10.0
+            if gly > 110:
+                issues.append(f"Hyperglycémie modérée ({gly:.1f} mg/dL)")
+
+        score = round(clamp(score, 0.0, 100.0), 1)
+        self.composite_indices["metabolic_score"] = score
+
+        return {
+            "score": score,
+            "interpretation": self._interpret_metabolic(score),
+            "issues": issues,
+            "risk_level": self._risk_band(score, good_high=True),
+        }
+
+    def _interpret_metabolic(self, score: float) -> str:
         if score >= 80:
             return "Santé métabolique optimale"
-        elif score >= 60:
+        if score >= 60:
             return "Santé métabolique correcte"
-        elif score >= 40:
+        if score >= 40:
             return "Dysrégulation métabolique modérée"
-        elif score >= 20:
+        if score >= 20:
             return "Dysrégulation métabolique importante"
-        else:
-            return "Syndrome métabolique établi"
-    
-    def calculate_neurotransmitter_balance(self):
-        """
-        Calcule l'équilibre des neurotransmetteurs
-        """
-        try:
-            dopamine = self.biological_markers.get('dopamine', 0)
-            serotonine = self.biological_markers.get('serotonine', 0)
-            noradrenaline = self.biological_markers.get('noradrenaline', 0)
-            adrenaline = self.biological_markers.get('adrenaline', 0)
-            
-            # Normalisation par rapport aux valeurs optimales
-            scores = []
-            details = {}
-            
-            if dopamine > 0:
-                dopa_score = ((dopamine - 108) / (244 - 108)) * 100
-                dopa_score = max(0, min(100, dopa_score))
-                scores.append(dopa_score)
-                details['dopamine'] = {
-                    'value': dopamine,
-                    'score': dopa_score,
-                    'status': 'Optimal' if 40 <= dopa_score <= 70 else 'Déséquilibré'
-                }
-            
-            if serotonine > 0:
-                sero_score = ((serotonine - 38) / (89 - 38)) * 100
-                sero_score = max(0, min(100, sero_score))
-                scores.append(sero_score)
-                details['serotonine'] = {
-                    'value': serotonine,
-                    'score': sero_score,
-                    'status': 'Optimal' if 40 <= sero_score <= 70 else 'Déséquilibré'
-                }
-            
-            if noradrenaline > 0:
-                nora_score = ((noradrenaline - 11.1) / (28 - 11.1)) * 100
-                nora_score = max(0, min(100, nora_score))
-                scores.append(nora_score)
-                details['noradrenaline'] = {
-                    'value': noradrenaline,
-                    'score': nora_score,
-                    'status': 'Optimal' if 40 <= nora_score <= 70 else 'Déséquilibré'
-                }
-            
-            balance_score = np.mean(scores) if scores else 0
-            
-            self.composite_indices['neuro_balance'] = balance_score
-            
-            return {
-                'score': balance_score,
-                'interpretation': self._interpret_neuro(balance_score),
-                'details': details,
-                'recommendation': self._get_neuro_recommendation(details)
+        return "Syndrome métabolique établi"
+
+    # ============================================================
+    # 4) Neurotransmetteurs (flat markers)
+    # ============================================================
+
+    def calculate_neurotransmitter_balance(self) -> Dict[str, Any]:
+        # valeurs attendues (existant dans ton code)
+        dopamine = safe_get(self.biological_markers, "dopamine")
+        serotonine = safe_get(self.biological_markers, "serotonine")
+        noradrenaline = safe_get(self.biological_markers, "noradrenaline")
+        adrenaline = safe_get(self.biological_markers, "adrenaline")
+
+        # si aucune donnée
+        if all(v is None for v in [dopamine, serotonine, noradrenaline, adrenaline]):
+            return {"score": None, "interpretation": "Données insuffisantes", "details": {}, "recommendation": ""}
+
+        details: Dict[str, Dict[str, Any]] = {}
+        scores: List[Optional[float]] = []
+
+        def add(name: str, value: Optional[float], low: float, high: float):
+            s = score_linear(value, low=low, high=high, reverse=False)
+            if s is None:
+                return
+            details[name] = {
+                "value": value,
+                "score": s,
+                "status": "Optimal" if 40 <= s <= 70 else "Déséquilibré",
             }
-        except Exception as e:
-            print(f"Erreur calcul neuro balance: {e}")
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'details': {}, 'recommendation': ''}
-    
-    def _interpret_neuro(self, score):
-        """Interprète le score neurotransmetteur"""
+            scores.append(s)
+
+        # plages “référence” (celles de ton code)
+        add("dopamine", dopamine, 108, 244)
+        add("serotonine", serotonine, 38, 89)
+        add("noradrenaline", noradrenaline, 11.1, 28)
+        # adrenaline (si tu veux, mets une plage; sinon ignore)
+        # add("adrenaline", adrenaline, X, Y)
+
+        balance = mean_or_none(scores)
+        if balance is None:
+            return {"score": None, "interpretation": "Données insuffisantes", "details": details, "recommendation": ""}
+
+        self.composite_indices["neuro_balance"] = balance
+
+        return {
+            "score": balance,
+            "interpretation": self._interpret_neuro(balance),
+            "details": details,
+            "recommendation": self._neuro_reco(details),
+        }
+
+    def _interpret_neuro(self, score: float) -> str:
         if score >= 70:
             return "Équilibre neurotransmetteur optimal"
-        elif score >= 50:
+        if score >= 50:
             return "Équilibre neurotransmetteur correct"
-        elif score >= 30:
+        if score >= 30:
             return "Déséquilibre neurotransmetteur modéré"
-        else:
-            return "Déséquilibre neurotransmetteur important"
-    
-    def _get_neuro_recommendation(self, details):
-        """Génère recommandations basées sur le profil neurotransmetteur"""
-        recommendations = []
-        
+        return "Déséquilibre neurotransmetteur important"
+
+    def _neuro_reco(self, details: Dict[str, Dict[str, Any]]) -> str:
+        recos: List[str] = []
         for neuro, data in details.items():
-            if data['score'] < 40:
-                if neuro == 'dopamine':
-                    recommendations.append("Stimuler dopamine: L-tyrosine, exercice, objectifs")
-                elif neuro == 'serotonine':
-                    recommendations.append("Stimuler sérotonine: 5-HTP, lumière, gratitude")
-                elif neuro == 'noradrenaline':
-                    recommendations.append("Moduler noradrénaline: adaprogènes, respiration")
-            elif data['score'] > 70:
-                if neuro == 'dopamine':
-                    recommendations.append("Réguler dopamine: réduire stimulants")
-                elif neuro == 'noradrenaline':
-                    recommendations.append("Réguler noradrénaline: relaxation, magnésium")
-        
-        return ' | '.join(recommendations) if recommendations else "Équilibre optimal maintenu"
-    
-    def calculate_neurotransmitter_index(self):
-        """Alias pour calculate_neurotransmitter_balance"""
-        return self.calculate_neurotransmitter_balance()
-    
-    def calculate_inflammation_index(self):
-        """
-        Calcule l'indice inflammatoire composite
-        """
-        try:
-            crp = self.biological_markers.get('crp', 0)
-            lbp = self.biological_markers.get('lbp', 0)
-            zonuline = self.biological_markers.get('zonuline', 0)
-            homocysteine = self.biological_markers.get('homocysteine', 0)
-            
-            score = 0
-            sources = []
-            
-            # CRP ultra-sensible
-            if crp > 1.0:
-                crp_contribution = (crp / 5.0) * 40
-                score += min(40, crp_contribution)
-                sources.append(f"CRP: {crp:.2f} mg/L (inflammation systémique)")
-            
-            # LBP (endotoxémie métabolique)
-            if lbp > 13.1:
-                lbp_contribution = ((lbp - 13.1) / 13.1) * 30
-                score += min(30, lbp_contribution)
-                sources.append(f"LBP: {lbp:.2f} ng/mL (endotoxémie)")
-            
-            # Zonuline (perméabilité intestinale)
-            if zonuline > 37:
-                zonuline_contribution = ((zonuline - 37) / 37) * 30
-                score += min(30, zonuline_contribution)
-                sources.append(f"Zonuline: {zonuline:.2f} ng/mL (intestin perméable)")
-            
-            # Homocystéine
-            if homocysteine > 12:
-                score += 15
-                sources.append(f"Homocystéine: {homocysteine:.2f} µmol/L (inflammation vasculaire)")
-            
-            score = min(100, score)
-            
-            self.composite_indices['inflammation_index'] = score
-            
-            return {
-                'score': score,
-                'interpretation': self._interpret_inflammation(score),
-                'sources': sources,
-                'priority': self._get_inflammation_priority(score, sources)
-            }
-        except Exception as e:
-            print(f"Erreur calcul inflammation index: {e}")
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'sources': [], 'priority': ''}
-    
-    def _interpret_inflammation(self, score):
-        """Interprète le score inflammatoire"""
+            s = data.get("score")
+            if not isinstance(s, (int, float)):
+                continue
+            if s < 40:
+                if neuro == "dopamine":
+                    recos.append("Stimuler dopamine: L-tyrosine, exercice, objectifs")
+                elif neuro == "serotonine":
+                    recos.append("Stimuler sérotonine: 5-HTP, lumière, rythmes")
+                elif neuro == "noradrenaline":
+                    recos.append("Moduler noradrénaline: adaptogènes, respiration")
+            elif s > 70:
+                if neuro == "dopamine":
+                    recos.append("Réguler dopamine: réduire stimulants")
+                elif neuro == "noradrenaline":
+                    recos.append("Réguler noradrénaline: relaxation, magnésium")
+        return " | ".join(recos) if recos else "Équilibre optimal maintenu"
+
+    # ============================================================
+    # 5) Inflammation index (flat markers)
+    # ============================================================
+
+    def calculate_inflammation_index(self) -> Dict[str, Any]:
+        crp = safe_get(self.biological_markers, "crp")
+        lbp = safe_get(self.biological_markers, "lbp")
+        zonuline = safe_get(self.biological_markers, "zonuline")
+        homocysteine = safe_get(self.biological_markers, "homocysteine")
+
+        if all(v is None for v in [crp, lbp, zonuline, homocysteine]):
+            return {"score": None, "interpretation": "Données insuffisantes", "sources": [], "priority": "–"}
+
+        score = 0.0
+        sources: List[str] = []
+
+        if crp is not None and crp > 1.0:
+            score += min(40.0, (crp / 5.0) * 40.0)
+            sources.append(f"CRP: {crp:.2f} mg/L (inflammation systémique)")
+
+        if lbp is not None and lbp > 13.1:
+            score += min(30.0, ((lbp - 13.1) / 13.1) * 30.0)
+            sources.append(f"LBP: {lbp:.2f} ng/mL (endotoxémie)")
+
+        if zonuline is not None and zonuline > 37:
+            score += min(30.0, ((zonuline - 37) / 37) * 30.0)
+            sources.append(f"Zonuline: {zonuline:.2f} ng/mL (perméabilité)")
+
+        if homocysteine is not None and homocysteine > 12:
+            score += 15.0
+            sources.append(f"Homocystéine: {homocysteine:.2f} µmol/L (vasculaire)")
+
+        score = round(clamp(score, 0.0, 100.0), 1)
+        self.composite_indices["inflammation_index"] = score
+
+        return {
+            "score": score,
+            "interpretation": self._interpret_inflammation(score),
+            "sources": sources,
+            "priority": self._priority_band(score),
+        }
+
+    def _interpret_inflammation(self, score: float) -> str:
         if score < 20:
             return "Inflammation physiologique normale"
-        elif score < 40:
+        if score < 40:
             return "Inflammation modérée"
-        elif score < 60:
+        if score < 60:
             return "Inflammation importante"
-        else:
-            return "Inflammation sévère systémique"
-    
-    def _get_inflammation_priority(self, score, sources):
-        """Détermine la priorité d'intervention"""
+        return "Inflammation sévère systémique"
+
+    def _priority_band(self, score: float) -> str:
         if score < 30:
             return "Surveillance"
-        elif score < 60:
+        if score < 60:
             return "Intervention recommandée"
-        else:
-            return "Intervention urgente"
-    
-    def calculate_microbiome_index(self):
-        """
-        Calcule l'indice microbiome basé sur les métabolites bactériens
-        """
-        try:
-            benzoate = self.biological_markers.get('benzoate', 0)
-            hippurate = self.biological_markers.get('hippurate', 0)
-            phenol = self.biological_markers.get('phenol', 0)
-            p_cresol = self.biological_markers.get('p_cresol', 0)
-            indican = self.biological_markers.get('indican', 0)
-            
-            score = 100
-            issues = []
-            
-            # Métabolites de putréfaction (bas = bon)
-            if phenol > 10:
-                score -= min(20, (phenol - 10) * 2)
-                issues.append(f"Phénol élevé: {phenol:.1f}")
-            
-            if p_cresol > 5:
-                score -= min(20, (p_cresol - 5) * 3)
-                issues.append(f"P-crésol élevé: {p_cresol:.1f}")
-            
-            if indican > 20:
-                score -= min(15, (indican - 20))
-                issues.append(f"Indican élevé: {indican:.1f}")
-            
-            # Métabolites bénéfiques (élevé = bon)
-            if hippurate > 0 and hippurate < 200:
-                score -= 15
-                issues.append(f"Hippurate bas: {hippurate:.1f}")
-            
-            if benzoate > 0 and benzoate < 5:
-                score -= 10
-                issues.append(f"Benzoate bas: {benzoate:.1f}")
-            
-            score = max(0, score)
-            
-            self.composite_indices['microbiome_index'] = score
-            
-            return {
-                'score': score,
-                'interpretation': self._interpret_microbiome(score),
-                'issues': issues
-            }
-        except Exception as e:
-            print(f"Erreur calcul microbiome index: {e}")
-            return {'score': 0, 'interpretation': 'Données insuffisantes', 'issues': []}
-    
-    def _interpret_microbiome(self, score):
-        """Interprète le score microbiome"""
+        return "Intervention urgente"
+
+    # ============================================================
+    # 6) Microbiome index (flat markers)
+    # ============================================================
+
+    def calculate_microbiome_index(self) -> Dict[str, Any]:
+        benzoate = safe_get(self.biological_markers, "benzoate")
+        hippurate = safe_get(self.biological_markers, "hippurate")
+        phenol = safe_get(self.biological_markers, "phenol")
+        p_cresol = safe_get(self.biological_markers, "p_cresol")
+        indican = safe_get(self.biological_markers, "indican")
+
+        if all(v is None for v in [benzoate, hippurate, phenol, p_cresol, indican]):
+            return {"score": None, "interpretation": "Données insuffisantes", "issues": []}
+
+        score = 100.0
+        issues: List[str] = []
+
+        if phenol is not None and phenol > 10:
+            score -= min(20.0, (phenol - 10.0) * 2.0)
+            issues.append(f"Phénol élevé: {phenol:.1f}")
+
+        if p_cresol is not None and p_cresol > 5:
+            score -= min(20.0, (p_cresol - 5.0) * 3.0)
+            issues.append(f"P-crésol élevé: {p_cresol:.1f}")
+
+        if indican is not None and indican > 20:
+            score -= min(15.0, (indican - 20.0))
+            issues.append(f"Indican élevé: {indican:.1f}")
+
+        if hippurate is not None and hippurate < 200:
+            score -= 15.0
+            issues.append(f"Hippurate bas: {hippurate:.1f}")
+
+        if benzoate is not None and benzoate < 5:
+            score -= 10.0
+            issues.append(f"Benzoate bas: {benzoate:.1f}")
+
+        score = round(clamp(score, 0.0, 100.0), 1)
+        self.composite_indices["microbiome_index"] = score
+
+        return {"score": score, "interpretation": self._interpret_microbiome(score), "issues": issues}
+
+    def _interpret_microbiome(self, score: float) -> str:
         if score >= 80:
             return "Microbiome équilibré"
-        elif score >= 60:
+        if score >= 60:
             return "Microbiome correct"
-        elif score >= 40:
+        if score >= 40:
             return "Dysbiose modérée"
-        else:
-            return "Dysbiose importante"
-    
-    def calculate_all_indices(self):
+        return "Dysbiose importante"
+
+    # ============================================================
+    # 7) Orchestration
+    # ============================================================
+
+    def calculate_all_indices(self, bio_data_structured: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Calcule tous les indices composites
+        bio_data_structured = dict structuré (metabolisme_glucidique/lipides/...) pour calculate_metabolism_index
         """
         results = {
-            'stress': self.calculate_stress_index(),
-            'metabolic': self.calculate_metabolic_health_score(),
-            'neurotransmitters': self.calculate_neurotransmitter_balance(),
-            'inflammation': self.calculate_inflammation_index(),
-            'microbiome': self.calculate_microbiome_index()
+            "stress": self.calculate_stress_index(),
+            "metabolic": self.calculate_metabolic_health_score(),
+            "neurotransmitters": self.calculate_neurotransmitter_balance(),
+            "inflammation": self.calculate_inflammation_index(),
+            "microbiome": self.calculate_microbiome_index(),
         }
-        
+
+        if bio_data_structured is not None:
+            results["metabolism_index"] = self.calculate_metabolism_index(bio_data_structured)
+
         return results
-    
-    def build_predictive_model(self, target='biological_age', synthetic_population_size=50):
+
+    # ============================================================
+    # 8) Modèle prédictif (population synthétique) - isolé & tracé
+    # ============================================================
+
+    def build_predictive_model(
+        self,
+        target: str = "biological_age",
+        synthetic_population_size: int = 80,
+        noise_sd: float = 0.5,
+        seed: int = 42,
+    ) -> ModelResult:
         """
-        Construit un modèle prédictif par régression multiple
-        
-        Args:
-            target: Variable à prédire ('biological_age', 'youth_capital', 'health_score')
-            synthetic_population_size: Taille de la population synthétique pour validation
+        IMPORTANT:
+        - Ce modèle est une *démo* basée sur une population synthétique autour du patient.
+        - À isoler clairement pour éviter de le présenter comme "appris" sur une cohorte réelle.
         """
+
         try:
-            # Préparer les features
-            features = {}
-            
-            # Ajouter les indices composites
-            if self.composite_indices:
-                features.update(self.composite_indices)
-            
-            # Ajouter les biomarqueurs clés
-            key_markers = [
-                'cortisol_car_30', 'dhea', 'homa_index', 'crp', 'vit_d',
-                'omega3_index', 'dopamine', 'serotonine', 'glycemie'
-            ]
-            
-            for marker in key_markers:
-                value = self.biological_markers.get(marker, 0)
-                if value > 0:
-                    features[marker] = value
-            
-            # Ajouter les scores lifestyle si disponibles
-            if self.lifestyle_scores:
-                features.update(self.lifestyle_scores)
-            
+            features = self._collect_features_for_model()
+
             if len(features) < 4:
-                return {
-                    'success': False,
-                    'message': 'Données insuffisantes pour construire le modèle (minimum 4 variables)',
-                    'r2_score': 0,
-                    'feature_importance': {},
-                    'correlations': {}
-                }
-            
-            # Créer population synthétique
-            np.random.seed(42)
-            X_synthetic = pd.DataFrame()
-            
-            for feature_name, feature_value in features.items():
-                std_dev = feature_value * 0.15  # 15% de variation
-                X_synthetic[feature_name] = np.random.normal(
-                    feature_value, 
-                    std_dev, 
-                    synthetic_population_size
+                return ModelResult(
+                    success=False,
+                    message="Données insuffisantes pour construire le modèle (minimum 4 variables).",
+                    n_features=len(features),
                 )
-            
-            # Générer variable cible synthétique
-            # Pondération basée sur la littérature scientifique
+
+            rng = np.random.default_rng(seed)
+            X = pd.DataFrame()
+
+            # synthèse (15% CV)
+            for name, val in features.items():
+                v = float(val)
+                sd = abs(v) * 0.15 if v != 0 else 0.15
+                X[name] = rng.normal(loc=v, scale=sd, size=synthetic_population_size)
+
+            # poids "expert" (à documenter)
             weights = {
-                'stress_index': -0.02,
-                'metabolic_score': 0.03,
-                'neuro_balance': 0.02,
-                'inflammation_index': -0.015,
-                'cortisol_car_30': -0.01,
-                'homa_index': -0.015,
-                'crp': -0.02,
-                'vit_d': 0.01,
-                'omega3_index': 0.05
+                "stress_index": -0.02,
+                "metabolic_score": 0.03,
+                "neuro_balance": 0.02,
+                "inflammation_index": -0.015,
+                "cortisol_car_30": -0.01,
+                "homa_index": -0.015,
+                "crp": -0.02,
+                "vit_d": 0.01,
+                "omega3_index": 0.05,
             }
-            
-            y_synthetic = np.zeros(synthetic_population_size)
-            
-            for feature in X_synthetic.columns:
-                weight = weights.get(feature, 0.01)  # Poids par défaut
-                y_synthetic += weight * X_synthetic[feature]
-            
-            # Ajouter du bruit
-            y_synthetic += np.random.normal(0, 0.5, synthetic_population_size)
-            
-            # Standardisation
+
+            y = np.zeros(synthetic_population_size, dtype=float)
+            for col in X.columns:
+                y += weights.get(col, 0.01) * X[col].to_numpy()
+
+            y += rng.normal(0, noise_sd, synthetic_population_size)
+
             scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_synthetic)
-            
-            # Entraînement du modèle
+            Xs = scaler.fit_transform(X)
+
             model = LinearRegression()
-            model.fit(X_scaled, y_synthetic)
-            
-            # Métriques
-            r2_score = model.score(X_scaled, y_synthetic)
-            
-            # Coefficients
-            coefficients = pd.DataFrame({
-                'Feature': X_synthetic.columns,
-                'Coefficient': model.coef_,
-                'Abs_Coefficient': np.abs(model.coef_)
-            }).sort_values('Abs_Coefficient', ascending=False)
-            
-            # Prédiction pour le patient
-            patient_features_df = pd.DataFrame([features])
-            patient_features_aligned = patient_features_df.reindex(columns=X_synthetic.columns, fill_value=0)
-            patient_scaled = scaler.transform(patient_features_aligned)
-            prediction = model.predict(patient_scaled)[0]
-            
-            # Corrélations
-            correlations = {}
-            for feature in X_synthetic.columns:
-                corr, pval = stats.pearsonr(X_synthetic[feature], y_synthetic)
-                correlations[feature] = {
-                    'correlation': corr,
-                    'p_value': pval,
-                    'significant': pval < 0.05
-                }
-            
-            # Stocker les résultats
+            model.fit(Xs, y)
+            r2 = float(model.score(Xs, y))
+
+            coeffs = pd.DataFrame(
+                {"Feature": X.columns, "Coefficient": model.coef_, "Abs_Coefficient": np.abs(model.coef_)}
+            ).sort_values("Abs_Coefficient", ascending=False)
+
+            # prédire le patient
+            patient_df = pd.DataFrame([features]).reindex(columns=X.columns, fill_value=0.0)
+            pred = float(model.predict(scaler.transform(patient_df))[0])
+
+            # corrélations
+            corrs: Dict[str, Dict[str, Any]] = {}
+            for col in X.columns:
+                corr, pval = stats.pearsonr(X[col].to_numpy(), y)
+                corrs[col] = {"correlation": float(corr), "p_value": float(pval), "significant": bool(pval < 0.05)}
+
             self.statistical_model = {
-                'model': model,
-                'scaler': scaler,
-                'features': list(X_synthetic.columns),
-                'r2_score': r2_score,
-                'coefficients': coefficients,
-                'correlations': correlations
+                "model": model,
+                "scaler": scaler,
+                "features": list(X.columns),
+                "r2_score": r2,
+                "coefficients": coeffs,
+                "correlations": corrs,
+                "target": target,
+                "synthetic_population_size": synthetic_population_size,
+                "seed": seed,
             }
-            
-            self.predictions[target] = {
-                'value': prediction,
-                'confidence': r2_score
-            }
-            
-            # Préparer feature_importance comme dict pour compatibilité
-            feature_importance = dict(zip(coefficients['Feature'], coefficients['Coefficient']))
-            
-            return {
-                'success': True,
-                'r2_score': r2_score,
-                'coefficients': coefficients,
-                'feature_importance': feature_importance,
-                'prediction': prediction,
-                'correlations': correlations,
-                'n_features': len(features)
-            }
-            
+            self.predictions[target] = {"value": pred, "confidence": r2}
+
+            feature_importance = dict(zip(coeffs["Feature"], coeffs["Coefficient"]))
+
+            return ModelResult(
+                success=True,
+                r2_score=r2,
+                prediction=pred,
+                n_features=len(features),
+                feature_importance=feature_importance,
+                correlations=corrs,
+                coefficients=coeffs,
+            )
+
         except Exception as e:
-            print(f"Erreur construction modèle: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                'success': False,
-                'message': f'Erreur: {str(e)}',
-                'r2_score': 0,
-                'feature_importance': {},
-                'correlations': {}
-            }
-    
-    def calculate_correlations(self):
-        """
-        Calcule les corrélations entre biomarqueurs
-        """
-        if self.statistical_model and 'correlations' in self.statistical_model:
-            corr_data = self.statistical_model['correlations']
-            
-            # Extraire corrélations significatives
-            significant_corr = []
-            for feature, data in corr_data.items():
-                if data['significant']:
-                    significant_corr.append({
-                        'Feature': feature,
-                        'Correlation': data['correlation'],
-                        'P-value': data['p_value']
-                    })
-            
-            return {
-                'significant_correlations': significant_corr,
-                'all_correlations': corr_data
-            }
-        else:
-            return {
-                'significant_correlations': [],
-                'all_correlations': {}
-            }
-    
-    def generate_recommendations(self):
-        """
-        Génère des recommandations personnalisées
-        """
-        recommendations = []
-        
-        # Basé sur les indices composites
-        for key, value in self.composite_indices.items():
-            if 'stress' in key and value > 60:
-                recommendations.append({
-                    'area': 'Gestion du stress',
-                    'priority': 'Élevé',
-                    'recommendation': 'Protocole de réduction du stress recommandé'
-                })
-            elif 'inflammation' in key and value > 40:
-                recommendations.append({
-                    'area': 'Inflammation',
-                    'priority': 'Élevé',
-                    'recommendation': 'Protocole anti-inflammatoire recommandé'
-                })
-            elif 'metabolic' in key or 'metabolism' in key:
-                if value < 60:
-                    recommendations.append({
-                        'area': 'Métabolisme',
-                        'priority': 'Élevé',
-                        'recommendation': 'Optimisation métabolique nécessaire'
-                    })
-        
-        return recommendations if recommendations else [
-            {'area': 'Général', 'priority': 'Moyen', 'recommendation': 'Maintenir les bonnes pratiques actuelles'}
+            logger.exception("Erreur construction modèle")
+            return ModelResult(success=False, message=str(e), n_features=0)
+
+    def _collect_features_for_model(self) -> Dict[str, float]:
+        features: Dict[str, float] = {}
+
+        # indices composites déjà calculés
+        for k, v in self.composite_indices.items():
+            if isinstance(v, (int, float)):
+                features[k] = float(v)
+
+        # biomarqueurs clés (flat)
+        key_markers = [
+            "cortisol_car_30",
+            "dhea",
+            "homa_index",
+            "crp",
+            "vit_d",
+            "omega3_index",
+            "dopamine",
+            "serotonine",
+            "glycemie",
         ]
-    
-    def generate_visualizations(self):
-        """
-        Génère les visualisations statistiques
-        """
-        return self.generate_statistical_visualizations()
-    
-    def generate_statistical_visualizations(self):
-        """
-        Génère les visualisations statistiques
-        """
+        for m in key_markers:
+            v = safe_get(self.biological_markers, m)
+            if v is not None:
+                features[m] = float(v)
+
+        # lifestyle scores (numériques)
+        for k, v in (self.lifestyle_scores or {}).items():
+            fv = to_float(v)
+            if fv is not None:
+                features[k] = float(fv)
+
+        return features
+
+    # ============================================================
+    # 9) Recommandations (simple, déterministe)
+    # ============================================================
+
+    def generate_recommendations(self) -> List[Dict[str, Any]]:
+        recos: List[Dict[str, Any]] = []
+
+        stress = self.composite_indices.get("stress_index")
+        inflam = self.composite_indices.get("inflammation_index")
+        metab = self.composite_indices.get("metabolic_score")
+
+        if isinstance(stress, (int, float)) and stress > 60:
+            recos.append({"area": "Gestion du stress", "priority": "Élevé", "recommendation": "Protocole stress prioritaire"})
+
+        if isinstance(inflam, (int, float)) and inflam > 40:
+            recos.append({"area": "Inflammation", "priority": "Élevé", "recommendation": "Protocole anti-inflammatoire recommandé"})
+
+        if isinstance(metab, (int, float)) and metab < 60:
+            recos.append({"area": "Métabolisme", "priority": "Élevé", "recommendation": "Optimisation métabolique nécessaire"})
+
+        return recos if recos else [{"area": "Général", "priority": "Moyen", "recommendation": "Maintenir les bonnes pratiques"}]
+
+    # ============================================================
+    # 10) Visualisations (sans seaborn, pas de style global)
+    # ============================================================
+
+    def generate_statistical_visualizations(self) -> Optional[BytesIO]:
         try:
             fig = plt.figure(figsize=(16, 10))
-            
-            # 1. Importance des features
-            if self.statistical_model:
-                ax1 = plt.subplot(2, 3, 1)
-                coeffs = self.statistical_model['coefficients'].head(6)
-                colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in coeffs['Coefficient']]
-                ax1.barh(range(len(coeffs)), coeffs['Coefficient'], color=colors)
+
+            # 1) top coefficients
+            ax1 = plt.subplot(2, 3, 1)
+            if self.statistical_model.get("coefficients") is not None:
+                coeffs = self.statistical_model["coefficients"].head(6)
+                ax1.barh(range(len(coeffs)), coeffs["Coefficient"])
                 ax1.set_yticks(range(len(coeffs)))
-                ax1.set_yticklabels([f.replace('_', ' ').title() for f in coeffs['Feature']], fontsize=9)
-                ax1.set_xlabel('Coefficient Standardisé', fontsize=10)
-                ax1.set_title('Impact des Facteurs', fontsize=11, fontweight='bold')
-                ax1.axvline(x=0, color='black', linestyle='--', linewidth=0.8)
-                ax1.grid(axis='x', alpha=0.3)
-            
-            # 2. Profil radar des indices composites
-            ax2 = plt.subplot(2, 3, 2, projection='polar')
+                ax1.set_yticklabels([str(f).replace("_", " ").title() for f in coeffs["Feature"]], fontsize=9)
+                ax1.axvline(x=0, linestyle="--", linewidth=0.8)
+                ax1.set_title("Impact des facteurs")
+            else:
+                ax1.text(0.5, 0.5, "Modèle non disponible", ha="center", va="center")
+
+            # 2) indices (bar)
+            ax2 = plt.subplot(2, 3, 2)
             if self.composite_indices:
-                categories = []
-                values = []
-                
-                for key, value in self.composite_indices.items():
-                    categories.append(key.replace('_', '\n').title())
-                    # Inverser les indices négatifs pour le radar
-                    if 'stress' in key or 'inflammation' in key:
-                        values.append(100 - value)
-                    else:
-                        values.append(value)
-                
-                angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
-                values += values[:1]
-                angles += angles[:1]
-                
-                ax2.plot(angles, values, 'o-', linewidth=2, label='Patient', color='#e74c3c')
-                ax2.fill(angles, values, alpha=0.25, color='#e74c3c')
-                
-                # Ligne optimale
-                optimal = [85] * (len(categories) + 1)
-                ax2.plot(angles, optimal, 'o-', linewidth=2, label='Optimal', color='#3498db', linestyle='--')
-                
-                ax2.set_xticks(angles[:-1])
-                ax2.set_xticklabels(categories, fontsize=8)
+                names = list(self.composite_indices.keys())
+                vals = [self.composite_indices[k] for k in names]
+                ax2.bar(range(len(names)), vals)
+                ax2.set_xticks(range(len(names)))
+                ax2.set_xticklabels([n.replace("_", "\n") for n in names], fontsize=8)
                 ax2.set_ylim(0, 100)
-                ax2.set_title('Profil Biologique Global', fontsize=11, fontweight='bold', pad=20)
-                ax2.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), fontsize=9)
-                ax2.grid(True)
-            
-            # 3. Heatmap des corrélations
+                ax2.set_title("Indices composites")
+            else:
+                ax2.text(0.5, 0.5, "Indices non calculés", ha="center", va="center")
+
+            # 3) corrélations (top 8)
             ax3 = plt.subplot(2, 3, 3)
-            if self.statistical_model and self.statistical_model['correlations']:
-                corr_data = self.statistical_model['correlations']
-                features = list(corr_data.keys())[:8]  # Top 8
-                corr_values = [corr_data[f]['correlation'] for f in features]
-                
-                # Créer matrice pour heatmap
-                corr_matrix = np.array(corr_values).reshape(-1, 1)
-                
-                sns.heatmap(corr_matrix, 
-                           annot=True, 
-                           fmt='.2f', 
-                           cmap='RdYlGn',
-                           center=0,
-                           yticklabels=[f.replace('_', ' ').title()[:15] for f in features],
-                           xticklabels=['Corrélation'],
-                           cbar_kws={'label': 'Coefficient'},
-                           ax=ax3)
-                ax3.set_title('Corrélations avec Santé', fontsize=11, fontweight='bold')
-            
-            # 4. Profil cortisol si disponible
+            corrs = self.statistical_model.get("correlations") or {}
+            if corrs:
+                items = list(corrs.items())[:8]
+                names = [k.replace("_", " ").title()[:18] for k, _ in items]
+                vals = [v["correlation"] for _, v in items]
+                ax3.barh(range(len(names)), vals)
+                ax3.set_yticks(range(len(names)))
+                ax3.set_yticklabels(names, fontsize=8)
+                ax3.set_title("Corrélations (synthétiques)")
+                ax3.axvline(0, linestyle="--", linewidth=0.8)
+            else:
+                ax3.text(0.5, 0.5, "Corrélations non disponibles", ha="center", va="center")
+
+            # 4) cortisol profil
             ax4 = plt.subplot(2, 3, 4)
-            cortisol_times = ['Réveil', 'CAR\n+30min', '12h', '18h', '22h']
-            cortisol_keys = ['cortisol_reveil', 'cortisol_car_30', 'cortisol_12h', 
-                            'cortisol_18h', 'cortisol_22h']
-            cortisol_values = [self.biological_markers.get(k, 0) for k in cortisol_keys]
-            
-            if any(cortisol_values):
-                # Zones optimales
-                optimal_min = [5, 7.5, 1.9, 0.3, 0.3]
-                optimal_max = [17.1, 25.6, 5.2, 3.0, 1.4]
-                
-                x_pos = np.arange(len(cortisol_times))
-                ax4.fill_between(x_pos, optimal_min, optimal_max, alpha=0.2, 
-                                color='#2ecc71', label='Zone optimale')
-                ax4.plot(x_pos, cortisol_values, 'o-', linewidth=2, markersize=8,
-                        label='Patient', color='#e74c3c')
-                
-                ax4.set_xticks(x_pos)
-                ax4.set_xticklabels(cortisol_times, fontsize=9)
-                ax4.set_ylabel('Cortisol (nmol/L)', fontsize=10)
-                ax4.set_title('Profil Circadien Cortisol', fontsize=11, fontweight='bold')
-                ax4.legend(fontsize=9)
-                ax4.grid(True, alpha=0.3)
+            times = ["Réveil", "+30", "12h", "18h", "22h"]
+            keys = ["cortisol_reveil", "cortisol_car_30", "cortisol_12h", "cortisol_18h", "cortisol_22h"]
+            vals = [safe_get(self.biological_markers, k) for k in keys]
+            if any(v is not None for v in vals):
+                xs = np.arange(len(times))
+                y = [v if v is not None else np.nan for v in vals]
+                ax4.plot(xs, y, marker="o")
+                ax4.set_xticks(xs)
+                ax4.set_xticklabels(times)
+                ax4.set_title("Profil cortisol")
             else:
-                ax4.text(0.5, 0.5, 'Données cortisol\nnon disponibles', 
-                        ha='center', va='center', fontsize=12, color='gray')
-                ax4.set_title('Profil Circadien Cortisol', fontsize=11, fontweight='bold')
-            
-            # 5. Balance neurotransmetteurs
+                ax4.text(0.5, 0.5, "Cortisol non disponible", ha="center", va="center")
+
+            # 5) neurotransmetteurs
             ax5 = plt.subplot(2, 3, 5)
-            neuro_data = self.calculate_neurotransmitter_balance()
-            if neuro_data['details']:
-                neuro_names = []
-                neuro_scores = []
-                
-                for name, data in neuro_data['details'].items():
-                    neuro_names.append(name.title())
-                    neuro_scores.append(data['score'])
-                
-                x = np.arange(len(neuro_names))
-                colors_neuro = ['#2ecc71' if 40 <= s <= 70 else '#e74c3c' for s in neuro_scores]
-                
-                ax5.bar(x, neuro_scores, color=colors_neuro, alpha=0.7, edgecolor='black')
-                ax5.axhline(y=50, color='gray', linestyle='--', linewidth=1, alpha=0.5, label='Optimal')
-                ax5.axhspan(40, 70, alpha=0.1, color='green', label='Zone optimale')
-                
-                ax5.set_ylabel('Score Normalisé (%)', fontsize=10)
-                ax5.set_title('Équilibre Neurotransmetteurs', fontsize=11, fontweight='bold')
-                ax5.set_xticks(x)
-                ax5.set_xticklabels(neuro_names, fontsize=9)
+            neuro = self.calculate_neurotransmitter_balance()
+            if neuro.get("details"):
+                n_names = list(neuro["details"].keys())
+                n_scores = [neuro["details"][k]["score"] for k in n_names]
+                ax5.bar(range(len(n_names)), n_scores)
+                ax5.set_xticks(range(len(n_names)))
+                ax5.set_xticklabels([n.title() for n in n_names], fontsize=9)
                 ax5.set_ylim(0, 100)
-                ax5.legend(fontsize=8)
-                ax5.grid(axis='y', alpha=0.3)
+                ax5.set_title("Neurotransmetteurs")
             else:
-                ax5.text(0.5, 0.5, 'Données neurotransmetteurs\nnon disponibles', 
-                        ha='center', va='center', fontsize=12, color='gray')
-                ax5.set_title('Équilibre Neurotransmetteurs', fontsize=11, fontweight='bold')
-            
-            # 6. Distribution des indices composites
+                ax5.text(0.5, 0.5, "Neurotransmetteurs non disponibles", ha="center", va="center")
+
+            # 6) distribution indices (horizontal)
             ax6 = plt.subplot(2, 3, 6)
             if self.composite_indices:
-                indices_names = [k.replace('_', ' ').title() for k in self.composite_indices.keys()]
-                indices_values = list(self.composite_indices.values())
-                
-                # Inverser stress et inflammation pour cohérence visuelle
-                for i, name in enumerate(list(self.composite_indices.keys())):
-                    if 'stress' in name or 'inflammation' in name:
-                        indices_values[i] = 100 - indices_values[i]
-                
-                colors_indices = ['#2ecc71' if v >= 70 else '#f39c12' if v >= 50 else '#e74c3c' 
-                                 for v in indices_values]
-                
-                ax6.barh(range(len(indices_names)), indices_values, color=colors_indices, 
-                        alpha=0.7, edgecolor='black')
-                ax6.set_yticks(range(len(indices_names)))
-                ax6.set_yticklabels(indices_names, fontsize=9)
-                ax6.set_xlabel('Score (%)', fontsize=10)
+                names = list(self.composite_indices.keys())
+                vals = [self.composite_indices[k] for k in names]
+                ax6.barh(range(len(names)), vals)
+                ax6.set_yticks(range(len(names)))
+                ax6.set_yticklabels([n.replace("_", " ").title() for n in names], fontsize=8)
                 ax6.set_xlim(0, 100)
-                ax6.axvline(x=70, color='green', linestyle='--', linewidth=1, alpha=0.5)
-                ax6.axvline(x=50, color='orange', linestyle='--', linewidth=1, alpha=0.5)
-                ax6.set_title('Distribution Indices Santé', fontsize=11, fontweight='bold')
-                ax6.grid(axis='x', alpha=0.3)
-            
+                ax6.set_title("Scores (0-100)")
+            else:
+                ax6.text(0.5, 0.5, "Indices non calculés", ha="center", va="center")
+
             plt.tight_layout()
-            
-            # Sauvegarder en buffer
+
             buf = BytesIO()
-            plt.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+            plt.savefig(buf, format="png", dpi=200, bbox_inches="tight")
             buf.seek(0)
-            plt.close()
-            
+            plt.close(fig)
+
             return buf
-            
-        except Exception as e:
-            print(f"Erreur génération visualisations: {e}")
-            import traceback
-            traceback.print_exc()
+
+        except Exception:
+            logger.exception("Erreur génération visualisations")
             return None
-    
-    def generate_comprehensive_report_data(self):
-        """
-        Génère toutes les données pour le rapport complet
-        """
-        # Calculer tous les indices
-        indices_results = self.calculate_all_indices()
-        
-        # Construire le modèle prédictif
-        model_results = self.build_predictive_model()
-        
-        # Compiler les données du rapport
-        report_data = {
-            'patient_info': self.patient_info,
-            'composite_indices': indices_results,
-            'statistical_model': model_results,
-            'biological_markers': self.biological_markers,
-            'analysis_date': datetime.now().strftime('%d/%m/%Y %H:%M'),
-            'recommendations': self._generate_recommendations(indices_results, model_results)
+
+    # ============================================================
+    # 11) Export données report
+    # ============================================================
+
+    def generate_comprehensive_report_data(self, bio_data_structured: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        indices = self.calculate_all_indices(bio_data_structured=bio_data_structured)
+        model = self.build_predictive_model()
+
+        return {
+            "patient_info": self.patient_info,
+            "composite_indices": indices,
+            "statistical_model": {
+                "success": model.success,
+                "r2_score": model.r2_score,
+                "prediction": model.prediction,
+                "n_features": model.n_features,
+                "message": model.message,
+                "feature_importance": model.feature_importance,
+            },
+            "biological_markers": self.biological_markers,
+            "analysis_date": now_str(),
+            "recommendations": self.generate_recommendations(),
         }
-        
-        return report_data
-    
-    def _generate_recommendations(self, indices_results, model_results):
+
+    # ============================================================
+    # Utils
+    # ============================================================
+
+    def _risk_band(self, score: float, good_high: bool = True) -> str:
         """
-        Génère des recommandations personnalisées basées sur l'analyse statistique
+        good_high=True => score haut = bon
         """
-        recommendations = []
-        
-        # Basé sur le stress
-        if indices_results['stress']['score'] > 40:
-            recommendations.append({
-                'priority': 1 if indices_results['stress']['score'] > 60 else 2,
-                'category': 'Gestion du Stress',
-                'issue': f"Score stress: {indices_results['stress']['score']:.0f}/100",
-                'action': indices_results['stress']['interpretation'],
-                'interventions': [
-                    'Cohérence cardiaque 3x/jour',
-                    'Adaprogènes (Rhodiola, Ashwagandha)',
-                    'Thérapie cognitivo-comportementale',
-                    'Chronothérapie lumineuse matinale'
-                ],
-                'expected_impact': 'Modéré à élevé'
-            })
-        
-        # Basé sur le métabolisme
-        if indices_results['metabolic']['score'] < 60:
-            recommendations.append({
-                'priority': 1,
-                'category': 'Métabolisme',
-                'issue': f"Score métabolique: {indices_results['metabolic']['score']:.0f}/100",
-                'action': indices_results['metabolic']['interpretation'],
-                'interventions': [
-                    'Régime méditerranéen hypoglycémique',
-                    'Activité physique HIIT 3x/semaine',
-                    'Jeûne intermittent 16:8',
-                    'Supplémentation: Berbérine, Chrome, Magnésium'
-                ],
-                'expected_impact': 'Élevé'
-            })
-        
-        # Basé sur l'inflammation
-        if indices_results['inflammation']['score'] > 40:
-            recommendations.append({
-                'priority': 1 if indices_results['inflammation']['score'] > 60 else 2,
-                'category': 'Inflammation',
-                'issue': f"Score inflammation: {indices_results['inflammation']['score']:.0f}/100",
-                'action': 'Réduire inflammation systémique',
-                'interventions': [
-                    'Protocole anti-inflammatoire (oméga-3, curcumine)',
-                    'Réparation barrière intestinale (L-glutamine, zinc)',
-                    'Probiotiques multi-souches',
-                    'Élimination aliments pro-inflammatoires'
-                ],
-                'expected_impact': 'Modéré à élevé'
-            })
-        
-        # Basé sur les neurotransmetteurs
-        neuro_score = indices_results['neurotransmitters']['score']
-        if neuro_score < 50:
-            recommendations.append({
-                'priority': 2,
-                'category': 'Neurotransmetteurs',
-                'issue': f"Déséquilibre neurotransmetteur: {neuro_score:.0f}/100",
-                'action': indices_results['neurotransmitters']['recommendation'],
-                'interventions': [
-                    'Précurseurs: L-tyrosine, 5-HTP, L-théanine',
-                    'Cofacteurs: B6, B9, B12, Magnésium',
-                    'Exercice régulier (boost dopamine)',
-                    'Exposition solaire (sérotonine)'
-                ],
-                'expected_impact': 'Modéré'
-            })
-        
-        # Ajouter recommandations basées sur le modèle statistique
-        if model_results.get('success') and model_results.get('coefficients') is not None:
-            top_factor = model_results['coefficients'].iloc[0]
-            
-            recommendations.append({
-                'priority': 1,
-                'category': 'Levier Principal',
-                'issue': f"Facteur #1 identifié: {top_factor['Feature']}",
-                'action': f"Impact statistique: {top_factor['Coefficient']:.3f}",
-                'interventions': [
-                    'Focus prioritaire sur ce levier',
-                    'Suivi mensuel de ce paramètre',
-                    'Ajustements personnalisés basés sur réponse'
-                ],
-                'expected_impact': 'Très élevé'
-            })
-        
-        # Trier par priorité
-        recommendations.sort(key=lambda x: x['priority'])
-        
-        return recommendations
+        if good_high:
+            if score >= 70:
+                return "Faible"
+            if score >= 50:
+                return "Modéré"
+            if score >= 30:
+                return "Élevé"
+            return "Très élevé"
+        else:
+            # score haut = pire (si tu en as besoin)
+            if score < 30:
+                return "Faible"
+            if score < 50:
+                return "Modéré"
+            if score < 70:
+                return "Élevé"
+            return "Très élevé"
 
 
-# Export de la classe
-__all__ = ['AlgoLifeStatisticalAnalysis']
+__all__ = ["AlgoLifeStatisticalAnalysis"]
