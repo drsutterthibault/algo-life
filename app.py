@@ -21,6 +21,10 @@ from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 import json
 
+# ✅ PATCH: force reload module PDF (évite ancienne version / cache / doublon de fichier)
+import importlib
+import algolife_pdf_generator as pdfgen
+
 # PDF extraction
 try:
     import PyPDF2
@@ -31,8 +35,11 @@ except ImportError:
 
 # Import modules ALGO-LIFE
 from algolife_statistical_analysis import AlgoLifeStatisticalAnalysis
-from algolife_pdf_generator import generate_algolife_pdf_report
 from algolife_engine import AlgoLifeEngine
+
+# ✅ PATCH: reload au runtime + alias fonction
+pdfgen = importlib.reload(pdfgen)
+generate_algolife_pdf_report = pdfgen.generate_algolife_pdf_report
 
 # ============================================================================
 # CONFIGURATION
@@ -1032,8 +1039,6 @@ class HealthScoreCalculator:
         
         # HORMONES
         hormone_score = 100
-        hormone_count = 0
-        
         cortisol_scores = []
         for cort_key in ['cortisol_reveil', 'cortisol_car_30', 'cortisol_12h', 'cortisol_18h', 'cortisol_22h']:
             if cort_key in biomarkers:
@@ -1196,26 +1201,19 @@ class HealthScoreCalculator:
         
         # Facteurs d'activité
         activity_factors = {
-            "sedentary": 1.2,       # Peu ou pas d'exercice
-            "light": 1.375,         # Exercice léger 1-3 jours/semaine
-            "moderate": 1.55,       # Exercice modéré 3-5 jours/semaine
-            "active": 1.725,        # Exercice intense 6-7 jours/semaine
-            "very_active": 1.9      # Exercice très intense
+            "sedentary": 1.2,
+            "light": 1.375,
+            "moderate": 1.55,
+            "active": 1.725,
+            "very_active": 1.9
         }
         
         activity_factor = activity_factors.get(activity_level, 1.55)
-        
-        # DET (Dépense Énergétique Totale)
         det = bmr * activity_factor
         
-        # Macronutriments
-        # Protéines: 1.6-2.2 g/kg pour adulte actif
         proteins_g = weight * 1.8
+        lipids_g = (det * 0.27) / 9
         
-        # Lipides: 25-30% des calories
-        lipids_g = (det * 0.27) / 9  # 1g lipide = 9 kcal
-        
-        # Glucides: le reste
         proteins_kcal = proteins_g * 4
         lipids_kcal = lipids_g * 9
         carbs_kcal = det - proteins_kcal - lipids_kcal
@@ -1242,10 +1240,6 @@ class RecommendationEngine:
         health_score: Dict,
         biological_age_data: Dict
     ) -> Dict:
-        """
-        Génère des recommandations personnalisées multi-niveaux
-        """
-        
         recommendations = {
             'micronutrition': [],
             'alimentation': [],
@@ -1255,12 +1249,10 @@ class RecommendationEngine:
         
         priorities = []
         
-        # Analyse biomarqueur par biomarqueur
         for biomarker_key, value in biomarkers.items():
             classification = BiomarkerDatabase.classify_biomarker(biomarker_key, value, age, sex)
             
             if classification['status'] in ['abnormal', 'deficient', 'high', 'elevated', 'low']:
-                # Recommandations spécifiques
                 recs = RecommendationEngine._get_biomarker_recommendations(biomarker_key, value, classification)
                 
                 for rec_type, rec_list in recs.items():
@@ -1273,7 +1265,6 @@ class RecommendationEngine:
                     'priority': 'Élevé' if classification['status'] in ['deficient', 'high'] else 'Moyen'
                 })
         
-        # Dédupliquer
         for key in recommendations:
             recommendations[key] = list(set(recommendations[key]))
         
@@ -1284,8 +1275,6 @@ class RecommendationEngine:
     
     @staticmethod
     def _get_biomarker_recommendations(biomarker: str, value: float, classification: Dict) -> Dict:
-        """Recommandations spécifiques par biomarqueur"""
-        
         recs = {
             'micronutrition': [],
             'alimentation': [],
@@ -1293,7 +1282,6 @@ class RecommendationEngine:
             'supplements': []
         }
         
-        # GLUTATHION
         if biomarker == 'glutathion_total' and classification['status'] in ['low', 'deficient']:
             recs['supplements'].append("N-acétyl-cystéine (NAC) : 600–1200 mg/jour")
             recs['supplements'].append("Glycine : 2–3 g/jour (soir)")
@@ -1301,7 +1289,6 @@ class RecommendationEngine:
             recs['alimentation'].append("Privilégiez les protéines soufrées : ail, oignon, crucifères")
             recs['alimentation'].append("Consommez des œufs et du poulet (source de cystéine)")
         
-        # COENZYME Q10
         if biomarker == 'coenzyme_q10' and classification['status'] in ['low', 'deficient']:
             recs['supplements'].append("Coenzyme Q10 (ubiquinol) : 200 mg/jour avec repas gras")
             recs['supplements'].append("PQQ : 10–20 mg/jour")
@@ -1309,14 +1296,12 @@ class RecommendationEngine:
             recs['alimentation'].append("Intégrez sardines et maquereaux")
             recs['lifestyle'].append("Si vous prenez des statines, la supplémentation en CoQ10 est essentielle")
         
-        # SÉLÉNIUM
         if biomarker == 'selenium' and classification['status'] in ['low', 'deficient']:
             recs['supplements'].append("Sélénium (sélénométhionine) : 100–200 µg/jour")
             recs['alimentation'].append("Consommez 2-3 noix du Brésil par jour")
             recs['alimentation'].append("Mangez des poissons et fruits de mer")
             recs['alimentation'].append("Consommez des abats et œufs bio")
         
-        # FERRITINE
         if biomarker == 'ferritine':
             if classification['status'] == 'deficient':
                 recs['supplements'].append("Fer bisglycinate : 30 mg/jour (à jeun avec vitamine C)")
@@ -1326,7 +1311,6 @@ class RecommendationEngine:
                 recs['lifestyle'].append("Envisagez des saignées thérapeutiques (suivi médical)")
                 recs['alimentation'].append("Limitez les aliments enrichis en fer")
         
-        # VITAMINE D
         if biomarker == 'vit_d':
             if classification['status'] in ['deficient', 'insufficient']:
                 dosage = 4000 if value < 20 else 2000
@@ -1335,14 +1319,12 @@ class RecommendationEngine:
             elif value > 100:
                 recs['lifestyle'].append("Réduire la supplémentation en vitamine D")
         
-        # CRP
         if biomarker == 'crp' and value > 3:
             recs['supplements'].append("Oméga-3 (EPA/DHA) : 2-3 g/jour")
             recs['supplements'].append("Curcumine : 500-1000 mg/jour")
             recs['alimentation'].append("Adoptez un régime anti-inflammatoire (méditerranéen)")
             recs['lifestyle'].append("Réduisez le stress chronique")
         
-        # HOMA / INSULINO-RÉSISTANCE
         if biomarker == 'homa_index' and value > 2.4:
             recs['supplements'].append("Berbérine : 500 mg 3x/jour")
             recs['supplements'].append("Chrome picolinate : 200 µg/jour")
@@ -1351,7 +1333,6 @@ class RecommendationEngine:
             recs['lifestyle'].append("Pratiquez le jeûne intermittent (16:8)")
             recs['lifestyle'].append("Exercice de résistance 3x/semaine")
         
-        # ZONULINE / PERMÉABILITÉ INTESTINALE
         if biomarker == 'zonuline' and value > 50:
             recs['supplements'].append("L-glutamine : 5-10 g/jour")
             recs['supplements'].append("Zinc carnosine : 75 mg 2x/jour")
@@ -1359,7 +1340,6 @@ class RecommendationEngine:
             recs['alimentation'].append("Évitez gluten et produits laitiers pendant 3 mois")
             recs['alimentation'].append("Bouillon d'os 2-3x/semaine")
         
-        # CORTISOL / DHEA
         if biomarker in ['cortisol_reveil', 'cortisol_car_30'] and classification['status'] == 'low':
             recs['supplements'].append("Rhodiola rosea : 200-400 mg/jour")
             recs['supplements'].append("Ashwagandha : 300-600 mg/jour")
@@ -1370,7 +1350,6 @@ class RecommendationEngine:
             recs['supplements'].append("DHEA : 25-50 mg/jour (sous supervision médicale)")
             recs['lifestyle'].append("Exercice régulier (augmente DHEA naturellement)")
         
-        # HOMOCYSTÉINE
         if biomarker == 'homocysteine' and value > 10:
             recs['supplements'].append("Complexe vitamines B : B6 (50mg), B9 (800µg), B12 (1000µg)")
             recs['supplements'].append("TMG (triméthylglycine) : 500-1000 mg/jour")
@@ -1417,6 +1396,12 @@ def init_session_state():
     if 'recommendations' not in st.session_state:
         st.session_state.recommendations = None
 
+    if 'nutritional_needs' not in st.session_state:
+        st.session_state.nutritional_needs = None
+
+    if 'engine_results' not in st.session_state:
+        st.session_state.engine_results = None
+
 init_session_state()
 
 
@@ -1438,6 +1423,20 @@ st.markdown("---")
 
 with st.sidebar:
     st.header("👤 Informations Patient")
+
+    # ✅ PATCH DEBUG: afficher le fichier réellement chargé
+    st.caption("🧪 Debug PDF generator")
+    st.code(getattr(pdfgen, "__file__", "unknown"), language="text")
+    st.caption(f"PDFGEN LOADED: {datetime.now().strftime('%H:%M:%S')}")
+
+    # ✅ PATCH: bouton reset cache + rerun
+    if st.button("🧹 Reset (cache + rerun)", use_container_width=True):
+        try:
+            st.cache_data.clear()
+            st.cache_resource.clear()
+        except Exception:
+            pass
+        st.rerun()
     
     # Auto-fill from extracted data if available
     default_name = st.session_state.extracted_data['patient_info'].get('nom', 'Patient')
@@ -1558,11 +1557,7 @@ with tab1:
             if st.button("🔍 Extraire", key="extract_bio_btn", use_container_width=True):
                 with st.spinner("Extraction en cours..."):
                     text = AdvancedPDFExtractor.extract_text(bio_pdf)
-                    
-                    # Extract biomarkers
                     biomarkers = AdvancedPDFExtractor.extract_biomarkers(text, debug=debug_bio)
-                    
-                    # Extract patient info
                     patient_info = AdvancedPDFExtractor.extract_patient_info(text)
                     
                     if biomarkers:
@@ -1598,9 +1593,7 @@ with tab1:
                 with st.spinner("Extraction en cours..."):
                     text = AdvancedPDFExtractor.extract_text(epi_pdf)
                     
-                    # Pour l'instant, patterns basiques - à améliorer
                     epi_data = {}
-                    
                     patterns_epi = {
                         'biological_age': r'[âa]ge\s+biologique[:\s]+(\d+\.?\d*)',
                         'telomere_length': r't[ée]lom[èe]re.*?(\d+\.?\d*)',
@@ -1642,9 +1635,7 @@ with tab1:
                 with st.spinner("Extraction en cours..."):
                     text = AdvancedPDFExtractor.extract_text(img_pdf)
                     
-                    # Patterns DXA
                     img_data = {}
-                    
                     patterns_img = {
                         'body_fat_percentage': r'masse\s+grasse.*?(\d+\.?\d*)\s*%',
                         'lean_mass': r'masse\s+maigre.*?(\d+\.?\d*)',
@@ -1684,7 +1675,6 @@ with tab1:
     total = total_bio + total_epi + total_img
     
     col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
-    
     with col_sum1:
         st.metric("🧪 Biomarqueurs Bio", total_bio)
     with col_sum2:
@@ -1705,14 +1695,12 @@ with tab1:
         if st.button("🚀 LANCER L'ANALYSE COMPLÈTE", type="primary", use_container_width=True, key="launch_full_analysis"):
             with st.spinner("🔬 Analyse en cours... Cela peut prendre quelques secondes."):
                 try:
-                    # Récupérer les données patient
                     patient_info = st.session_state.patient_data['patient_info']
                     biomarkers = st.session_state.patient_data['biological_markers']
                     
                     if not patient_info or not biomarkers:
                         st.error("❌ Veuillez d'abord enregistrer les informations patient et extraire les biomarqueurs.")
                     else:
-                        # 1. Calcul âge biologique
                         biological_age_data = HealthScoreCalculator.calculate_biological_age(
                             biomarkers=biomarkers,
                             chronological_age=patient_info['age'],
@@ -1720,7 +1708,6 @@ with tab1:
                         )
                         st.session_state.biological_age = biological_age_data
                         
-                        # 2. Calcul score de santé
                         health_score_data = HealthScoreCalculator.calculate_health_score(
                             biomarkers=biomarkers,
                             age=patient_info['age'],
@@ -1728,7 +1715,6 @@ with tab1:
                         )
                         st.session_state.health_score = health_score_data
                         
-                        # 3. Calcul besoins nutritionnels
                         nutritional_needs = HealthScoreCalculator.calculate_nutritional_needs(
                             age=patient_info['age'],
                             sex=patient_info['sexe'],
@@ -1738,7 +1724,6 @@ with tab1:
                         )
                         st.session_state.nutritional_needs = nutritional_needs
                         
-                        # 4. Génération recommandations
                         recommendations_data = RecommendationEngine.generate_personalized_recommendations(
                             biomarkers=biomarkers,
                             age=patient_info['age'],
@@ -1748,11 +1733,8 @@ with tab1:
                         )
                         st.session_state.recommendations = recommendations_data
                         
-                        # 5. Analyse AlgoLifeEngine (si disponible)
                         try:
                             engine = AlgoLifeEngine()
-                            
-                            # Préparer les données
                             dxa_data = st.session_state.patient_data.get('imaging_data', {})
                             
                             bio_data_engine = {
@@ -1798,7 +1780,6 @@ with tab1:
                             st.warning(f"⚠️ AlgoLifeEngine non disponible: {e}")
                             st.session_state.engine_results = None
                         
-                        # Marquer l'analyse comme complète
                         st.session_state.analysis_complete = True
                         
                         st.success("✅ Analyse complète terminée!")
@@ -1824,7 +1805,6 @@ with tab2:
     if not st.session_state.analysis_complete:
         st.info("📥 Veuillez d'abord importer des données et lancer l'analyse depuis l'onglet 'Import & Extraction'")
     else:
-        # SECTION 1: SCORES PRINCIPAUX
         st.subheader("🎯 Scores Principaux")
         
         health_score = st.session_state.health_score
@@ -1838,7 +1818,6 @@ with tab2:
             grade = health_score['grade']
             grade_label = health_score['grade_label']
             
-            # Choisir la classe CSS selon le score
             if score >= 95:
                 score_class = "score-excellent"
             elif score >= 80:
@@ -1862,17 +1841,15 @@ with tab2:
             bio_age = biological_age['biological_age']
             chrono_age = biological_age['chronological_age']
             delta = biological_age['delta']
-            status = biological_age['status']
             
-            # Déterminer la couleur
             if delta < -1:
-                color = "#10b981"  # vert
+                color = "#10b981"
                 icon = "⬇️"
             elif delta <= 1:
-                color = "#3b82f6"  # bleu
+                color = "#3b82f6"
                 icon = "↔️"
             else:
-                color = "#f59e0b"  # orange
+                color = "#f59e0b"
                 icon = "⬆️"
             
             st.markdown(f"""
@@ -1892,12 +1869,9 @@ with tab2:
         
         st.divider()
         
-        # SECTION 2: SCORES PAR CATÉGORIE
         st.subheader("📈 Scores par Catégorie")
-        
         category_scores = health_score['category_scores']
         
-        # Créer un DataFrame pour l'affichage
         df_categories = pd.DataFrame([
             {
                 'Catégorie': cat.replace('_', ' ').title(),
@@ -1905,44 +1879,31 @@ with tab2:
                 'Status': 'Excellent' if score >= 90 else 'Bon' if score >= 75 else 'Moyen' if score >= 60 else 'Faible'
             }
             for cat, score in category_scores.items()
-        ])
-        
-        df_categories = df_categories.sort_values('Score', ascending=False)
+        ]).sort_values('Score', ascending=False)
         
         st.dataframe(df_categories, use_container_width=True, hide_index=True)
         
-        # Graphique
         import matplotlib.pyplot as plt
-        
         fig, ax = plt.subplots(figsize=(10, 6))
-        
         categories = [cat.replace('_', ' ').title() for cat in category_scores.keys()]
-        scores = list(category_scores.values())
-        colors = ['#10b981' if s >= 90 else '#3b82f6' if s >= 75 else '#f59e0b' if s >= 60 else '#ef4444' for s in scores]
-        
-        ax.barh(categories, scores, color=colors)
+        scores_list = list(category_scores.values())
+        colors = ['#10b981' if s >= 90 else '#3b82f6' if s >= 75 else '#f59e0b' if s >= 60 else '#ef4444' for s in scores_list]
+        ax.barh(categories, scores_list, color=colors)
         ax.set_xlabel('Score (/100)', fontsize=12, fontweight='bold')
         ax.set_title('Scores par Catégorie', fontsize=14, fontweight='bold')
         ax.set_xlim(0, 100)
         ax.grid(axis='x', alpha=0.3)
-        
         plt.tight_layout()
         st.pyplot(fig)
         
         st.divider()
         
-        # SECTION 3: CLASSIFICATION DES BIOMARQUEURS
         st.subheader("🔬 Classification des Biomarqueurs")
         
         biomarkers = st.session_state.patient_data['biological_markers']
         patient_info = st.session_state.patient_data['patient_info']
         
-        # Classifier tous les biomarqueurs
-        classified = {
-            'normaux': [],
-            'a_surveiller': [],
-            'anormaux': []
-        }
+        classified = {'normaux': [], 'a_surveiller': [], 'anormaux': []}
         
         for biomarker_key, value in biomarkers.items():
             classification = BiomarkerDatabase.classify_biomarker(
@@ -1959,21 +1920,19 @@ with tab2:
                 'Biomarqueur': biomarker_key.replace('_', ' ').title(),
                 'Valeur': value,
                 'Unité': bio_info.get('unit', ''),
-                'Status': classification['status'],
-                'Interprétation': classification['interpretation'],
-                'Icon': classification['icon']
+                'Status': classification.get('status', 'unknown'),
+                'Interprétation': classification.get('interpretation', ''),
+                'Icon': classification.get('icon', '')
             }
             
-            if classification['status'] in ['optimal', 'normal']:
+            if classification.get('status') in ['optimal', 'normal']:
                 classified['normaux'].append(item)
-            elif classification['status'] in ['insufficient', 'low', 'elevated']:
+            elif classification.get('status') in ['insufficient', 'low', 'elevated']:
                 classified['a_surveiller'].append(item)
             else:
                 classified['anormaux'].append(item)
         
-        # Affichage
         col_class1, col_class2, col_class3 = st.columns(3)
-        
         with col_class1:
             st.metric("✅ Normaux", len(classified['normaux']), delta=None)
         with col_class2:
@@ -1981,37 +1940,30 @@ with tab2:
         with col_class3:
             st.metric("⚠️ Anormaux", len(classified['anormaux']), delta=None)
         
-        # Détails
         with st.expander("✅ Biomarqueurs Normaux", expanded=False):
             if classified['normaux']:
-                df_normaux = pd.DataFrame(classified['normaux'])
-                st.dataframe(df_normaux, use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(classified['normaux']), use_container_width=True, hide_index=True)
             else:
                 st.info("Aucun biomarqueur normal.")
         
         with st.expander("⚡ Biomarqueurs À Surveiller", expanded=True):
             if classified['a_surveiller']:
-                df_surveiller = pd.DataFrame(classified['a_surveiller'])
-                st.dataframe(df_surveiller, use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(classified['a_surveiller']), use_container_width=True, hide_index=True)
             else:
                 st.success("Aucun biomarqueur à surveiller.")
         
         with st.expander("⚠️ Biomarqueurs Anormaux", expanded=True):
             if classified['anormaux']:
-                df_anormaux = pd.DataFrame(classified['anormaux'])
-                st.dataframe(df_anormaux, use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(classified['anormaux']), use_container_width=True, hide_index=True)
             else:
                 st.success("Aucun biomarqueur anormal.")
         
         st.divider()
         
-        # SECTION 4: BESOINS NUTRITIONNELS
         st.subheader("🍽️ Besoins Nutritionnels Calculés")
-        
         nutritional_needs = st.session_state.nutritional_needs
         
         col_nut1, col_nut2, col_nut3, col_nut4, col_nut5 = st.columns(5)
-        
         with col_nut1:
             st.metric("BMR", f"{nutritional_needs['bmr']:.0f} kcal", help="Métabolisme de base")
         with col_nut2:
@@ -2025,21 +1977,16 @@ with tab2:
         
         st.divider()
         
-        # SECTION 5: RECOMMANDATIONS
         st.subheader("💡 Recommandations Personnalisées")
-        
         recommendations = st.session_state.recommendations
         
-        # Priorités
-        if recommendations['priorities']:
+        if recommendations and recommendations.get('priorities'):
             st.markdown("#### ⚠️ Priorités d'Action")
-            
-            for i, priority in enumerate(recommendations['priorities'][:5], 1):  # Top 5
+            for i, priority in enumerate(recommendations['priorities'][:5], 1):
                 biomarker_name = priority['biomarker'].replace('_', ' ').title()
                 value = priority['value']
                 status = priority['status']
                 priority_level = priority['priority']
-                
                 alert_class = "alert-danger" if priority_level == "Élevé" else "alert-warning"
                 
                 st.markdown(f"""
@@ -2049,28 +1996,29 @@ with tab2:
                 </div>
                 """, unsafe_allow_html=True)
         
-        # Recommandations détaillées
         st.markdown("#### 📋 Recommandations Détaillées")
-        
         tabs_reco = st.tabs(["💊 Suppléments", "🥗 Alimentation", "🏃 Lifestyle"])
         
         with tabs_reco[0]:
-            if recommendations['recommendations']['supplements']:
-                for supplement in recommendations['recommendations']['supplements']:
+            supps = (recommendations or {}).get('recommendations', {}).get('supplements', [])
+            if supps:
+                for supplement in supps:
                     st.markdown(f"- {supplement}")
             else:
                 st.info("Aucune supplémentation spécifique recommandée.")
         
         with tabs_reco[1]:
-            if recommendations['recommendations']['alimentation']:
-                for aliment in recommendations['recommendations']['alimentation']:
+            alims = (recommendations or {}).get('recommendations', {}).get('alimentation', [])
+            if alims:
+                for aliment in alims:
                     st.markdown(f"- {aliment}")
             else:
                 st.info("Aucune recommandation alimentaire spécifique.")
         
         with tabs_reco[2]:
-            if recommendations['recommendations']['lifestyle']:
-                for lifestyle in recommendations['recommendations']['lifestyle']:
+            lifes = (recommendations or {}).get('recommendations', {}).get('lifestyle', [])
+            if lifes:
+                for lifestyle in lifes:
                     st.markdown(f"- {lifestyle}")
             else:
                 st.info("Aucune recommandation lifestyle spécifique.")
@@ -2079,7 +2027,6 @@ with tab2:
 # ============================================================================
 # TAB 3 - RAPPORT PDF
 # ============================================================================
-
 
 with tab3:
     st.header("📄 Génération du Rapport Professionnel")
@@ -2105,40 +2052,22 @@ with tab3:
         if st.button("📥 GÉNÉRER LE RAPPORT PDF", type="primary", use_container_width=True, key="generate_pdf_btn"):
             with st.spinner("📄 Génération du rapport en cours... Cela peut prendre quelques secondes."):
                 try:
-                    # Préparer toutes les données (optionnel, mais tu peux le garder)
-                    report_data = {
-                        'patient_info': st.session_state.patient_data['patient_info'],
-                        'biomarkers': st.session_state.patient_data['biological_markers'],
-                        'health_score': st.session_state.health_score,
-                        'biological_age': st.session_state.biological_age,
-                        'nutritional_needs': st.session_state.nutritional_needs,
-                        'recommendations': st.session_state.recommendations,
-                        'engine_results': st.session_state.engine_results
-                    }
-
-                    # ✅ Générer le PDF (TEMPLATE v4.1)
                     pdf_buffer = generate_algolife_pdf_report(
                         patient_data=st.session_state.patient_data,
                         biomarker_results=st.session_state.patient_data["biological_markers"],
-
-                        # ✅ AJOUTS OBLIGATOIRES POUR LE TEMPLATE v4.1
                         health_score=st.session_state.health_score,
                         biological_age=st.session_state.biological_age,
                         nutritional_needs=st.session_state.nutritional_needs,
                         recommendations=st.session_state.recommendations,
-
-                        # ✅ OPTIONNEL
                         engine_results=st.session_state.engine_results,
                         chart_buffer=None
                     )
 
                     st.success("✅ Rapport PDF généré avec succès!")
                     
-                    # Nom du fichier
                     patient_name = st.session_state.patient_data['patient_info'].get('nom', 'Patient')
                     filename = f"ALGO-LIFE_{patient_name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
                     
-                    # Bouton de téléchargement
                     st.download_button(
                         label="📥 TÉLÉCHARGER LE RAPPORT PDF",
                         data=pdf_buffer.getvalue(),
@@ -2164,7 +2093,7 @@ with tab3:
 with tab4:
     st.header("ℹ️ Documentation ALGO-LIFE")
     
-    st.markdown("""
+    st.markdown(f"""
     ### 🎯 Vue d'Ensemble
     
     **ALGO-LIFE** est une plateforme multimodale d'analyse de santé fonctionnelle qui intègre:
@@ -2200,74 +2129,6 @@ with tab4:
     - Graphiques et visualisations
     - Prêt pour consultation patient
     
-    ### 🔬 Biomarqueurs Supportés
-    
-    #### Hormones
-    - Cortisol salivaire (5 points: réveil, CAR+30, 12h, 18h, 22h)
-    - DHEA
-    
-    #### Métabolisme
-    - Glycémie à jeun
-    - Insuline
-    - Index HOMA-IR / QUICKI
-    
-    #### Inflammation
-    - CRP ultra-sensible
-    - Homocystéine
-    
-    #### Micronutriments
-    - Vitamine D (25-OH)
-    - Ferritine
-    - Zinc
-    - Sélénium
-    - Magnésium érythrocytaire
-    
-    #### Antioxydants
-    - Glutathion total
-    - Coenzyme Q10
-    - Glutathion peroxydase (GPX)
-    
-    #### Santé Intestinale
-    - Zonuline
-    - LBP (Lipopolysaccharide Binding Protein)
-    
-    #### Neurotransmetteurs
-    - Dopamine
-    - Sérotonine
-    - Noradrénaline
-    - Adrénaline
-    
-    #### Cardiovasculaire
-    - Homocystéine
-    - Index Oméga-3
-    - Ratio AA/EPA
-    
-    ### 📊 Interprétation des Scores
-    
-    #### Score Santé
-    - **95-100**: A+ (Excellent)
-    - **90-94**: A (Très bon)
-    - **85-89**: A- (Très bon)
-    - **80-84**: B+ (Bon)
-    - **75-79**: B (Bon)
-    - **70-74**: B- (Satisfaisant)
-    - **60-69**: C (Moyen)
-    - **<60**: D (Faible)
-    
-    #### Âge Biologique
-    - **Delta < -3 ans**: Excellent (vieillissement ralenti)
-    - **Delta -3 à -1 ans**: Très bon
-    - **Delta -1 à +1 ans**: Bon (âge en accord)
-    - **Delta +1 à +3 ans**: Modéré
-    - **Delta > +3 ans**: Préoccupant (vieillissement accéléré)
-    
-    ### 🔐 Sécurité & Confidentialité
-    
-    - Toutes les données restent locales sur votre machine
-    - Aucune transmission de données patient sur internet
-    - Conforme RGPD
-    - Rapports PDF sécurisés
-    
     ### 📞 Support & Contact
     
     **Développeur**: Dr Thibault SUTTER - Biologiste  
@@ -2277,13 +2138,6 @@ with tab4:
     
     **Version**: 4.0 - Janvier 2026  
     **Dernière mise à jour**: {datetime.now().strftime('%d/%m/%Y')}
-    
-    ### 📚 Références Scientifiques
-    
-    - Horvath S. (2013). DNA methylation age of human tissues and cell types. Genome Biology.
-    - Mifflin-St Jeor equation for BMR calculation
-    - HOMA-IR: Matthews et al. (1985). Diabetologia
-    - CAR (Cortisol Awakening Response): Pruessner et al. (1997). Psychoneuroendocrinology
     
     ### ⚖️ Disclaimer
     
