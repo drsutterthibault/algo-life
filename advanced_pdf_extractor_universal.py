@@ -1,12 +1,12 @@
 """
-ALGO-LIFE - Universal PDF Extractor v3.2 (CLEAN BIOMARKERS ONLY)
-✅ Extraction ciblée biomarqueurs connus (TARGETED)
-✅ Extraction ouverte STRICTE (OPEN) = biomarqueurs + valeur + unité + ref range
-✅ Patch SYNLAB amélioré + récupération des références
-✅ Anti-bruit (dates, pages, méthodes, texte non analytique)
+ALGO-LIFE - Universal Extractor v2.3 (CLEAN + REF RANGES + SYNLAB)
+✅ Extraction propre biomarqueurs uniquement (anti-parasites)
+✅ Parse unités + références: (low–high), >x, <x
+✅ SYNLAB patch robuste (lignes tabulées + méthodes entre parenthèses)
+✅ Sortie structurée prête pour rules engine Excel
 
 Author: Dr Thibault SUTTER
-Date: January 2026
+Date: Jan 2026
 """
 
 import re
@@ -26,195 +26,19 @@ except ImportError:
     PYPDF2_AVAILABLE = False
 
 
-# ---------------------------------------------------------------------------
-# Helpers parsing ranges
-# ---------------------------------------------------------------------------
-
-DASHES = r"\-–—−"  # inclut le "−" synlab
-
-def _clean_spaces(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
-
-def _normalize_decimal(s: str) -> str:
-    return (s or "").replace(",", ".").strip()
-
-def _normalize_key(name: str) -> str:
-    key = (name or "").lower()
-    key = re.sub(r"[àâä]", "a", key)
-    key = re.sub(r"[éèêë]", "e", key)
-    key = re.sub(r"[îï]", "i", key)
-    key = re.sub(r"[ôö]", "o", key)
-    key = re.sub(r"[ùûü]", "u", key)
-    key = re.sub(r"[ç]", "c", key)
-    key = re.sub(r"[^a-z0-9]+", "_", key)
-    key = re.sub(r"_+", "_", key).strip("_")
-    return key
-
-def _clean_biomarker_name(name: str) -> str:
-    name = name or ""
-    name = re.sub(r"[\.]{3,}", "", name)
-    name = re.sub(r"\s+", " ", name)
-    name = name.strip(" .:;,|-_")
-    return name
-
-def _looks_like_method_line(line: str) -> bool:
-    """
-    Lignes parasites fréquentes dans Synlab / PDF :
-    - (CLIA - Siemens Atellica)
-    - (Colorimétrie ...)
-    """
-    s = (line or "").strip()
-    if not s:
-        return True
-    if s.startswith("(") and s.endswith(")"):
-        return True
-    # méthodes sans parenthèses mais typiques
-    lower = s.lower()
-    method_words = [
-        "immuno", "chemilum", "clia", "eclia", "elisa", "siemens", "atellica", "roche",
-        "colorim", "tptz", "nephel", "turbid", "hplc", "spectro", "method", "automate"
-    ]
-    if any(w in lower for w in method_words) and len(s) < 80:
-        return True
-    return False
-
-def _is_header_or_footer(name: str) -> bool:
-    ignore_patterns = [
-        r"^page\s+\d+",
-        r"^edition",
-        r"^date",
-        r"^laboratoire",
-        r"^patient",
-        r"^docteur",
-        r"^dr\b",
-        r"^prelev",
-        r"^dossier",
-        r"^adresse",
-        r"^telephone",
-        r"^email",
-        r"^code",
-        r"^resultat",
-        r"^unite",
-        r"^reference",
-        r"^valeur",
-        r"^commentaire",
-        r"^interpretation",
-        r"^biochimie",
-        r"^hematologie",
-        r"^immunologie",
-        r"^bacteriologie",
-        r"^virologie",
-        r"^marqueurs",
-        r"^proteines",
-        r"^vitamines",
-        r"^renseignements",
-        r"^conclusion",
-        r"^signature",
-    ]
-    n = (name or "").lower().strip()
-    return any(re.search(p, n) for p in ignore_patterns)
-
-def parse_reference_range(raw: str) -> Dict[str, Any]:
-    """
-    Extrait un range depuis un texte, ex:
-      (12.5−32.2) -> {"type":"interval", "low":12.5, "high":32.2}
-      (>12.19)    -> {"type":"gt", "threshold":12.19}
-      (<0.5)      -> {"type":"lt", "threshold":0.5}
-      (<= 1.0)    -> {"type":"lte", "threshold":1.0}
-      (>= 30)     -> {"type":"gte", "threshold":30}
-    Renvoie {} si rien trouvé.
-    """
-    if not raw:
-        return {}
-    s = raw.strip()
-    # on accepte "(...)" ou juste "..."
-    s = s.strip()
-    s = s[1:-1].strip() if (s.startswith("(") and s.endswith(")")) else s
-
-    s = s.replace(" ", "")
-    s = s.replace("–", "−").replace("—", "−").replace("-", "−")  # unifie
-
-    # intervalle a−b
-    m = re.search(rf"(?P<low>\d+(?:[.,]\d+)?)\s*[{DASHES}]\s*(?P<high>\d+(?:[.,]\d+)?)", s)
-    if m:
-        try:
-            low = float(_normalize_decimal(m.group("low")))
-            high = float(_normalize_decimal(m.group("high")))
-            return {"type": "interval", "low": low, "high": high, "raw": raw}
-        except Exception:
-            return {}
-
-    # seuils
-    m = re.search(r"(?P<op>>=|<=|>|<)\s*(?P<th>\d+(?:[.,]\d+)?)", s)
-    if m:
-        try:
-            th = float(_normalize_decimal(m.group("th")))
-            op = m.group("op")
-            return {"type": {"<": "lt", ">": "gt", "<=": "lte", ">=": "gte"}[op], "threshold": th, "raw": raw}
-        except Exception:
-            return {}
-
-    return {}
-
-def looks_like_unit(unit: str) -> bool:
-    """
-    On veut éviter que 'ans', 'page', etc. soient pris comme unités.
-    On autorise les unités biomédicales courantes.
-    """
-    u = (unit or "").strip()
-    if not u:
-        return False
-    u_low = u.lower()
-
-    # unités à rejeter
-    bad = ["ans", "page", "pages", "mm", "cm", "m", "kg", "kcal", "jours", "jour", "min", "sec", "seconde"]
-    if u_low in bad:
-        return False
-
-    # unités acceptées (liste volontairement large)
-    good_patterns = [
-        r"^(mg|g|ug|µg|ng|pg)\/?(l|dl|ml|100ml)?$",
-        r"^(mmol|mol|umol|µmol|nmol|pmol)\/?(l|dl|ml)?$",
-        r"^(ui|iu)\/?l?$",
-        r"^(mui|mu|miu|mui)\/?l$",
-        r"^(u\/l|ui\/l|iu\/l)$",
-        r"^(kui|mui)\/l$",
-        r"^(%)$",
-        r"^(g\/l|g\/dl|mmol\/l|µmol\/l|umol\/l|nmol\/l|pmol\/l|mg\/l|mg\/dl|ng\/ml|µg\/l|ug\/l)$",
-        r"^(u\/g|u\/g\s*hb|u\/gHb|u\/g\shb)$",
-        r"^(ratio)$",
-        r"^(u?fc\/g)$",
-        r"^(10\^?\d+\/l)$",
-    ]
-    for p in good_patterns:
-        if re.match(p, u_low.replace(" ", ""), re.IGNORECASE):
-            return True
-
-    # tolérance pour trucs type "mg/L" avec variantes
-    if re.match(r"^[a-zA-Zµμ/%°]+(?:\/[a-zA-Z0-9]+)+$", u):
-        return True
-
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Extractor
-# ---------------------------------------------------------------------------
-
 class UniversalPDFExtractor:
     """
-    Extracteur PDF universel avec 2 modes:
-    1. TARGETED: biomarqueurs connus avec ranges/interprétation
-    2. OPEN STRICT: extraction de biomarqueurs SEULEMENT si ligne ressemble à un résultat
-       => nom + valeur + unité + référence (ou valeur+unité+réf)
-    ✅ PATCH SYNLAB: parsing spécifique (et récupération ranges)
+    Extracteur PDF universel avec 2 passes:
+      1) TARGETED: biomarqueurs connus (clé canonique) -> value
+      2) OPEN CLEAN: extraction générique des lignes "biomarqueur | valeur | unité | ref"
     """
 
     def __init__(self, known_biomarkers: Optional[Dict] = None):
         self.known_biomarkers = known_biomarkers or {}
+        self._targeted_patterns_cache = self._build_targeted_patterns() if self.known_biomarkers else {}
 
     # ============================================================
-    # PASS 1: Extraction Ciblée (biomarqueurs connus)
+    # PASS 1: Extraction ciblée (biomarqueurs connus)
     # ============================================================
 
     def extract_known_biomarkers(self, text: str, debug: bool = False) -> Dict[str, float]:
@@ -222,23 +46,23 @@ class UniversalPDFExtractor:
             return {}
 
         data: Dict[str, float] = {}
-        text_lower = (text or "").lower()
-        patterns_cache = self._build_targeted_patterns()
+        text_lower = text.lower()
 
-        for biomarker_key, pattern_list in patterns_cache.items():
+        for biomarker_key, pattern_list in self._targeted_patterns_cache.items():
             for pattern in pattern_list:
                 try:
-                    matches = re.finditer(pattern, text_lower, re.IGNORECASE | re.MULTILINE)
-                    for match in matches:
+                    for match in re.finditer(pattern, text_lower, re.IGNORECASE | re.MULTILINE):
                         try:
-                            value_str = _normalize_decimal(match.group(1))
+                            value_str = match.group(1).replace(',', '.').strip()
                             value = float(value_str)
-                            if 0 < value < 100000:
+
+                            # sanity
+                            if self._is_value_plausible(value):
                                 data[biomarker_key] = value
                                 if debug:
                                     print(f"✅ [TARGETED] {biomarker_key}: {value}")
                                 break
-                        except (ValueError, IndexError):
+                        except Exception:
                             continue
                     if biomarker_key in data:
                         break
@@ -255,277 +79,139 @@ class UniversalPDFExtractor:
             pattern_list: List[str] = []
 
             for name in lab_names:
-                name_normalized = (name or "").lower()
-                name_normalized = name_normalized.replace("é", "[eé]").replace("è", "[eè]").replace("ê", "[eê]").replace("ë", "[eë]")
+                name_norm = self._normalize_for_regex(name)
 
-                # Label AVANT valeur (le plus fiable)
-                pattern_list.append(rf"{name_normalized}\s*[:\s]+\s*(\d+[.,]?\d*)")
+                # label -> valeur (classique)
+                pattern_list.append(rf'{name_norm}\s*[:\s]\s*(\d+[.,]?\d*)')
 
-                # Label + valeur + unité + ref
-                pattern_list.append(rf"{name_normalized}.*?(\d+[.,]?\d*)\s*[a-zµμ°/%A-Z/]*\s*\((.*?)\)")
+                # label ... valeur unité
+                pattern_list.append(rf'{name_norm}\s+(\d+[.,]?\d*)\s*[a-zµμ°/%A-Z]{{0,12}}')
 
-                # Valeur avant label (rare)
-                pattern_list.append(rf"(\d+[.,]?\d*)\s+{name_normalized}")
+                # valeur -> label (rare)
+                pattern_list.append(rf'(\d+[.,]?\d*)\s+{name_norm}')
 
-                # Avec symboles
-                pattern_list.append(rf"{name_normalized}\s*[*+\-]*\s*(\d+[.,]?\d*)")
+                # label * + - valeur
+                pattern_list.append(rf'{name_norm}\s*[*+\-]?\s*(\d+[.,]?\d*)')
 
             patterns[biomarker_key] = pattern_list
 
         return patterns
 
+    def _normalize_for_regex(self, s: str) -> str:
+        """
+        normalise pour regex accent tolerant
+        """
+        s = s.lower().strip()
+        s = re.escape(s)
+
+        # tolérance accents fréquents
+        s = s.replace("e", "[eéèêë]")
+        s = s.replace("a", "[aàâä]")
+        s = s.replace("i", "[iîï]")
+        s = s.replace("o", "[oôö]")
+        s = s.replace("u", "[uùûü]")
+        s = s.replace("c", "[cç]")
+
+        return s
+
     # ============================================================
-    # PASS 2: Extraction Ouverte STRICTE (biomarqueurs only)
+    # PASS 2: Extraction ouverte CLEAN (uniquement lignes biomarqueurs)
     # ============================================================
 
     def extract_all_biomarkers(
         self,
         text: str,
         debug: bool = False,
-        min_value: float = 0.001,
+        min_value: float = 0.0001,
         max_value: float = 100000
-    ) -> Dict[str, Dict]:
+    ) -> Dict[str, Dict[str, Any]]:
         """
-        Extrait des biomarqueurs (OPEN STRICT):
-        - On ne conserve que des lignes "résultats" crédibles
-        - Extrait: name, value, unit, reference_range
+        Retour:
+          Dict[key, {
+              name, value, unit,
+              ref_low, ref_high, ref_type,
+              raw_text, line_number,
+              is_known, canonical_key
+          }]
         """
-        data: Dict[str, Dict] = {}
-        raw_text = text or ""
+        data: Dict[str, Dict[str, Any]] = {}
 
-        # 1) Synlab parser strict (prioritaire)
-        if self._is_synlab_format(raw_text):
+        # pré-clean texte
+        lines = self._preclean_lines(text)
+
+        # SYNLAB: parser spécifique prioritaire (meilleur SNR)
+        if self._is_synlab_format(text):
             if debug:
-                print("🔍 Format SYNLAB détecté - parser strict")
-            synlab_data = self._extract_synlab_specific(raw_text, debug=debug, min_value=min_value, max_value=max_value)
-            data.update(synlab_data)
+                print("🔍 SYNLAB détecté -> parser Synlab CLEAN")
+            syn = self._extract_synlab_specific(lines, debug=debug, min_value=min_value, max_value=max_value)
+            data.update(syn)
 
-        # 2) Parse ligne par ligne avec règles STRICTES
-        lines = raw_text.split("\n")
-
-        # Pattern strict : NOM  <spaces>  VALEUR  UNITE  (REF)
-        # Ex: "Fer serique   18.0  µmol/l   (12.5−32.2)"
-        strict_line_patterns = [
-            rf"""
-            ^(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\(\)\/\+]+?)      # nom (pas vide)
-            \s{{2,}}                                               # séparation
-            (?P<value>\d+[.,]?\d*)                                 # valeur
-            \s+
-            (?P<unit>[A-Za-zµμ°/%]+(?:\/[A-Za-z0-9]+)?)            # unité
-            \s*
-            (?P<ref>\(.*?\))?                                      # ref optionnelle (mais filtrée ensuite)
-            $
-            """,
-            # Variante "Nom: valeur unité (ref)"
-            rf"""
-            ^(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\(\)\/\+]+?)
-            \s*[:]\s*
-            (?P<value>\d+[.,]?\d*)
-            \s+
-            (?P<unit>[A-Za-zµμ°/%]+(?:\/[A-Za-z0-9]+)?)
-            \s*
-            (?P<ref>\(.*?\))?
-            $
-            """,
-        ]
-
-        # On veut éviter les faux positifs :
-        # ✅ On exige: (ref) présent OU (unité biomédicale + ligne ressemble à résultat)
-        # et on rejette: méthodes, headers, etc.
+        # OPEN CLEAN parser (générique mais strict)
         for i, line in enumerate(lines):
-            line_clean = _clean_spaces(line)
-            if not line_clean or len(line_clean) < 6:
+            if not self._is_candidate_biomarker_line(line):
                 continue
 
-            # skip gros bruit
-            if _looks_like_method_line(line_clean):
+            parsed = self._parse_line_generic(line)
+            if not parsed:
                 continue
 
-            # stop si c'est une ligne très narrative (beaucoup de ponctuation)
-            if line_clean.count(",") >= 3 and "(" not in line_clean:
-                continue
+            name, value, unit, ref = parsed["name"], parsed["value"], parsed["unit"], parsed["ref"]
 
-            for pidx, pattern in enumerate(strict_line_patterns):
-                m = re.match(pattern, line_clean, re.IGNORECASE | re.VERBOSE)
-                if not m:
-                    continue
-
-                name = _clean_biomarker_name(m.group("name"))
-                value_str = _normalize_decimal(m.group("value"))
-                unit = (m.group("unit") or "").strip()
-                ref_raw = m.group("ref") or ""
-
-                if _is_header_or_footer(name):
-                    break
-                if len(name) < 3 or len(name) > 80:
-                    break
-
-                # unit doit ressembler à une unité biomédicale
-                if not looks_like_unit(unit):
-                    # si on n'a pas d'unité crédible, on ne garde PAS
-                    break
-
-                try:
-                    value = float(value_str)
-                except Exception:
-                    break
-
-                if not (min_value <= value <= max_value):
-                    break
-
-                ref = parse_reference_range(ref_raw)
-
-                # ✅ règle anti-faux-positif principale:
-                # on garde seulement si on a une référence exploitable
-                # OU si on est dans une "section résultat" typique (Synlab) déjà traitée.
-                # Ici (parse générique), on exige ref.
-                if not ref:
-                    break
-
-                key = _normalize_key(name)
-                candidate = {
-                    "name": name,
-                    "value": value,
-                    "unit": unit,
-                    "reference": ref,
-                    "raw_text": line_clean,
-                    "line_number": i,
-                    "pattern_used": f"strict_{pidx}",
-                }
-
-                # Dedup: on garde celui avec ref intervalle plutôt que seuil, et le plus long raw_text
-                if key not in data:
-                    data[key] = candidate
-                else:
-                    prev = data[key]
-                    prev_ref = prev.get("reference", {}) or {}
-                    cand_ref = candidate.get("reference", {}) or {}
-
-                    def ref_score(r: Dict[str, Any]) -> int:
-                        if r.get("type") == "interval":
-                            return 3
-                        if r.get("type") in ["gt", "lt", "gte", "lte"]:
-                            return 2
-                        return 0
-
-                    if (ref_score(cand_ref) > ref_score(prev_ref)) or (len(candidate["raw_text"]) > len(prev.get("raw_text", ""))):
-                        data[key] = candidate
-
-                if debug:
-                    rr = candidate["reference"]
-                    if rr.get("type") == "interval":
-                        rr_s = f"[{rr['low']}-{rr['high']}]"
-                    else:
-                        rr_s = f"{rr.get('type')} {rr.get('threshold')}"
-                    print(f"✅ [OPEN-STRICT] {name} = {value} {unit} | ref {rr_s} (line {i})")
-
-                break  # stop patterns for this line
-
-        return data
-
-    # ============================================================
-    # ✅ PATCH SYNLAB: Extraction spécifique + ref ranges
-    # ============================================================
-
-    def _is_synlab_format(self, text: str) -> bool:
-        synlab_markers = [
-            "synlab",
-            "laboratoire de biologie médicale",
-            "biologistes médicaux",
-            "dossier validé biologiquement",
-        ]
-        tl = (text or "").lower()
-        return any(m in tl for m in synlab_markers)
-
-    def _extract_synlab_specific(
-        self,
-        text: str,
-        debug: bool = False,
-        min_value: float = 0.001,
-        max_value: float = 100000
-    ) -> Dict[str, Dict]:
-        """
-        Synlab strict:
-        Nom  <2+ spaces>  valeur  unité   (ref)
-        Ex:
-          Fer serique                    18.0  µmol/l      (12.5−32.2)
-          Transferrine                   1.88  g/l         (2.00−3.60)
-          Folates sériques ...           42.90 nmol/l     (>12.19)
-        """
-        data: Dict[str, Dict] = {}
-        lines = (text or "").split("\n")
-
-        synlab_pattern = rf"""
-        ^(?P<name>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\(\)\/\+]+?)
-        \s{{2,}}
-        (?P<value>\d+[.,]?\d*)
-        \s+
-        (?P<unit>[A-Za-zµμ°/%]+(?:\/[A-Za-z0-9]+)?)
-        \s*
-        (?P<ref>\(.*?\))?
-        $
-        """
-
-        for i, line in enumerate(lines):
-            line_clean = _clean_spaces(line)
-
-            if not line_clean or len(line_clean) < 6:
-                continue
-            if line_clean.startswith(("Edition", "Page", "Dossier")):
-                continue
-            if "biologiquement" in line_clean.lower():
-                continue
-            if _looks_like_method_line(line_clean):
-                continue
-
-            m = re.match(synlab_pattern, line_clean, re.IGNORECASE | re.VERBOSE)
-            if not m:
-                continue
-
-            name = _clean_biomarker_name(m.group("name"))
-            unit = (m.group("unit") or "").strip()
-            ref_raw = m.group("ref") or ""
-
-            if _is_header_or_footer(name):
-                continue
-            if len(name) < 3 or len(name) > 80:
-                continue
-            if not looks_like_unit(unit):
-                continue
-
-            try:
-                value = float(_normalize_decimal(m.group("value")))
-            except Exception:
-                continue
             if not (min_value <= value <= max_value):
                 continue
 
-            ref = parse_reference_range(ref_raw)
+            # anti-faux positifs: exige un signe biomédical (unité OU ref_range OU nom connu)
+            key = self._normalize_key(name)
+            is_known = self._is_known_name_or_key(name, key)
 
-            # ✅ en Synlab: si pas de ref sur la ligne, on rejette (évite bruit)
-            if not ref:
+            has_unit = bool(unit)
+            has_ref = ref is not None
+
+            if not (is_known or has_unit or has_ref):
+                # sinon tu récupères des chiffres de paragraphes et tu pleures
                 continue
 
-            key = _normalize_key(name)
+            # blacklist fin: headers/footers
+            if self._is_header_or_footer(name):
+                continue
+
+            # stock
             if key not in data:
-                data[key] = {
+                entry = {
                     "name": name,
                     "value": value,
                     "unit": unit,
-                    "reference": ref,
-                    "raw_text": line_clean,
+                    "raw_text": line,
                     "line_number": i,
-                    "pattern_used": "synlab_strict",
+                    "pattern_used": "generic_clean",
+                    "ref_low": None,
+                    "ref_high": None,
+                    "ref_type": None,
+                    "is_known": False,
+                    "canonical_key": None,
                 }
+
+                if ref:
+                    entry["ref_low"] = ref.get("low")
+                    entry["ref_high"] = ref.get("high")
+                    entry["ref_type"] = ref.get("type")
+
+                # map vers clé canonique si biomarqueur connu
+                canon = self._canonical_key_from_name(name)
+                if canon:
+                    entry["is_known"] = True
+                    entry["canonical_key"] = canon
+
+                data[key] = entry
                 if debug:
-                    rr = data[key]["reference"]
-                    rr_s = f"[{rr['low']}-{rr['high']}]" if rr.get("type") == "interval" else f"{rr.get('type')} {rr.get('threshold')}"
-                    print(f"✅ [SYNLAB-STRICT] {name} = {value} {unit} | ref {rr_s}")
+                    rl = entry["ref_low"]
+                    rh = entry["ref_high"]
+                    print(f"✅ [OPEN CLEAN] {name} = {value} {unit} | ref=({rl},{rh})")
 
         return data
 
     # ============================================================
-    # PASS 3: Fusion Intelligente
+    # PASS 3: Fusion intelligente (known + all)
     # ============================================================
 
     def extract_complete(
@@ -533,33 +219,357 @@ class UniversalPDFExtractor:
         text: str,
         debug: bool = False,
         prioritize_known: bool = True
-    ) -> Tuple[Dict[str, float], Dict[str, Dict]]:
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]]]:
         known = self.extract_known_biomarkers(text, debug=debug)
         all_data = self.extract_all_biomarkers(text, debug=debug)
 
-        # enrichir all_data via known (canonical_key)
-        if prioritize_known:
-            for key, value in known.items():
-                norm = _normalize_key(key)
-                if norm in all_data:
-                    all_data[norm]["is_known"] = True
-                    all_data[norm]["canonical_key"] = key
-                    # si l'unité est vide en OPEN mais connue dans la DB
-                    if not all_data[norm].get("unit"):
-                        all_data[norm]["unit"] = self.known_biomarkers.get(key, {}).get("unit", "")
+        if prioritize_known and known:
+            for canonical_key, value in known.items():
+                # inject dans all_data si absent, sinon marque is_known
+                canon_name = canonical_key.replace("_", " ").title()
+                canon_norm = self._normalize_key(canon_name)
+
+                found_key = None
+                # tente match direct canonical_key dans data via canonical_key stocké
+                for k, v in all_data.items():
+                    if v.get("canonical_key") == canonical_key:
+                        found_key = k
+                        break
+
+                if found_key:
+                    all_data[found_key]["is_known"] = True
+                    all_data[found_key]["canonical_key"] = canonical_key
+                    all_data[found_key]["value"] = value
                 else:
-                    # ajouter entrée minimale (sans ref si non détectée)
-                    all_data[norm] = {
-                        "name": key.replace("_", " ").title(),
+                    all_data[canon_norm] = {
+                        "name": canon_name,
                         "value": value,
-                        "unit": self.known_biomarkers.get(key, {}).get("unit", ""),
-                        "reference": {},  # inconnu
-                        "is_known": True,
-                        "canonical_key": key,
+                        "unit": self.known_biomarkers.get(canonical_key, {}).get("unit", ""),
+                        "raw_text": "",
+                        "line_number": -1,
                         "pattern_used": "targeted_only",
+                        "ref_low": None,
+                        "ref_high": None,
+                        "ref_type": None,
+                        "is_known": True,
+                        "canonical_key": canonical_key,
                     }
 
         return known, all_data
+
+    # ============================================================
+    # SYNLAB parser CLEAN
+    # ============================================================
+
+    def _is_synlab_format(self, text: str) -> bool:
+        markers = [
+            "synlab",
+            "laboratoire de biologie médicale",
+            "dossier validé biologiquement",
+            "biologistes médicaux",
+        ]
+        t = text.lower()
+        return any(m in t for m in markers)
+
+    def _extract_synlab_specific(
+        self,
+        lines: List[str],
+        debug: bool = False,
+        min_value: float = 0.0001,
+        max_value: float = 100000
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Pattern SYNLAB typique:
+          Fer serique   18.0  µmol/l   (12.5−32.2)
+          FERRITINE     187.5 ng/ml    (22.0−322.0)
+          Folates ...   42.90 nmol/l   (>12.19)
+        """
+        data: Dict[str, Dict[str, Any]] = {}
+
+        # nom  + espaces + valeur + unité + ref(OPTION)
+        # on accepte unités du style µmol/l, g/l, mg/L, ng/ml, %, etc.
+        pat = re.compile(
+            r'^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s{2,}'
+            r'(\d+[.,]?\d*)\s+'
+            r'([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)'
+            r'(?:\s*\(([^)]{1,40})\))?\s*$'
+        )
+
+        for i, line in enumerate(lines):
+            # ignore méthodes entre parenthèses seule
+            if line.startswith("(") and line.endswith(")"):
+                continue
+
+            if not self._is_candidate_biomarker_line(line):
+                continue
+
+            m = pat.match(line)
+            if not m:
+                continue
+
+            name = self._clean_biomarker_name(m.group(1))
+            value_str = m.group(2).replace(",", ".").strip()
+            unit = (m.group(3) or "").strip()
+            ref_raw = (m.group(4) or "").strip()
+
+            if self._is_header_or_footer(name):
+                continue
+
+            try:
+                value = float(value_str)
+            except ValueError:
+                continue
+
+            if not (min_value <= value <= max_value) or not self._is_value_plausible(value):
+                continue
+
+            # parse ref
+            ref = self._parse_reference(ref_raw) if ref_raw else None
+
+            key = self._normalize_key(name)
+
+            if key not in data:
+                entry = {
+                    "name": name,
+                    "value": value,
+                    "unit": unit,
+                    "raw_text": line,
+                    "line_number": i,
+                    "pattern_used": "synlab_clean",
+                    "ref_low": None,
+                    "ref_high": None,
+                    "ref_type": None,
+                    "is_known": False,
+                    "canonical_key": None,
+                }
+                if ref:
+                    entry["ref_low"] = ref.get("low")
+                    entry["ref_high"] = ref.get("high")
+                    entry["ref_type"] = ref.get("type")
+
+                canon = self._canonical_key_from_name(name)
+                if canon:
+                    entry["is_known"] = True
+                    entry["canonical_key"] = canon
+
+                data[key] = entry
+                if debug:
+                    print(f"✅ [SYNLAB CLEAN] {name} = {value} {unit} ref={ref_raw}")
+
+        return data
+
+    # ============================================================
+    # Generic CLEAN parsing
+    # ============================================================
+
+    def _parse_line_generic(self, line: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse une ligne sous formes courantes :
+          "CRP ultrasensible .... 1.2 mg/L (0.0-3.0)"
+          "Ferritine: 22 ng/mL (22-322)"
+          "25-OH Vitamine D 36.3 ng/ml (>30.0)"
+        """
+        # 1) tabulé: name .... value unit (ref)
+        tab = re.compile(
+            r'^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s*[\.:\s]{2,}\s*'
+            r'(\d+[.,]?\d*)\s*'
+            r'([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?'
+            r'(?:\s*\(([^)]{1,40})\))?\s*$'
+        )
+
+        # 2) "name: value unit (ref)"
+        colon = re.compile(
+            r'^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s*[:]\s*'
+            r'(\d+[.,]?\d*)\s*'
+            r'([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?'
+            r'(?:\s*\(([^)]{1,40})\))?\s*$'
+        )
+
+        # 3) "name value unit (ref)" (moins strict)
+        space = re.compile(
+            r'^([A-Za-zÀ-ÿ0-9\s\-\(\)\+\/]+?)\s+'
+            r'(\d+[.,]?\d*)\s*'
+            r'([a-zA-Zµμ°/%]+(?:/[a-zA-Z0-9]+)?)?'
+            r'(?:\s*\(([^)]{1,40})\))?\s*$'
+        )
+
+        for pat in (tab, colon, space):
+            m = pat.match(line)
+            if not m:
+                continue
+
+            name = self._clean_biomarker_name(m.group(1))
+            value_str = m.group(2).replace(",", ".").strip()
+            unit = (m.group(3) or "").strip()
+            ref_raw = (m.group(4) or "").strip()
+
+            # name sanity
+            if len(name) < 3 or len(name) > 80:
+                return None
+
+            # évite "Edition 1 2 3", etc.
+            if self._is_header_or_footer(name):
+                return None
+
+            try:
+                value = float(value_str)
+            except ValueError:
+                return None
+
+            if not self._is_value_plausible(value):
+                return None
+
+            ref = self._parse_reference(ref_raw) if ref_raw else None
+
+            return {"name": name, "value": value, "unit": unit, "ref": ref}
+
+        return None
+
+    def _parse_reference(self, ref_raw: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse:
+          "12.5−32.2" / "12.5-32.2"
+          ">30.0" / ">= 75"
+          "<5.4"
+        """
+        if not ref_raw:
+            return None
+
+        s = ref_raw.strip()
+        s = s.replace("−", "-").replace("–", "-")
+        s = s.replace(",", ".")
+        s = re.sub(r"\s+", "", s)
+
+        # range low-high
+        m = re.match(r"^(\d+\.?\d*)-(\d+\.?\d*)$", s)
+        if m:
+            return {"type": "range", "low": float(m.group(1)), "high": float(m.group(2))}
+
+        # >x / >=x
+        m = re.match(r"^(>=|>)(\d+\.?\d*)$", s)
+        if m:
+            return {"type": "lower_bound", "low": float(m.group(2)), "high": None}
+
+        # <x / <=x
+        m = re.match(r"^(<=|<)(\d+\.?\d*)$", s)
+        if m:
+            return {"type": "upper_bound", "low": None, "high": float(m.group(2))}
+
+        return None
+
+    # ============================================================
+    # Filtering / Cleaning
+    # ============================================================
+
+    def _preclean_lines(self, text: str) -> List[str]:
+        lines = []
+        for raw in text.split("\n"):
+            line = raw.strip()
+            if not line:
+                continue
+            line = re.sub(r"\s{2,}", "  ", line)  # compact spaces
+            lines.append(line)
+        return lines
+
+    def _is_candidate_biomarker_line(self, line: str) -> bool:
+        """
+        Filtre fort anti-parasites :
+          - doit contenir au moins un chiffre
+          - évite les paragraphes longs
+          - évite adresses, pages, dates, etc.
+        """
+        if len(line) < 5:
+            return False
+        if len(line) > 140:
+            return False
+
+        # doit contenir un nombre
+        if not re.search(r"\d", line):
+            return False
+
+        # évite URLs / emails / numéros de page
+        low = line.lower()
+        if "http" in low or "www" in low or "@" in low:
+            return False
+
+        # évite "Page X", "Edition", "Dossier", "Adresse"
+        if re.search(r"^(page|edition|dossier|adresse|t[eé]l|fax)\b", low):
+            return False
+
+        return True
+
+    def _is_value_plausible(self, value: float) -> bool:
+        # évite certains faux positifs (années, codes)
+        if value == 0:
+            return False
+        if 1800 <= value <= 2100:
+            return False
+        return True
+
+    def _clean_biomarker_name(self, name: str) -> str:
+        name = re.sub(r"[\.]{3,}", "", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        name = name.strip(".:;,|-_")
+        return name
+
+    def _normalize_key(self, name: str) -> str:
+        key = name.lower()
+        key = re.sub(r"[àâä]", "a", key)
+        key = re.sub(r"[éèêë]", "e", key)
+        key = re.sub(r"[îï]", "i", key)
+        key = re.sub(r"[ôö]", "o", key)
+        key = re.sub(r"[ùûü]", "u", key)
+        key = re.sub(r"[ç]", "c", key)
+        key = re.sub(r"[^a-z0-9]+", "_", key)
+        key = re.sub(r"_+", "_", key).strip("_")
+        return key
+
+    def _is_header_or_footer(self, name: str) -> bool:
+        ignore_patterns = [
+            r"^page\s+\d+",
+            r"^date",
+            r"^laboratoire",
+            r"^patient",
+            r"^docteur",
+            r"^pr[ée]lev",
+            r"^r[ée]f[ée]rence",
+            r"^valeur",
+            r"^r[ée]sultat",
+            r"^unit[ée]",
+            r"^biochimie",
+            r"^h[ée]matologie",
+            r"^immunologie",
+            r"^microbiologie",
+            r"^commentaire",
+            r"^interpretation",
+            r"^conclusion",
+            r"^m[ée]thode",
+        ]
+        low = name.lower()
+        return any(re.search(p, low) for p in ignore_patterns)
+
+    def _is_known_name_or_key(self, name: str, key: str) -> bool:
+        if not self.known_biomarkers:
+            return False
+        if key in self.known_biomarkers:
+            return True
+        # match par alias
+        return self._canonical_key_from_name(name) is not None
+
+    def _canonical_key_from_name(self, extracted_name: str) -> Optional[str]:
+        """
+        Retourne canonical_key si extracted_name match un lab_name connu
+        """
+        if not self.known_biomarkers:
+            return None
+        n = extracted_name.lower().strip()
+
+        for canon, meta in self.known_biomarkers.items():
+            for alias in meta.get("lab_names", [canon]):
+                a = alias.lower().strip()
+                if a and a in n:
+                    return canon
+        return None
 
     # ============================================================
     # Extraction PDF complète
@@ -569,104 +579,37 @@ class UniversalPDFExtractor:
     def extract_text_from_pdf(pdf_file) -> str:
         text = ""
 
-        # Méthode 1: pdfplumber
+        # pdfplumber
         if PDFPLUMBER_AVAILABLE:
             try:
+                pdf_file.seek(0)
                 with pdfplumber.open(pdf_file) as pdf:
                     for page in pdf.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text += page_text + "\n"
-                    if text.strip():
-                        return text
+                        t = page.extract_text()
+                        if t:
+                            text += t + "\n"
+                if text.strip():
+                    return text
             except Exception:
                 pass
 
-        # Méthode 2: PyPDF2
+        # PyPDF2
         if PYPDF2_AVAILABLE:
             try:
                 pdf_file.seek(0)
-                pdf_reader = PyPDF2.PdfReader(pdf_file)
-                for page in pdf_reader.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
+                reader = PyPDF2.PdfReader(pdf_file)
+                for page in reader.pages:
+                    t = page.extract_text()
+                    if t:
+                        text += t + "\n"
+                if text.strip():
+                    return text
             except Exception:
                 pass
 
-        if not text:
-            raise ImportError("PDF libraries not available or empty extraction. Install pdfplumber or PyPDF2.")
+        raise ImportError("PDF libraries not available. Install pdfplumber or PyPDF2.")
 
-        return text
-
-    def extract_from_pdf_file(
-        self,
-        pdf_file,
-        debug: bool = False
-    ) -> Tuple[Dict[str, float], Dict[str, Dict], str]:
+    def extract_from_pdf_file(self, pdf_file, debug: bool = False) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], str]:
         text = self.extract_text_from_pdf(pdf_file)
         known, all_data = self.extract_complete(text, debug=debug)
         return known, all_data, text
-
-
-# ============================================================
-# Exemple
-# ============================================================
-
-if __name__ == "__main__":
-    known_db = {
-        "crp": {"unit": "mg/L", "lab_names": ["crp", "crp ultrasensible", "hs-crp", "crp-us"]},
-        "vit_d": {"unit": "ng/mL", "lab_names": ["vitamine d", "25-oh d", "vitamin d", "25-oh-vitamine d"]},
-        "ferritine": {"unit": "ng/ml", "lab_names": ["ferritine"]},
-        "folates": {"unit": "nmol/l", "lab_names": ["folates", "folates sériques", "vitamine b9"]},
-    }
-
-    extractor = UniversalPDFExtractor(known_biomarkers=known_db)
-
-    sample_text = """
-    SYNLAB Pays de Savoie
-    Laboratoire de biologie médicale
-
-    BIOCHIMIE − SANG
-
-    Fer serique                    18.0  µmol/l      (12.5−32.2)
-    (Colorimétrie TPTZ )           101   µg/100ml    (70−180)
-
-    Transferrine                   1.88  g/l         (2.00−3.60)
-    (Immunoturbidimétrie Siemens)
-
-    Calcium                        2.38  mmol/l      (2.18−2.60)
-    (Complexometrie −Siemens)      96    mg/l        (88−105)
-
-    PROTEINES − MARQUEURS − VITAMINES − SANG
-
-    FERRITINE                      187.5 ng/ml      (22.0−322.0)
-    (CLIA − Siemens Atellica)
-
-    Folates sériques (vitamine B9) 42.90 nmol/l     (>12.19)
-    (CLIA − Siemens Atellica)      18.9  ng/ml      (>5.4)
-
-    25−OH−Vitamine D(D2+D3)        90.8  nmol/l     (>75.0)
-    (CLIA − Siemens Atellica)      36.3  ng/ml      (>30.0)
-
-    Ceci est un paragraphe narratif avec 2026 et 15% de texte.
-    """
-
-    known, all_biomarkers = extractor.extract_complete(sample_text, debug=True)
-
-    print("\n" + "=" * 60)
-    print(f"✅ CONNUS extraits: {len(known)}")
-    print(known)
-
-    print("\n" + "=" * 60)
-    print(f"✅ TOTAL (OPEN STRICT) extraits: {len(all_biomarkers)}")
-    for k, d in all_biomarkers.items():
-        marker = "⭐" if d.get("is_known") else "🆕"
-        ref = d.get("reference", {}) or {}
-        if ref.get("type") == "interval":
-            rr = f"[{ref['low']}-{ref['high']}]"
-        elif ref.get("type"):
-            rr = f"{ref['type']} {ref.get('threshold')}"
-        else:
-            rr = "-"
-        print(f"  {marker} {d['name']}: {d['value']} {d.get('unit','')} | ref {rr}")
