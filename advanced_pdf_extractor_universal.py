@@ -1,6 +1,7 @@
 """
-ALGO-LIFE - Universal PDF Extractor v2.0
-Extraction OUVERTE de TOUS les biomarqueurs (pas seulement les prédéfinis)
+ALGO-LIFE PDF Generator - Universal Extractor v2.1 (SYNLAB PATCH)
+✅ Extraction universelle (tous biomarqueurs)
+✅ Patch spécifique format SYNLAB
 
 Author: Dr Thibault SUTTER
 Date: January 2026
@@ -28,6 +29,8 @@ class UniversalPDFExtractor:
     Extracteur PDF universel avec 2 modes:
     1. TARGETED: biomarqueurs connus avec ranges/interprétation
     2. OPEN: extraction générique de TOUTES les paires nom-valeur
+    
+    ✅ PATCH SYNLAB: Gère le format spécifique des PDFs Synlab
     """
     
     def __init__(self, known_biomarkers: Optional[Dict] = None):
@@ -127,6 +130,13 @@ class UniversalPDFExtractor:
         """
         data = {}
         
+        # ✅ PATCH SYNLAB: Prétraitement spécifique
+        if self._is_synlab_format(text):
+            if debug:
+                print("🔍 Format SYNLAB détecté - Utilisation du parser spécifique")
+            synlab_data = self._extract_synlab_specific(text, debug=debug)
+            data.update(synlab_data)
+        
         # Patterns génériques pour détecter lignes avec valeurs numériques
         generic_patterns = [
             # Pattern 1: "Nom du test ........ 15.2 mg/L" (format tabulé)
@@ -206,6 +216,104 @@ class UniversalPDFExtractor:
                         if debug:
                             print(f"⚠️ Error parsing line {line_num}: {e}")
                         continue
+        
+        return data
+    
+    # ============================================================
+    # ✅ PATCH SYNLAB: Extraction spécifique
+    # ============================================================
+    
+    def _is_synlab_format(self, text: str) -> bool:
+        """Détecte si le PDF est au format Synlab"""
+        synlab_markers = [
+            'synlab',
+            'laboratoire de biologie médicale',
+            'biologistes médicaux coresponsables',
+            'dossier validé biologiquement'
+        ]
+        text_lower = text.lower()
+        return any(marker in text_lower for marker in synlab_markers)
+    
+    def _extract_synlab_specific(self, text: str, debug: bool = False) -> Dict[str, Dict]:
+        """
+        Extracteur spécifique pour format Synlab
+        
+        Format typique:
+        Fer serique                    18.0  µmol/l      (12.5−32.2)
+        (Colorimétrie TPTZ )           101   µg/100ml    (70−180)
+        
+        Transferrine                   1.88  g/l         (2.00−3.60)
+        (Immunoturbidimétrie Siemens)
+        """
+        data = {}
+        lines = text.split('\n')
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Skip lignes vides, headers, footers
+            if (not line or 
+                len(line) < 5 or
+                line.startswith('Edition') or
+                line.startswith('Page') or
+                line.startswith('Dossier') or
+                'biologiquement' in line.lower()):
+                i += 1
+                continue
+            
+            # Skip lignes méthode (entre parenthèses au début)
+            if line.startswith('(') and line.endswith(')'):
+                i += 1
+                continue
+            
+            # Pattern Synlab: Nom + espaces + valeur + unité + (range)
+            # Ex: "Fer serique                    18.0  µmol/l      (12.5−32.2)"
+            synlab_pattern = r'^([A-Za-zÀ-ÿ\s\-]+?)\s{2,}(\d+[.,]?\d*)\s+([a-zµμ°/%A-Z]+(?:/[a-zA-Z0-9]+)?)\s*(?:\(.*?\))?'
+            
+            match = re.match(synlab_pattern, line, re.IGNORECASE)
+            
+            if match:
+                name = match.group(1).strip()
+                value_str = match.group(2).replace(',', '.').strip()
+                unit = match.group(3).strip()
+                
+                # Nettoyer le nom
+                name = self._clean_biomarker_name(name)
+                
+                # Valider nom
+                if len(name) < 3 or len(name) > 80:
+                    i += 1
+                    continue
+                
+                # Skip headers
+                if self._is_header_or_footer(name):
+                    i += 1
+                    continue
+                
+                try:
+                    value = float(value_str)
+                    
+                    # Sanity check
+                    if 0.001 <= value <= 100000:
+                        key = self._normalize_key(name)
+                        
+                        if key not in data:
+                            data[key] = {
+                                'name': name,
+                                'value': value,
+                                'unit': unit,
+                                'raw_text': line,
+                                'line_number': i,
+                                'pattern_used': 'synlab_specific'
+                            }
+                            
+                            if debug:
+                                print(f"✅ [SYNLAB] {name} = {value} {unit}")
+                except ValueError:
+                    pass
+            
+            i += 1
         
         return data
     
@@ -291,6 +399,14 @@ class UniversalPDFExtractor:
             r'^r[ée]sultat',
             r'^unit[ée]',
             r'^total',
+            r'^biochimie',
+            r'^proteines',
+            r'^marqueurs',
+            r'^vitamines',
+            r'^sang',
+            r'^renseignements',
+            r'^commentaire',
+            r'^interpretation',
         ]
         
         name_lower = name.lower()
@@ -367,36 +483,47 @@ if __name__ == "__main__":
         },
         'vit_d': {
             'unit': 'ng/mL',
-            'lab_names': ['vitamine d', '25-oh d', 'vitamin d']
+            'lab_names': ['vitamine d', '25-oh d', 'vitamin d', '25-oh-vitamine d']
         },
         'ferritine': {
-            'unit': 'µg/L',
-            'lab_names': ['ferritine', 'ferritin']
+            'unit': 'ng/ml',
+            'lab_names': ['ferritine']
+        },
+        'folates': {
+            'unit': 'nmol/l',
+            'lab_names': ['folates', 'folates sériques', 'vitamine b9']
         }
     }
     
     # Test avec un PDF fictif
     extractor = UniversalPDFExtractor(known_biomarkers=known_db)
     
-    # Simuler du texte de PDF
+    # Simuler du texte de PDF Synlab
     sample_text = """
-    LABORATOIRE SYNLAB - Résultats d'analyse
-    Patient: DOE John
+    SYNLAB Pays de Savoie
+    Laboratoire de biologie médicale
     
-    HÉMATOLOGIE
-    Hémoglobine .................. 14.2 g/dL
-    Hématocrite .................. 42.1 %
-    Leucocytes ................... 7200 /mm³
+    BIOCHIMIE − SANG
     
-    BIOCHIMIE
-    CRP ultrasensible ............ 2.3 mg/L
-    Vitamine D ................... 28.5 ng/mL
-    Ferritine .................... 85 µg/L
-    Glucose ...................... 5.2 mmol/L
-    Cholestérol total ............ 4.8 mmol/L
-    HDL Cholestérol .............. 1.6 mmol/L
-    LDL Cholestérol .............. 2.9 mmol/L
-    Triglycérides ................ 1.1 mmol/L
+    Fer serique                    18.0  µmol/l      (12.5−32.2)
+    (Colorimétrie TPTZ )           101   µg/100ml    (70−180)
+    
+    Transferrine                   1.88  g/l         (2.00−3.60)
+    (Immunoturbidimétrie Siemens)
+    
+    Calcium                        2.38  mmol/l      (2.18−2.60)
+    (Complexometrie −Siemens)      96    mg/l        (88−105)
+    
+    PROTEINES − MARQUEURS − VITAMINES − SANG
+    
+    FERRITINE                      187.5 ng/ml      (22.0−322.0)
+    (CLIA − Siemens Atellica)
+    
+    Folates sériques (vitamine B9) 42.90 nmol/l     (>12.19)
+    (CLIA − Siemens Atellica)      18.9  ng/ml      (>5.4)
+    
+    25−OH−Vitamine D(D2+D3)        90.8  nmol/l     (>75.0)
+    (CLIA − Siemens Atellica)      36.3  ng/ml      (>30.0)
     """
     
     known, all_biomarkers = extractor.extract_complete(sample_text, debug=True)
@@ -408,4 +535,5 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print(f"✅ TOTAL extraits: {len(all_biomarkers)}")
     for key, data in all_biomarkers.items():
-        print(f"  {data['name']}: {data['value']} {data['unit']}")
+        marker = "⭐" if data.get('is_known') else "🆕"
+        print(f"  {marker} {data['name']}: {data['value']} {data['unit']}")
