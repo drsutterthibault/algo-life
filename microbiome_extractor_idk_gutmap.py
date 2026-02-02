@@ -1,275 +1,197 @@
+# -*- coding: utf-8 -*-
 """
-microbiome_extractor_idk_gutmap.py
-ALGO-LIFE – Extracteur Microbiote (IDK GutMAP / report type "Dysbiosis Index" + "Bacterial diversity")
-
-Pourquoi ce fichier ?
-- Sur certains PDF GutMAP, les valeurs (DI 1–5, diversité, z-scores) sont rendues sous forme de tableaux/indicateurs graphiques.
-- Une extraction "texte seul" (PyPDF2) ne récupère pas ces infos => "Aucune donnée".
-- Cet extracteur tente :
-  1) extraction depuis le TEXTE (si présent),
-  2) extraction depuis les TABLES PDF via pdfplumber (robuste pour DI 1–5),
-  3) fallback OCR (optionnel) pour capturer des libellés simples si besoin.
-
-Usage dans app.py (recommandé) :
-    from microbiome_extractor_idk_gutmap import extract_microbiome_data
-
-    text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
-    microbiome_data = extract_microbiome_data(text, pdf_file=microbiome_pdf, debug=True)
-
-NB: pdf_file doit être l'objet Streamlit UploadedFile (ou bytes / path).
+IDK / GutMAP Microbiome Extractor (robuste)
+- 1) Utilise le texte "universal extractor" si dispo
+- 2) Fallback: relit le PDF en mode layout (pdfplumber) si pdf_bytes fourni
+- 3) Regex robustes pour dysbiosis / shannon / ratios + quelques espèces clés
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Union
-import io
 import re
+from io import BytesIO
+from typing import Dict, Optional, Tuple
 
-# Tables PDF
+# pdfplumber en fallback (optionnel)
 try:
     import pdfplumber  # type: ignore
     PDFPLUMBER_OK = True
 except Exception:
-    pdfplumber = None
     PDFPLUMBER_OK = False
 
-# OCR optionnel
-try:
-    from PIL import Image  # type: ignore
-    import pytesseract  # type: ignore
-    OCR_OK = True
-except Exception:
-    Image = None
-    pytesseract = None
-    OCR_OK = False
 
+# ----------------------------
+# Utils
+# ----------------------------
 
-UploadedLike = Union[bytes, bytearray, str, Any]  # str=path, Any=Streamlit UploadedFile
-
-
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-
-def _to_bytes(pdf_file: UploadedLike) -> Optional[bytes]:
-    """Convertit un fichier (Streamlit UploadedFile / path / bytes) en bytes."""
-    if pdf_file is None:
+def _to_float(x: str) -> Optional[float]:
+    if x is None:
         return None
-    if isinstance(pdf_file, (bytes, bytearray)):
-        return bytes(pdf_file)
-    if isinstance(pdf_file, str):
-        try:
-            with open(pdf_file, "rb") as f:
-                return f.read()
-        except Exception:
-            return None
-    # Streamlit UploadedFile a .getvalue() ou .read()
-    for attr in ("getvalue", "read"):
-        if hasattr(pdf_file, attr):
-            try:
-                data = getattr(pdf_file, attr)()
-                if isinstance(data, (bytes, bytearray)):
-                    return bytes(data)
-            except Exception:
-                pass
-    return None
-
-
-def _debug_add(debug: bool, out: Dict, key: str, value: Any) -> None:
-    if debug:
-        out.setdefault("_debug", {})
-        out["_debug"][key] = value
-
-
-def _normalize_text(text: str) -> str:
-    text = text or ""
-    return re.sub(r"\s+", " ", text).strip()
-
-
-# ---------------------------------------------------------------------
-# Extraction TEXTE (si le PDF contient bien les valeurs en texte)
-# ---------------------------------------------------------------------
-
-def _extract_from_text(text: str, debug: bool = False) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    t = (text or "").lower()
-
-    # Dysbiosis index: parfois écrit explicitement "Dysbiosis index: 2"
-    m = re.search(r"dysbiosis\s*index\s*[:\-]?\s*(\d)\s*/?\s*5?", t)
-    if m:
-        try:
-            out["dysbiosis_index"] = int(m.group(1))
-        except Exception:
-            pass
-
-    # Diversité: phrases types
-    # "The bacterial diversity is as expected" / "slightly lower than expected" / "lower than expected"
-    if "bacterial diversity" in t and "expected" in t:
-        if "slightly lower than expected" in t:
-            out["diversity_shannon"] = "slightly lower than expected"
-            out["shannon_index_numeric"] = 2
-        elif "lower than expected" in t:
-            out["diversity_shannon"] = "lower than expected"
-            out["shannon_index_numeric"] = 1
-        elif "as expected" in t:
-            out["diversity_shannon"] = "as expected"
-            out["shannon_index_numeric"] = 3
-
-    # Ratio Firmicutes/Bacteroidetes: parfois écrit
-    m = re.search(r"firmicutes\s*/\s*bacteroidetes\s*ratio\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)", t)
-    if m:
-        try:
-            out["firmicutes_bacteroidetes_ratio"] = float(m.group(1))
-        except Exception:
-            pass
-
-    _debug_add(debug, out, "from_text_keys", list(out.keys()))
-    return out
-
-
-# ---------------------------------------------------------------------
-# Extraction TABLES via pdfplumber (robuste pour GutMAP DI 1–5)
-# ---------------------------------------------------------------------
-
-def _guess_selected_index_from_row(row: list) -> Optional[int]:
-    """
-    GutMAP a souvent une ligne type: ["11","2","3","4","5"] ou ["1","22","3","4","5"] etc.
-    Le chiffre sélectionné apparaît parfois doublé ("11" => 1 sélectionné, "22" => 2 sélectionné).
-    """
-    if not row:
+    s = x.strip().replace(",", ".")
+    # garde signe +/-
+    s = re.sub(r"[^\d\.\-\+]", "", s)
+    if s in ("", "+", "-"):
         return None
-    cells = [(c or "").strip() for c in row if c is not None]
-    if len(cells) < 5:
-        return None
-
-    # Garder uniquement ce qui ressemble à 1..5
-    cleaned = []
-    for c in cells:
-        # enlever caractères non digit
-        d = re.sub(r"[^\d]", "", c)
-        if d:
-            cleaned.append(d)
-
-    # Exemples: ["11","2","3","4","5"] => 1
-    #          ["1","22","3","4","5"] => 2
-    #          ["1","2","33","4","5"] => 3
-    for i in range(1, 6):
-        token = str(i) * 2
-        if token in cleaned:
-            return i
-
-    # Fallback: si une cellule contient "1" + un autre caractère non digit (rare)
-    # ou si une cellule contient plus d'un digit dont tous identiques.
-    for c in cleaned:
-        if len(c) >= 2 and len(set(c)) == 1:
-            v = int(c[0])
-            if 1 <= v <= 5:
-                return v
-
-    return None
-
-
-def _extract_from_tables(pdf_bytes: bytes, debug: bool = False) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    if not (PDFPLUMBER_OK and pdf_bytes):
-        _debug_add(debug, out, "tables", "pdfplumber_not_available_or_empty_pdf")
-        return out
-
     try:
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            tables_found = 0
-            di_candidates = []
-            for page_i, page in enumerate(pdf.pages[:3]):  # DI est généralement en page 1
+        return float(s)
+    except Exception:
+        return None
+
+
+def _norm_text(t: str) -> str:
+    # normalise espaces / tirets / caractères invisibles
+    t = t.replace("\u00a0", " ")
+    t = re.sub(r"[ \t]+", " ", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t
+
+
+def _extract_with_pdfplumber(pdf_bytes: bytes) -> str:
+    if not PDFPLUMBER_OK:
+        return ""
+    out = []
+    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            # extraction "layout" + tables si possible
+            txt = page.extract_text(x_tolerance=2, y_tolerance=2) or ""
+            out.append(txt)
+
+            # tables (si présentes)
+            try:
                 tables = page.extract_tables() or []
-                tables_found += len(tables)
                 for tbl in tables:
                     for row in tbl:
-                        sel = _guess_selected_index_from_row(row)
-                        if sel is not None:
-                            di_candidates.append((page_i, sel, row))
-            _debug_add(debug, out, "tables_found", tables_found)
-            _debug_add(debug, out, "di_candidates", di_candidates[:5])
+                        if not row:
+                            continue
+                        out.append(" | ".join([(c or "") for c in row]))
+            except Exception:
+                pass
 
-            if di_candidates:
-                # prendre le premier (souvent unique)
-                out["dysbiosis_index"] = int(di_candidates[0][1])
-
-    except Exception as e:
-        _debug_add(debug, out, "tables_error", str(e))
-
-    return out
+    return _norm_text("\n".join(out))
 
 
-# ---------------------------------------------------------------------
-# OCR fallback (optionnel)
-# ---------------------------------------------------------------------
-
-def _extract_from_ocr(pdf_bytes: bytes, debug: bool = False) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    if not (OCR_OK and PDFPLUMBER_OK and pdf_bytes):
-        _debug_add(debug, out, "ocr", "ocr_not_available_or_pdfplumber_missing_or_empty_pdf")
-        return out
-
-    try:
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            # OCR uniquement sur la 1ère page pour rester léger
-            page = pdf.pages[0]
-            pil_img = page.to_image(resolution=200).original
-            ocr_text = pytesseract.image_to_string(pil_img, config="--psm 6")
-            o = ocr_text.lower()
-
-            # même logique que texte
-            tmp = _extract_from_text(ocr_text, debug=False)
-            out.update(tmp)
-
-            _debug_add(debug, out, "ocr_len", len(ocr_text))
-    except Exception as e:
-        _debug_add(debug, out, "ocr_error", str(e))
-
-    return out
+def _pick_first(patterns, text: str) -> Optional[str]:
+    for p in patterns:
+        m = re.search(p, text, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
 
 
-# ---------------------------------------------------------------------
-# API publique
-# ---------------------------------------------------------------------
+# ----------------------------
+# Core extraction
+# ----------------------------
 
 def extract_microbiome_data(
     text: str,
-    pdf_file: Optional[UploadedLike] = None,
+    pdf_bytes: Optional[bytes] = None,
     debug: bool = False,
-) -> Dict[str, Any]:
+) -> Dict[str, float]:
     """
-    Retourne un dict de paramètres microbiote.
-    Clés possibles:
-      - dysbiosis_index: int (1..5)
-      - diversity_shannon: str ("as expected" / "slightly lower than expected" / "lower than expected")
-      - shannon_index_numeric: int (1..3)
-      - firmicutes_bacteroidetes_ratio: float (si présent en texte)
-
-    Pour les bactéries individuelles (Akkermansia, Faecalibacterium, etc.):
-      - sur de nombreux GutMAP, ce sont des barres/z-scores graphiques non textuels.
-      - nécessiterait OCR ciblé par zones (plus lourd). On peut l’ajouter ensuite si tu veux.
+    Retourne un dict de features microbiote:
+    - dysbiosis_index
+    - shannon_index_numeric + diversity_shannon (label)
+    - firmicutes_bacteroidetes_ratio
+    - quelques espèces clés si présentes (z-scores ou log-abundance)
     """
-    out: Dict[str, Any] = {}
 
-    # 1) texte (rapide)
-    out.update(_extract_from_text(text, debug=debug))
+    if text is None:
+        text = ""
+    text0 = _norm_text(text)
 
-    # 2) tables (si pdf fourni)
-    pdf_bytes = _to_bytes(pdf_file) if pdf_file is not None else None
-    if pdf_bytes:
-        tbl = _extract_from_tables(pdf_bytes, debug=debug)
-        for k, v in tbl.items():
-            out.setdefault(k, v)
+    # Fallback PDF layout si texte trop pauvre
+    if (len(text0.strip()) < 300) and pdf_bytes:
+        layout_text = _extract_with_pdfplumber(pdf_bytes)
+        if len(layout_text.strip()) > len(text0.strip()):
+            text0 = layout_text
 
-    # 3) OCR léger si toujours vide
-    if pdf_bytes and not any(k in out for k in ("dysbiosis_index", "diversity_shannon", "shannon_index_numeric")):
-        ocr = _extract_from_ocr(pdf_bytes, debug=debug)
-        for k, v in ocr.items():
-            out.setdefault(k, v)
+    # Normalise pour recherche
+    t = text0
 
-    # Nettoyage debug
-    if not debug and "_debug" in out:
-        out.pop("_debug", None)
+    data: Dict[str, float] = {}
 
-    return out
+    # ---- Dysbiosis Index (souvent 1–5)
+    dys = _pick_first(
+        [
+            r"dysbiosis\s*index\s*[:\-]?\s*([0-9](?:\.[0-9])?)\s*/\s*5",
+            r"dysbiosis\s*index\s*[:\-]?\s*([0-9](?:\.[0-9])?)\b",
+            r"index\s*de\s*dysbiose\s*[:\-]?\s*([0-9](?:\.[0-9])?)\s*/\s*5",
+            r"index\s*de\s*dysbiose\s*[:\-]?\s*([0-9](?:\.[0-9])?)\b",
+        ],
+        t,
+    )
+    dys_f = _to_float(dys) if dys else None
+    if dys_f is not None:
+        # clamp raisonnable
+        if dys_f < 0:
+            dys_f = 0.0
+        if dys_f > 5:
+            dys_f = 5.0
+        data["dysbiosis_index"] = float(round(dys_f, 2))
+
+    # ---- Shannon diversity (parfois un score + label)
+    sh = _pick_first(
+        [
+            r"shannon\s*(?:diversity|index)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"diversit[ée]\s*\(shannon\)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
+        ],
+        t,
+    )
+    sh_f = _to_float(sh) if sh else None
+    if sh_f is not None:
+        data["shannon_index_numeric"] = float(round(sh_f, 3))
+        # label simple
+        if sh_f >= 3.5:
+            data["diversity_shannon"] = 3.0  # "haute" (mappé sur 3)
+        elif sh_f >= 2.5:
+            data["diversity_shannon"] = 2.0  # "moyenne"
+        else:
+            data["diversity_shannon"] = 1.0  # "basse"
+
+    # ---- Firmicutes/Bacteroidetes ratio
+    fb = _pick_first(
+        [
+            r"firmicutes\s*/\s*bacteroidetes\s*(?:ratio)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"f\s*/\s*b\s*(?:ratio)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
+        ],
+        t,
+    )
+    fb_f = _to_float(fb) if fb else None
+    if fb_f is not None:
+        data["firmicutes_bacteroidetes_ratio"] = float(round(fb_f, 3))
+
+    # ---- Espèces clés (souvent en Z-score / log)
+    # On prend la valeur numérique sur la même ligne si trouvée
+    species_patterns = {
+        "akkermansia_muciniphila": [
+            r"akkermansia\s*muciniphila[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
+        ],
+        "faecalibacterium_prausnitzii": [
+            r"faecalibacterium\s*prausnitzii[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
+        ],
+        "bifidobacterium": [
+            r"bifidobacterium[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
+        ],
+        "lactobacillus": [
+            r"lactobacillus[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
+        ],
+        "escherichia_coli": [
+            r"escherichia\s*coli[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
+        ],
+    }
+
+    for key, pats in species_patterns.items():
+        val = _pick_first(pats, t)
+        fv = _to_float(val) if val else None
+        if fv is not None:
+            data[key] = float(round(fv, 3))
+
+    if debug:
+        # On met au moins un indicateur si rien trouvé
+        data["_debug_text_len"] = float(len(t))
+
+    # Nettoyage : enlever debug si vide utile
+    if not debug and "_debug_text_len" in data:
+        data.pop("_debug_text_len", None)
+
+    return data
