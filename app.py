@@ -1463,133 +1463,86 @@ with tab1:
             st.info("ℹ️ Module DXA en cours d'intégration dans cette version. Vous pouvez déjà importer la biologie, l'épigénétique et le microbiote.")
 
     # ✅ NOUVEAU: Colonne Microbiote AVEC EXTRACTION AVANCÉE
-    with col_upload4:
-        st.subheader("🦠 PDF Microbiote")
-        microbiome_pdf = st.file_uploader(
-            "Analyses du microbiote",
-            type=["pdf"],
-            key="microbiome_pdf_upload",
-            help="Analyse du microbiome intestinal IDK GutMAP, diversité, pathogènes...",
-        )
+# --- Microbiote (IDK GutMAP)
+with col_upload4:
+    st.subheader("🦠 PDF Microbiote")
+    microbiome_pdf = st.file_uploader(
+        "Analyses du microbiote",
+        type=["pdf"],
+        key="microbiome_pdf_upload",
+        help="Rapport IDK GutMAP (dysbiosis index, diversité, bactéries clés...)",
+    )
 
-        if microbiome_pdf:
-            if st.button("🔍 Extraire", key="extract_microbiome_btn", use_container_width=True):
-                if not UNIVERSAL_EXTRACTOR_AVAILABLE:
-                    st.error("❌ UniversalPDFExtractor indisponible.")
-                else:
-                    with st.spinner("Extraction en cours..."):
+    if microbiome_pdf:
+        debug_micro = st.checkbox("🐛 Mode Debug", key="debug_micro_check")
+
+        if st.button("🔍 Extraire", key="extract_microbiome_btn", use_container_width=True):
+            if not MICROBIOME_EXTRACTOR_AVAILABLE:
+                st.error("❌ Extracteur microbiote indisponible.")
+                try:
+                    st.code(_MICROBIOME_IMPORT_ERROR, language="text")
+                except Exception:
+                    pass
+            else:
+                with st.spinner("Extraction en cours..."):
+                    microbiome_data = {}
+
+                    try:
+                        # 1) on récupère le texte via l'extracteur universel (déjà en place)
                         text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
-                        
-                        # ✅ Utiliser la méthode avancée
-                        # ✅ Utiliser la méthode avancée (robuste selon signature)
-                        known_db = BiomarkerDatabase.get_reference_ranges()
-                        try:
-                            extractor = UniversalPDFExtractor(known_biomarkers=known_db)
-                        except TypeError:
-                        # ✅ Extraction microbiote via module dédié (GitHub / standalone)
-                        if not MICROBIOME_EXTRACTOR_AVAILABLE:
-                            st.error("❌ Extracteur microbiote indisponible (import failed).")
-                            st.code(_MICROBIOME_IMPORT_ERROR, language="text")
-                            microbiome_data = {}
-                        else:
-                            microbiome_data = extract_microbiome_data(text, debug=True)
-if microbiome_data:
-                            st.session_state.extracted_data.setdefault("microbiome", {})
-                            st.session_state.extracted_data["microbiome"] = microbiome_data
-                            st.session_state.patient_data.setdefault("microbiome_data", {}).update(microbiome_data)
-                            
-                            st.success(f"✅ **{len(microbiome_data)} paramètres microbiote extraits!**")
-                            
-                            # Affichage des métriques clés
-                            m1, m2, m3, m4 = st.columns(4)
-                            
-                            if "dysbiosis_index" in microbiome_data:
-                                di_value = microbiome_data['dysbiosis_index']
-                                di_color = "🟢" if di_value <= 2 else "🟡" if di_value == 3 else "🔴"
-                                m1.metric(
-                                    "Dysbiosis Index", 
-                                    f"{di_color} {di_value:.0f}/5",
-                                    help="1-2: Normobiotic, 3: Mildly dysbiotic, 4-5: Severely dysbiotic"
-                                )
-                            
-                            if "shannon_index_numeric" in microbiome_data:
-                                shannon = microbiome_data['shannon_index_numeric']
-                                shannon_emoji = "🟢" if shannon == 3 else "🟡" if shannon == 2 else "🔴"
-                                m2.metric(
-                                    "Diversité", 
-                                    f"{shannon_emoji} {microbiome_data.get('diversity_shannon', 'N/A')}",
-                                    help="Diversité bactérienne (Shannon index)"
-                                )
-                            
-                            if "akkermansia_muciniphila" in microbiome_data:
-                                akk_value = microbiome_data['akkermansia_muciniphila']
-                                akk_emoji = "🟢" if akk_value >= 0 else "🟡" if akk_value >= -1 else "🔴"
-                                m3.metric(
-                                    "Akkermansia", 
-                                    f"{akk_emoji} {akk_value:+.1f}",
-                                    help="Bactérie anti-inflammatoire clé"
-                                )
-                            
-                            if "faecalibacterium_prausnitzii" in microbiome_data:
-                                faecal_value = microbiome_data['faecalibacterium_prausnitzii']
-                                faecal_emoji = "🟢" if faecal_value >= 0 else "🟡" if faecal_value >= -1 else "🔴"
-                                m4.metric(
-                                    "Faecalibacterium", 
-                                    f"{faecal_emoji} {faecal_value:+.1f}",
-                                    help="Producteur majeur de butyrate"
-                                )
-                            
-                            # Scores par catégorie
-                            if any(k.endswith("_score") for k in microbiome_data.keys()):
-                                st.markdown("#### 📊 Scores par Catégorie")
-                                score_cols = st.columns(3)
-                                
-                                if "anti_inflammatory_score" in microbiome_data:
-                                    score_cols[0].metric(
-                                        "Anti-inflammatoires",
-                                        f"{microbiome_data['anti_inflammatory_score']:.0f}%",
-                                        help="Bactéries bénéfiques productrices de SCFA"
-                                    )
-                                
-                                if "pro_inflammatory_score" in microbiome_data:
-                                    score_cols[1].metric(
-                                        "Pro-inflammatoires (inversé)",
-                                        f"{microbiome_data['pro_inflammatory_score']:.0f}%",
-                                        help="Score élevé = faible présence de pathogènes"
-                                    )
-                                
-                                if "broad_commensals_score" in microbiome_data:
-                                    score_cols[2].metric(
-                                        "Commensaux",
-                                        f"{microbiome_data['broad_commensals_score']:.0f}%",
-                                        help="Bactéries commensales essentielles"
-                                    )
-                            
-                            with st.expander("📋 Toutes les données extraites", expanded=False):
-                                # Organiser l'affichage par catégories
-                                st.markdown("##### 🔍 Indices Globaux")
-                                indices = {k: v for k, v in microbiome_data.items() 
-                                          if k in ["dysbiosis_index", "diversity_shannon", "shannon_index_numeric", "firmicutes_bacteroidetes_ratio"]}
-                                if indices:
-                                    st.json(indices)
-                                
-                                st.markdown("##### 🦠 Bactéries Détectées")
-                                bacteria = {k: v for k, v in microbiome_data.items() 
-                                           if k not in ["dysbiosis_index", "diversity_shannon", "shannon_index_numeric", 
-                                                       "firmicutes_bacteroidetes_ratio"] and not k.endswith("_score")}
-                                if bacteria:
-                                    df_bacteria = pd.DataFrame([
-                                        {"Bactérie": k.replace("_", " ").title(), "Abondance": f"{v:+.1f}"} 
-                                        for k, v in sorted(bacteria.items(), key=lambda x: abs(x[1]), reverse=True)
-                                    ])
-                                    st.dataframe(df_bacteria, use_container_width=True, hide_index=True)
-                                
-                                st.markdown("##### 📊 Scores Catégoriels")
-                                scores = {k: v for k, v in microbiome_data.items() if k.endswith("_score")}
-                                if scores:
-                                    st.json(scores)
-                        else:
-                            st.warning("⚠️ Aucune donnée de microbiote trouvée.")
+
+                        # 2) extraction structurée microbiote (IDK GutMAP)
+                        microbiome_data = extract_microbiome_data(text, debug=debug_micro) or {}
+                    except Exception as e:
+                        st.error(f"❌ Erreur extraction microbiote: {e}")
+                        import traceback
+                        with st.expander("Détails de l'erreur microbiote"):
+                            st.code(traceback.format_exc())
+
+                    if microbiome_data:
+                        st.session_state.extracted_data["microbiome"] = microbiome_data
+                        st.session_state.patient_data.setdefault("microbiome_data", {})
+                        st.session_state.patient_data["microbiome_data"].update(microbiome_data)
+
+                        st.success(f"✅ **{len(microbiome_data)} paramètres microbiote extraits!**")
+
+                        # Affichage rapide (quelques métriques si présentes)
+                        m1, m2, m3, m4 = st.columns(4)
+
+                        if "dysbiosis_index" in microbiome_data:
+                            di = microbiome_data["dysbiosis_index"]
+                            try:
+                                di = float(di)
+                            except Exception:
+                                di = di
+                            m1.metric("Dysbiosis Index", di)
+
+                        if "diversity_shannon" in microbiome_data:
+                            m2.metric("Diversité (Shannon)", microbiome_data["diversity_shannon"])
+
+                        if "akkermansia_muciniphila" in microbiome_data:
+                            m3.metric("Akkermansia", microbiome_data["akkermansia_muciniphila"])
+
+                        if "faecalibacterium_prausnitzii" in microbiome_data:
+                            m4.metric("Faecalibacterium", microbiome_data["faecalibacterium_prausnitzii"])
+
+                        with st.expander("📋 Toutes les données microbiote", expanded=False):
+                            # petit tri: indices d'abord
+                            keys_first = [
+                                "dysbiosis_index",
+                                "diversity_shannon",
+                                "firmicutes_bacteroidetes_ratio",
+                            ]
+                            ordered = {}
+                            for k in keys_first:
+                                if k in microbiome_data:
+                                    ordered[k] = microbiome_data[k]
+                            for k, v in microbiome_data.items():
+                                if k not in ordered:
+                                    ordered[k] = v
+                            st.json(ordered)
+                    else:
+                        st.warning("⚠️ Aucune donnée de microbiote trouvée. Essayez le mode Debug.")
     st.divider()
 
     st.subheader("📊 Récapitulatif des Données Extraites")
