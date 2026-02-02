@@ -1,197 +1,180 @@
-# -*- coding: utf-8 -*-
 """
-IDK / GutMAP Microbiome Extractor (robuste)
-- 1) Utilise le texte "universal extractor" si dispo
-- 2) Fallback: relit le PDF en mode layout (pdfplumber) si pdf_bytes fourni
-- 3) Regex robustes pour dysbiosis / shannon / ratios + quelques espèces clés
+microbiome_extractor_idk_gutmap.py
+---------------------------------
+Extracteur "light" pour rapports IDK® GutMAP (EN) à partir du texte PDF déjà extrait.
+
+⚠️ Important
+- Les rapports IDK GutMAP contiennent une grande partie des résultats sous forme de graphiques.
+  Selon le PDF, pdfplumber/PyPDF2 peuvent ne pas récupérer les valeurs quantitatives (z-scores).
+- Cet extracteur récupère donc de manière robuste :
+  - Dysbiosis Index (DI) : via texte si présent, sinon via le nom de fichier (ex: "..._DI-1_EN.pdf"),
+    sinon via l'interprétation ("normobiotic" -> DI 1/2, "mildly" -> DI 3, "severely" -> DI 4/5).
+  - Diversité (Shannon) : via la phrase "bacterial diversity is ..." (as expected / lower than expected / ...).
+  - Présence (bool) de quelques espèces clés, si elles apparaissent dans le texte du rapport
+    (présence dans la liste ≠ quantification).
+
+Usage (dans app.py)
+-------------------
+from microbiome_extractor_idk_gutmap import extract_microbiome_data
+
+text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
+microbiome_data = extract_microbiome_data(text, filename=microbiome_pdf.name, debug=True)
 """
 
 from __future__ import annotations
 
 import re
-from io import BytesIO
-from typing import Dict, Optional, Tuple
-
-# pdfplumber en fallback (optionnel)
-try:
-    import pdfplumber  # type: ignore
-    PDFPLUMBER_OK = True
-except Exception:
-    PDFPLUMBER_OK = False
+from typing import Any, Dict, Optional
 
 
-# ----------------------------
-# Utils
-# ----------------------------
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip().lower()
 
-def _to_float(x: str) -> Optional[float]:
-    if x is None:
+
+def _extract_di_from_filename(filename: Optional[str]) -> Optional[int]:
+    if not filename:
         return None
-    s = x.strip().replace(",", ".")
-    # garde signe +/-
-    s = re.sub(r"[^\d\.\-\+]", "", s)
-    if s in ("", "+", "-"):
-        return None
-    try:
-        return float(s)
-    except Exception:
-        return None
-
-
-def _norm_text(t: str) -> str:
-    # normalise espaces / tirets / caractères invisibles
-    t = t.replace("\u00a0", " ")
-    t = re.sub(r"[ \t]+", " ", t)
-    t = re.sub(r"\n{3,}", "\n\n", t)
-    return t
-
-
-def _extract_with_pdfplumber(pdf_bytes: bytes) -> str:
-    if not PDFPLUMBER_OK:
-        return ""
-    out = []
-    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
-            # extraction "layout" + tables si possible
-            txt = page.extract_text(x_tolerance=2, y_tolerance=2) or ""
-            out.append(txt)
-
-            # tables (si présentes)
-            try:
-                tables = page.extract_tables() or []
-                for tbl in tables:
-                    for row in tbl:
-                        if not row:
-                            continue
-                        out.append(" | ".join([(c or "") for c in row]))
-            except Exception:
-                pass
-
-    return _norm_text("\n".join(out))
-
-
-def _pick_first(patterns, text: str) -> Optional[str]:
-    for p in patterns:
-        m = re.search(p, text, flags=re.IGNORECASE)
-        if m:
-            return m.group(1)
+    fn = filename.upper()
+    # Common patterns: "_DI-1_", "DI-1", "DI 1"
+    m = re.search(r"\bDI[-_ ]?([1-5])\b", fn)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
     return None
 
 
-# ----------------------------
-# Core extraction
-# ----------------------------
+def _extract_di_from_text(text: str) -> Optional[int]:
+    t = text or ""
+    # If the report contains an explicit numeric statement (rare):
+    # "Dysbiosis Index (DI): 1" or "DI: 3"
+    m = re.search(r"(dysbiosis\s+index\s*\(di\)\s*[:=]\s*|di\s*[:=]\s*)([1-5])\b", t, re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(2))
+        except Exception:
+            return None
+    return None
 
-def extract_microbiome_data(
-    text: str,
-    pdf_bytes: Optional[bytes] = None,
-    debug: bool = False,
-) -> Dict[str, float]:
-    """
-    Retourne un dict de features microbiote:
-    - dysbiosis_index
-    - shannon_index_numeric + diversity_shannon (label)
-    - firmicutes_bacteroidetes_ratio
-    - quelques espèces clés si présentes (z-scores ou log-abundance)
-    """
 
-    if text is None:
-        text = ""
-    text0 = _norm_text(text)
+def _infer_di_from_interpretation(text: str) -> Optional[int]:
+    tl = _norm(text)
 
-    # Fallback PDF layout si texte trop pauvre
-    if (len(text0.strip()) < 300) and pdf_bytes:
-        layout_text = _extract_with_pdfplumber(pdf_bytes)
-        if len(layout_text.strip()) > len(text0.strip()):
-            text0 = layout_text
+    # Direct interpretations commonly present in IDK GutMAP sample reports
+    if "result: the microbiota is normobiotic" in tl or "microbiota is normobiotic" in tl:
+        return 1  # safest default within "1–2"
+    if "mildly dysbiotic" in tl:
+        return 3
+    if "severely dysbiotic" in tl:
+        return 4
 
-    # Normalise pour recherche
-    t = text0
+    # Generic fallbacks
+    if "normobiotic" in tl:
+        return 1
+    if "dysbiotic" in tl and "mild" in tl:
+        return 3
+    if "dysbiotic" in tl and ("severe" in tl or "severely" in tl):
+        return 4
 
-    data: Dict[str, float] = {}
+    return None
 
-    # ---- Dysbiosis Index (souvent 1–5)
-    dys = _pick_first(
-        [
-            r"dysbiosis\s*index\s*[:\-]?\s*([0-9](?:\.[0-9])?)\s*/\s*5",
-            r"dysbiosis\s*index\s*[:\-]?\s*([0-9](?:\.[0-9])?)\b",
-            r"index\s*de\s*dysbiose\s*[:\-]?\s*([0-9](?:\.[0-9])?)\s*/\s*5",
-            r"index\s*de\s*dysbiose\s*[:\-]?\s*([0-9](?:\.[0-9])?)\b",
-        ],
-        t,
-    )
-    dys_f = _to_float(dys) if dys else None
-    if dys_f is not None:
-        # clamp raisonnable
-        if dys_f < 0:
-            dys_f = 0.0
-        if dys_f > 5:
-            dys_f = 5.0
-        data["dysbiosis_index"] = float(round(dys_f, 2))
 
-    # ---- Shannon diversity (parfois un score + label)
-    sh = _pick_first(
-        [
-            r"shannon\s*(?:diversity|index)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
-            r"diversit[ée]\s*\(shannon\)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
-        ],
-        t,
-    )
-    sh_f = _to_float(sh) if sh else None
-    if sh_f is not None:
-        data["shannon_index_numeric"] = float(round(sh_f, 3))
-        # label simple
-        if sh_f >= 3.5:
-            data["diversity_shannon"] = 3.0  # "haute" (mappé sur 3)
-        elif sh_f >= 2.5:
-            data["diversity_shannon"] = 2.0  # "moyenne"
+def _extract_diversity(text: str) -> Dict[str, Any]:
+    tl = _norm(text)
+
+    # Typical sentence:
+    # "Result: The bacterial diversity is as expected."
+    # or "Result: The bacterial diversity is lower than expected."
+    out: Dict[str, Any] = {}
+
+    m = re.search(r"result:\s*the bacterial diversity is ([a-z ]+?)(?:\.|\n|$)", text, re.IGNORECASE)
+    if m:
+        phrase = _norm(m.group(1))
+        out["diversity_shannon"] = phrase
+
+        # Map to an ordinal (not the real Shannon index)
+        if "as expected" in phrase or "expected" in phrase:
+            out["shannon_index_numeric"] = 3
+        elif "slightly" in phrase or "mild" in phrase:
+            out["shannon_index_numeric"] = 2
+        elif "lower" in phrase or "reduced" in phrase or "low" in phrase:
+            out["shannon_index_numeric"] = 1
         else:
-            data["diversity_shannon"] = 1.0  # "basse"
+            out["shannon_index_numeric"] = 2
+    else:
+        # alternative wording sometimes seen
+        if "bacterial diversity is as expected" in tl:
+            out["diversity_shannon"] = "as expected"
+            out["shannon_index_numeric"] = 3
 
-    # ---- Firmicutes/Bacteroidetes ratio
-    fb = _pick_first(
-        [
-            r"firmicutes\s*/\s*bacteroidetes\s*(?:ratio)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
-            r"f\s*/\s*b\s*(?:ratio)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)",
-        ],
-        t,
-    )
-    fb_f = _to_float(fb) if fb else None
-    if fb_f is not None:
-        data["firmicutes_bacteroidetes_ratio"] = float(round(fb_f, 3))
+    return out
 
-    # ---- Espèces clés (souvent en Z-score / log)
-    # On prend la valeur numérique sur la même ligne si trouvée
-    species_patterns = {
-        "akkermansia_muciniphila": [
-            r"akkermansia\s*muciniphila[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
-        ],
-        "faecalibacterium_prausnitzii": [
-            r"faecalibacterium\s*prausnitzii[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
-        ],
-        "bifidobacterium": [
-            r"bifidobacterium[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
-        ],
-        "lactobacillus": [
-            r"lactobacillus[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
-        ],
-        "escherichia_coli": [
-            r"escherichia\s*coli[^0-9\-\+]*([\-+]?\d+(?:\.\d+)?)",
-        ],
+
+def _presence_flags(text: str) -> Dict[str, bool]:
+    tl = _norm(text)
+
+    def has(term: str) -> bool:
+        return term.lower() in tl
+
+    return {
+        "akkermansia_muciniphila_present": has("akkermansia muciniphila"),
+        "faecalibacterium_prausnitzii_present": has("faecalibacterium prausnitzii"),
+        "bifidobacterium_present": has("bifidobacterium"),
+        "lactobacillus_present": has("lactobacillus"),
+        "prevotella_present": has("prevotella"),
+        "escherichia_coli_present": has("escherichia coli"),
+        "clostridium_difficile_present": has("clostridium difficile"),
     }
 
-    for key, pats in species_patterns.items():
-        val = _pick_first(pats, t)
-        fv = _to_float(val) if val else None
-        if fv is not None:
-            data[key] = float(round(fv, 3))
 
+def extract_microbiome_data(text: str, filename: Optional[str] = None, debug: bool = False) -> Dict[str, Any]:
+    """
+    Retourne un dictionnaire exploitable par l'UI Streamlit.
+
+    Le dictionnaire peut contenir (selon disponibilité):
+      - dysbiosis_index (int 1–5)
+      - dysbiosis_status (str)
+      - diversity_shannon (str)
+      - shannon_index_numeric (int 1–3)
+      - *_present (bool) pour quelques espèces clés
+    """
+    raw = text or ""
+    data: Dict[str, Any] = {}
+
+    # 1) DI
+    di = _extract_di_from_text(raw)
+    if di is None:
+        di = _extract_di_from_filename(filename)
+    if di is None:
+        di = _infer_di_from_interpretation(raw)
+
+    if di is not None:
+        data["dysbiosis_index"] = int(di)
+        if di <= 2:
+            data["dysbiosis_status"] = "normobiotic"
+        elif di == 3:
+            data["dysbiosis_status"] = "mildly dysbiotic"
+        else:
+            data["dysbiosis_status"] = "severely dysbiotic"
+
+    # 2) Diversity (Shannon - qualitative)
+    data.update(_extract_diversity(raw))
+
+    # 3) Presence flags
+    data.update(_presence_flags(raw))
+
+    # 4) Minimal sanity: if nothing extracted, return {}
+    extracted_keys = [k for k, v in data.items() if v is not None]
     if debug:
-        # On met au moins un indicateur si rien trouvé
-        data["_debug_text_len"] = float(len(t))
+        data["_debug"] = {
+            "filename": filename,
+            "keys": extracted_keys,
+        }
 
-    # Nettoyage : enlever debug si vide utile
-    if not debug and "_debug_text_len" in data:
-        data.pop("_debug_text_len", None)
+    # Consider "useful" if DI or diversity or at least one key species present
+    useful = ("dysbiosis_index" in data) or ("diversity_shannon" in data) or any(
+        k.endswith("_present") and data.get(k) for k in data.keys()
+    )
 
-    return data
+    return data if useful else {}
