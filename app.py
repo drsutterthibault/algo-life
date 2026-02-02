@@ -3,13 +3,14 @@ ALGO-LIFE - Minimal Clean App (Bio + Microbiote)
 Import PDF + Excel (pas uniquement PDF)
 Extraction multimodale + recommandations via règles Excel
 
-Auteur: Dr Thibault SUTTER, PhD
+Auteur: Dr Thibault SUTTER
 Version: Clean reboot - Feb 2026
 """
 
 from __future__ import annotations
 
 import io
+import traceback
 from typing import Optional, Dict, Any, Tuple
 
 import pandas as pd
@@ -20,14 +21,15 @@ import pandas as pd
 try:
     import streamlit as st
 except Exception as e:
+    details = traceback.format_exc()
     raise RuntimeError(
-        "Streamlit n'est pas installé dans ton environnement.\n"
-        "Installe-le avec: pip install streamlit\n"
-        "Ou ajoute streamlit dans requirements.txt si tu déploies."
+        "Streamlit n'est pas installé (ou cassé) dans ton environnement.\n"
+        "➡️ Fix: ajoute 'streamlit' dans requirements.txt ou fais 'pip install streamlit'.\n\n"
+        f"--- Détails ---\n{details}"
     ) from e
 
 # -----------------------------
-# Local modules import (with clear error)
+# Local modules import (show real root cause)
 # -----------------------------
 try:
     from extractors import (
@@ -36,10 +38,12 @@ try:
         ExtractionResult,
     )
 except Exception as e:
+    details = traceback.format_exc()
     raise RuntimeError(
-        "Impossible d'importer 'extractors.py'.\n"
-        "Vérifie que le fichier 'extractors.py' est bien à la racine, au même niveau que app.py.\n"
-        "Et qu'il s'appelle exactement: extractors.py"
+        "Import impossible de 'extractors.py'.\n"
+        "✅ Le fichier existe (vu ton repo), donc c'est quasi sûr que c'est une ERREUR INTERNE dans extractors.py\n"
+        "➡️ Très souvent: dépendance manquante (pandas/openpyxl/pdfplumber/PyPDF2)\n\n"
+        f"--- Cause réelle (traceback) ---\n{details}"
     ) from e
 
 try:
@@ -48,10 +52,12 @@ try:
         generate_recommendations_multimodal,
     )
 except Exception as e:
+    details = traceback.format_exc()
     raise RuntimeError(
-        "Impossible d'importer 'rules_engine.py'.\n"
-        "Vérifie que le fichier 'rules_engine.py' est bien à la racine, au même niveau que app.py.\n"
-        "Et qu'il s'appelle exactement: rules_engine.py"
+        "Import impossible de 'rules_engine.py'.\n"
+        "✅ Le fichier existe (vu ton repo), donc c'est quasi sûr que c'est une ERREUR INTERNE dans rules_engine.py\n"
+        "➡️ Très souvent: dépendance manquante (pandas/openpyxl)\n\n"
+        f"--- Cause réelle (traceback) ---\n{details}"
     ) from e
 
 
@@ -80,7 +86,6 @@ def _read_upload(upload) -> Tuple[bytes, str]:
 
 def _download_json_button(label: str, payload: Dict[str, Any], filename: str):
     import json
-
     raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     st.download_button(label, data=raw, file_name=filename, mime="application/json")
 
@@ -91,7 +96,7 @@ def _download_csv_button(label: str, df: pd.DataFrame, filename: str):
 
 
 # -----------------------------
-# Sidebar: global inputs
+# Sidebar
 # -----------------------------
 with st.sidebar:
     st.header("Paramètres")
@@ -107,7 +112,7 @@ with st.sidebar:
 
 
 # -----------------------------
-# Main: uploads
+# Uploads
 # -----------------------------
 col1, col2 = st.columns(2)
 
@@ -131,9 +136,6 @@ with col2:
 
 st.markdown("---")
 
-# -----------------------------
-# Run button
-# -----------------------------
 run = st.button("🚀 Extraire + Générer les recommandations", type="primary")
 
 if run:
@@ -145,8 +147,8 @@ if run:
         st.error("Importe au moins un fichier (biologie ou microbiote).")
         st.stop()
 
-    # Read rules
     rules_bytes, rules_name = _read_upload(rules_upload)
+
     try:
         rules = load_rules_from_excel_bytes(rules_bytes)
     except Exception as e:
@@ -157,7 +159,6 @@ if run:
     bio_res: Optional[ExtractionResult] = None
     micro_res: Optional[ExtractionResult] = None
 
-    # Extract bio
     if bio_upload is not None:
         bio_bytes, bio_name = _read_upload(bio_upload)
         try:
@@ -167,7 +168,6 @@ if run:
             st.exception(e)
             st.stop()
 
-    # Extract microbiome
     if micro_upload is not None:
         micro_bytes, micro_name = _read_upload(micro_upload)
         try:
@@ -177,11 +177,9 @@ if run:
             st.exception(e)
             st.stop()
 
-    # Display extractions
     st.subheader("Extraction — Résultats structurés")
 
     cA, cB = st.columns(2)
-
     with cA:
         st.markdown("### Biologie")
         if bio_res is None or bio_res.data is None or bio_res.data.empty:
@@ -205,8 +203,6 @@ if run:
                 st.json(micro_res.meta)
 
     st.markdown("---")
-
-    # Generate recos
     st.subheader("Recommandations — moteur de règles multimodal")
 
     try:
@@ -222,9 +218,8 @@ if run:
         st.exception(e)
         st.stop()
 
-    # Render recos
     if not recos:
-        st.info("Aucune recommandation déclenchée (soit tout est normal, soit matching règles ↔ biomarqueurs à ajuster).")
+        st.info("Aucune recommandation déclenchée (normal ou matching règles ↔ biomarqueurs à ajuster).")
     else:
         for i, r in enumerate(recos, start=1):
             title = r.get("title", "Reco")
@@ -245,7 +240,6 @@ if run:
                     st.markdown("**Notes**")
                     st.write(r.get("notes"))
 
-    # Downloads
     st.markdown("---")
     payload = {
         "rules_file": rules_name,
@@ -255,5 +249,4 @@ if run:
         "micro_extraction": (micro_res.data.to_dict(orient="records") if (micro_res and micro_res.data is not None) else []),
         "recommendations": recos,
     }
-
     _download_json_button("⬇️ Télécharger (JSON complet)", payload, "algolife_multimodal_output.json")
