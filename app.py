@@ -1467,21 +1467,17 @@ with tab1:
                 else:
                     with st.spinner("Extraction en cours..."):
                         text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
-                        
-                        # ✅ Utiliser la méthode avancée
-                        # ✅ Utiliser la méthode avancée (robuste selon signature)
-                        known_db = BiomarkerDatabase.get_reference_ranges()
-                        try:
-                            extractor = UniversalPDFExtractor(known_biomarkers=known_db)
-                        except TypeError:
-                            extractor = UniversalPDFExtractor()
-
-                        if hasattr(extractor, "extract_microbiome_data"):
-                            microbiome_data = extractor.extract_microbiome_data(text, debug=True)
-                        else:
+                        if not MICROBIOME_EXTRACTOR_AVAILABLE:
+                            st.error("❌ Microbiome extractor indisponible (import failed).")
+                            st.code(_MICROBIOME_IMPORT_ERROR, language="text")
                             microbiome_data = {}
-                        
-                        if microbiome_data:
+                        else:
+                            microbiome_data = extract_microbiome_data(
+                                text,
+                                filename=getattr(microbiome_pdf, "name", None),
+                                debug=True,
+                            )
+if microbiome_data:
                             st.session_state.extracted_data.setdefault("microbiome", {})
                             st.session_state.extracted_data["microbiome"] = microbiome_data
                             st.session_state.patient_data.setdefault("microbiome_data", {}).update(microbiome_data)
@@ -1509,22 +1505,20 @@ with tab1:
                                     help="Diversité bactérienne (Shannon index)"
                                 )
                             
-                            if "akkermansia_muciniphila" in microbiome_data:
-                                akk_value = microbiome_data['akkermansia_muciniphila']
-                                akk_emoji = "🟢" if akk_value >= 0 else "🟡" if akk_value >= -1 else "🔴"
+                            if "akkermansia_muciniphila_present" in microbiome_data:
+                                present = bool(microbiome_data["akkermansia_muciniphila_present"])
                                 m3.metric(
-                                    "Akkermansia", 
-                                    f"{akk_emoji} {akk_value:+.1f}",
-                                    help="Bactérie anti-inflammatoire clé"
+                                    "Akkermansia",
+                                    "🟢 Présente" if present else "🟡 Non détectée",
+                                    help="Détection dans le rapport (pas une quantification)"
                                 )
                             
-                            if "faecalibacterium_prausnitzii" in microbiome_data:
-                                faecal_value = microbiome_data['faecalibacterium_prausnitzii']
-                                faecal_emoji = "🟢" if faecal_value >= 0 else "🟡" if faecal_value >= -1 else "🔴"
+                            if "faecalibacterium_prausnitzii_present" in microbiome_data:
+                                present = bool(microbiome_data["faecalibacterium_prausnitzii_present"])
                                 m4.metric(
-                                    "Faecalibacterium", 
-                                    f"{faecal_emoji} {faecal_value:+.1f}",
-                                    help="Producteur majeur de butyrate"
+                                    "Faecalibacterium",
+                                    "🟢 Présente" if present else "🟡 Non détectée",
+                                    help="Détection dans le rapport (pas une quantification)"
                                 )
                             
                             # Scores par catégorie
