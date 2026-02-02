@@ -1046,12 +1046,14 @@ def init_session_state() -> None:
             "biological_markers": {},
             "epigenetic_data": {},
             "imaging_data": {},
+            "microbiome_data": {},
         }
     if "extracted_data" not in st.session_state:
         st.session_state.extracted_data = {
             "biological": {},
             "epigenetic": {},
             "imaging": {},
+            "microbiome": {},
             "patient_info": {},
         }
     if "analysis_complete" not in st.session_state:
@@ -1211,7 +1213,7 @@ with tab1:
 
     st.divider()
 
-    col_upload1, col_upload2, col_upload3 = st.columns(3)
+    col_upload1, col_upload2, col_upload3, col_upload4 = st.columns(4)
 
     # --- Biologie
     with col_upload1:
@@ -1317,6 +1319,18 @@ with tab1:
 
     # --- Imagerie (simple regex)
 
+    with col_upload3:
+        st.subheader("🏥 PDF Imagerie / DXA")
+        imaging_pdf = st.file_uploader(
+            "Imagerie (DXA, composition corporelle, densité osseuse)",
+            type=["pdf"],
+            key="imaging_pdf_upload",
+            help="DXA, composition corporelle, densité osseuse... (module en cours d'intégration)",
+        )
+
+        if imaging_pdf:
+            st.info("ℹ️ Module DXA en cours d'intégration dans cette version. Vous pouvez déjà importer la biologie, l'épigénétique et le microbiote.")
+
     # ✅ NOUVEAU: Colonne Microbiote AVEC EXTRACTION AVANCÉE
     with col_upload4:
         st.subheader("🦠 PDF Microbiote")
@@ -1336,12 +1350,22 @@ with tab1:
                         text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
                         
                         # ✅ Utiliser la méthode avancée
-                        extractor = UniversalPDFExtractor(microbiome_pdf)
-                        microbiome_data = extractor.extract_microbiome_data(text, debug=True)
+                        # ✅ Utiliser la méthode avancée (robuste selon signature)
+                        known_db = BiomarkerDatabase.get_reference_ranges()
+                        try:
+                            extractor = UniversalPDFExtractor(known_biomarkers=known_db)
+                        except TypeError:
+                            extractor = UniversalPDFExtractor()
+
+                        if hasattr(extractor, "extract_microbiome_data"):
+                            microbiome_data = extractor.extract_microbiome_data(text, debug=True)
+                        else:
+                            microbiome_data = {}
                         
                         if microbiome_data:
+                            st.session_state.extracted_data.setdefault("microbiome", {})
                             st.session_state.extracted_data["microbiome"] = microbiome_data
-                            st.session_state.patient_data["microbiome_data"].update(microbiome_data)
+                            st.session_state.patient_data.setdefault("microbiome_data", {}).update(microbiome_data)
                             
                             st.success(f"✅ **{len(microbiome_data)} paramètres microbiote extraits!**")
                             
@@ -1438,16 +1462,18 @@ with tab1:
     st.divider()
 
     st.subheader("📊 Récapitulatif des Données Extraites")
-    total_bio = len(st.session_state.extracted_data["biological"])
-    total_epi = len(st.session_state.extracted_data["epigenetic"])
-    total_img = len(st.session_state.extracted_data["imaging"])
-    total = total_bio + total_epi + total_img
+    total_bio = len(st.session_state.extracted_data.get("biological", {}))
+    total_epi = len(st.session_state.extracted_data.get("epigenetic", {}))
+    total_img = len(st.session_state.extracted_data.get("imaging", {}))
+    total_micro = len(st.session_state.extracted_data.get("microbiome", {}))
+    total = total_bio + total_epi + total_img + total_micro
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("🧪 Biomarqueurs Bio", total_bio)
     c2.metric("🧬 Paramètres Épi", total_epi)
     c3.metric("🏥 Données Imagerie", total_img)
-    c4.metric("📈 Total", total)
+    c4.metric("🦠 Microbiote", total_micro)
+    c5.metric("📈 Total", total)
 
     if total > 0:
         st.markdown(
