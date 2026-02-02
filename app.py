@@ -1451,32 +1451,34 @@ with tab1:
             st.info("ℹ️ Module DXA en cours d'intégration dans cette version. Vous pouvez déjà importer la biologie, l'épigénétique et le microbiote.")
 
     # ✅ NOUVEAU: Colonne Microbiote AVEC EXTRACTION AVANCÉE
-    with col_upload4:
-        st.subheader("🦠 PDF Microbiote")
-        microbiome_pdf = st.file_uploader(
-            "Analyses du microbiote",
-            type=["pdf"],
-            key="microbiome_pdf_upload",
-            help="Analyse du microbiome intestinal IDK GutMAP, diversité, pathogènes...",
-        )
+# ============================================================
+# ✅ MICROBIOTE (IDK GutMAP Extractor)
+# ============================================================
 
-        if microbiome_pdf:
-            if st.button("🔍 Extraire", key="extract_microbiome_btn", use_container_width=True):
-                if not UNIVERSAL_EXTRACTOR_AVAILABLE:
-                    st.error("❌ UniversalPDFExtractor indisponible.")
-                else:
-                    with st.spinner("Extraction en cours..."):
-                        text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
-                        if not MICROBIOME_EXTRACTOR_AVAILABLE:
-                            st.error("❌ Microbiome extractor indisponible (import failed).")
-                            st.code(_MICROBIOME_IMPORT_ERROR, language="text")
-                            microbiome_data = {}
-                        else:
-                            microbiome_data = extract_microbiome_data(
-                                text,
-                                filename=getattr(microbiome_pdf, "name", None),
-                                debug=True,
-                            )
+with col_upload4:
+    st.subheader("🦠 PDF Microbiote")
+
+    microbiome_pdf = st.file_uploader(
+        "Analyses du microbiote (IDK GutMAP)",
+        type=["pdf"],
+        key="microbiome_pdf_upload",
+    )
+
+    if microbiome_pdf:
+
+        # ✅ Import extractor
+        if not MICROBIOME_EXTRACTOR_AVAILABLE:
+            st.error("❌ Extracteur microbiote indisponible.")
+            st.code(_MICROBIOME_IMPORT_ERROR)
+
+        else:
+            if st.button("🔍 Extraire Microbiote", key="extract_microbiome_btn"):
+
+                with st.spinner("Extraction microbiote en cours..."):
+
+                    # 1) Extract text from PDF
+                    text = AdvancedPDFExtractor
+
 if microbiome_data:
                             st.session_state.extracted_data.setdefault("microbiome", {})
                             st.session_state.extracted_data["microbiome"] = microbiome_data
