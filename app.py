@@ -45,14 +45,14 @@ except Exception as e:
     UNIVERSAL_EXTRACTOR_AVAILABLE = False
     _UNIVERSAL_IMPORT_ERROR = str(e)
 
-
-# ✅ Microbiome extractor (IDK GutMAP) - optional
+# ✅ Microbiome extractor (IDK GutMAP)
 try:
     from microbiome_extractor_idk_gutmap import extract_microbiome_data  # noqa: F401
     MICROBIOME_EXTRACTOR_AVAILABLE = True
 except Exception as e:
     MICROBIOME_EXTRACTOR_AVAILABLE = False
     _MICROBIOME_IMPORT_ERROR = str(e)
+
 
 # ✅ PATCH: force reload module PDF (évite ancienne version / cache / doublon)
 import algolife_pdf_generator as pdfgen
@@ -1062,8 +1062,8 @@ def init_session_state() -> None:
             "biological": {},
             "epigenetic": {},
             "imaging": {},
-            "microbiome": {},
             "patient_info": {},
+            "microbiome": {},
         }
     if "analysis_complete" not in st.session_state:
         st.session_state.analysis_complete = False
@@ -1327,47 +1327,58 @@ with tab1:
                             st.warning("⚠️ Aucune donnée épigénétique trouvée.")
 
     # --- Imagerie (simple regex)
-    # ✅ Microbiote (IDK GutMAP)
+
+    # ✅ NOUVEAU: Colonne Microbiote AVEC EXTRACTION AVANCÉE
     with col_upload4:
         st.subheader("🦠 PDF Microbiote")
         microbiome_pdf = st.file_uploader(
-            "Analyses du microbiote (IDK GutMAP)",
+            "Analyses du microbiote",
             type=["pdf"],
             key="microbiome_pdf_upload",
-            help="Rapport IDK GutMAP, diversité, dysbiose, bactéries clés...",
+            help="Rapport IDK GutMAP, diversité, pathogènes, commensaux...",
         )
 
         if microbiome_pdf:
-            if not MICROBIOME_EXTRACTOR_AVAILABLE:
-                st.error("❌ Extracteur microbiote indisponible. Vérifie microbiome_extractor_idk_gutmap.py")
-                st.code(_MICROBIOME_IMPORT_ERROR, language="text")
-            else:
-                debug_micro = st.checkbox("🐛 Mode Debug", key="debug_microbiome_check")
-                if st.button("🔍 Extraire", key="extract_microbiome_btn", use_container_width=True):
-                    with st.spinner("Extraction microbiote en cours..."):
-                        text_micro = AdvancedPDFExtractor.extract_text(microbiome_pdf)
-                        microbiome_data = extract_microbiome_data(text_micro, debug=debug_micro)
+            if st.button("🔍 Extraire", key="extract_microbiome_btn", use_container_width=True):
+                if not UNIVERSAL_EXTRACTOR_AVAILABLE:
+                    st.error("❌ UniversalPDFExtractor indisponible (utilisé pour extraire le texte).")
+                elif not MICROBIOME_EXTRACTOR_AVAILABLE:
+                    st.error("❌ Microbiome extractor indisponible (import failed).")
+                    st.code(_MICROBIOME_IMPORT_ERROR, language="text")
+                else:
+                    with st.spinner("Extraction en cours..."):
+                        text_pdf = AdvancedPDFExtractor.extract_text(microbiome_pdf)
+                        microbiome_data = extract_microbiome_data(text_pdf, debug=True)
 
                         if microbiome_data:
                             st.session_state.extracted_data["microbiome"] = microbiome_data
-                            st.session_state.patient_data["microbiome_data"] = microbiome_data
+                            st.session_state.patient_data["microbiome_data"].update(microbiome_data)
 
                             st.success(f"✅ **{len(microbiome_data)} paramètres microbiote extraits!**")
 
+                            # Affichage rapide (si présents)
                             m1, m2, m3, m4 = st.columns(4)
-                            if "dysbiosis_index" in microbiome_data:
-                                m1.metric("Dysbiosis Index", str(microbiome_data.get("dysbiosis_index")))
-                            if "diversity_shannon" in microbiome_data:
-                                m2.metric("Diversité (Shannon)", str(microbiome_data.get("diversity_shannon")))
-                            if "akkermansia_muciniphila" in microbiome_data:
-                                m3.metric("Akkermansia", str(microbiome_data.get("akkermansia_muciniphila")))
-                            if "faecalibacterium_prausnitzii" in microbiome_data:
-                                m4.metric("Faecalibacterium", str(microbiome_data.get("faecalibacterium_prausnitzii")))
 
-                            with st.expander("📋 Données microbiote (JSON)", expanded=False):
+                            if "dysbiosis_index" in microbiome_data:
+                                di_value = microbiome_data["dysbiosis_index"]
+                                di_color = "🟢" if di_value <= 2 else "🟡" if di_value == 3 else "🔴"
+                                m1.metric("Dysbiosis Index", f"{di_color} {di_value:.0f}/5")
+
+                            if "diversity_shannon" in microbiome_data:
+                                m2.metric("Diversité (Shannon)", str(microbiome_data["diversity_shannon"]))
+
+                            if "akkermansia_muciniphila" in microbiome_data:
+                                v = microbiome_data["akkermansia_muciniphila"]
+                                m3.metric("Akkermansia", f"{v:+.2f}")
+
+                            if "faecalibacterium_prausnitzii" in microbiome_data:
+                                v = microbiome_data["faecalibacterium_prausnitzii"]
+                                m4.metric("Faecalibacterium", f"{v:+.2f}")
+
+                            with st.expander("📋 Toutes les données extraites", expanded=False):
                                 st.json(microbiome_data)
                         else:
-                            st.warning("⚠️ Aucune donnée de microbiote trouvée. Active le mode Debug.")
+                            st.warning("⚠️ Aucune donnée de microbiote trouvée.")
 
     st.divider()
 
@@ -1850,3 +1861,4 @@ with f2:
 with f3:
     st.caption("Version 4.1 - Janvier 2026")
     st.caption(f"Dernière exécution: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
