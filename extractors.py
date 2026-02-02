@@ -188,4 +188,179 @@ def _extract_biology_from_text(txt: str, filename: str) -> pd.DataFrame:
             low = _to_float(m.group("low"))
             high = _to_float(m.group("high"))
             if marker and value is not None:
-                rows.app
+                rows.append({
+                    "marker": marker,
+                    "value": value,
+                    "unit": unit if unit else None,
+                    "ref_low": low,
+                    "ref_high": high,
+                    "source": filename,
+                })
+            continue
+
+        m = rx_belg.match(line)
+        if m:
+            marker = _clean_spaces(m.group("marker"))
+            value = _to_float(m.group("value"))
+            low = _to_float(m.group("low"))
+            high = _to_float(m.group("high"))
+            unit = _clean_spaces(m.group("unit") or "")
+            if marker and value is not None:
+                rows.append({
+                    "marker": marker,
+                    "value": value,
+                    "unit": unit if unit else None,
+                    "ref_low": low,
+                    "ref_high": high,
+                    "source": filename,
+                })
+            continue
+
+        m = rx_lbp.match(line)
+        if m:
+            marker = _clean_spaces(m.group("marker"))
+            value = _to_float(m.group("value"))
+            unit = _clean_spaces(m.group("unit") or "")
+            # try to parse VN range "x-y:VN"
+            refs = m.group("refs")
+            vn = None
+            vn2 = None
+            # Example: "0-6.8:opt. 2.3-8.3:VN"
+            m2 = re.search(r"(\d+(?:[.,]\d+)?)\s*[\-–]\s*(\d+(?:[.,]\d+)?)\s*:\s*VN", refs, flags=re.I)
+            if m2:
+                vn = _to_float(m2.group(1))
+                vn2 = _to_float(m2.group(2))
+            rows.append({
+                "marker": marker,
+                "value": value,
+                "unit": unit if unit else None,
+                "ref_low": vn,
+                "ref_high": vn2,
+                "source": filename,
+            })
+            continue
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    df["marker_norm"] = df["marker"].astype(str).apply(_normalize_marker_name)
+    # Drop obvious duplicates
+    df = df.drop_duplicates(subset=["marker_norm", "value", "unit"], keep="first")
+    return df.reset_index(drop=True)
+
+
+# -----------------------------
+# MICROBIOME PDF extraction (IDK GutMAP - functional markers)
+# -----------------------------
+def _extract_microbiome_from_text(txt: str, filename: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    For GutMAP PDF: we reliably extract:
+    - Dysbiosis result category (normobiotic / mildly dysbiotic / severely dysbiotic) -> DI score proxy
+    - Diversity result (as expected / slightly lower / lower than expected)
+
+    Additionally, we attempt to extract group-level 'Result: expected abundance ...' statements,
+    but those are usually not enough for per-bacteria marker rules (can be expanded later).
+    """
+    meta: Dict[str, Any] = {"source": filename}
+    t = txt
+
+    # Dysbiosis "Result: The microbiota is normobiotic" etc.
+    di_status = None
+    if re.search(r"\bnormobiotic\b", t, flags=re.I):
+        di_status = "normobiotic"
+        di_score = 2  # proxy 1-2
+    elif re.search(r"\bmildly\s+dysbiotic\b", t, flags=re.I):
+        di_status = "mildly_dysbiotic"
+        di_score = 3
+    elif re.search(r"\bseverely\s+dysbiotic\b", t, flags=re.I):
+        di_status = "severely_dysbiotic"
+        di_score = 5
+    else:
+        di_score = None
+
+    meta["dysbiosis_status"] = di_status
+    meta["dysbiosis_index_score_proxy"] = di_score
+
+    # Diversity
+    diversity = None
+    if re.search(r"diversity is as expected", t, flags=re.I):
+        diversity = "as_expected"
+    elif re.search(r"slightly lower than expected", t, flags=re.I):
+        diversity = "slightly_lower_than_expected"
+    elif re.search(r"lower than expected", t, flags=re.I):
+        diversity = "lower_than_expected"
+
+    meta["diversity_status"] = diversity
+
+    # Try capture "Result: (expected|slightly deviating|deviating) abundance of these bacteria."
+    group_hits = re.findall(
+        r"Result:\s*(expected|slightly deviating|deviating)\s+abundance of these bacteria",
+        t,
+        flags=re.I,
+    )
+    meta["group_results_counts"] = {
+        "expected": sum(1 for x in group_hits if x.lower().startswith("expected")),
+        "slightly_deviating": sum(1 for x in group_hits if x.lower().startswith("slightly")),
+        "deviating": sum(1 for x in group_hits if x.lower().startswith("deviating")),
+    }
+
+    # Build a minimal DF for functional markers (so we can display & export)
+    rows = []
+    if di_score is not None:
+        rows.append({
+            "marker": "Dysbiosis Index (DI)",
+            "value": float(di_score),
+            "unit": "score_proxy",
+            "ref_low": 1.0,
+            "ref_high": 2.0,
+            "source": filename,
+            "marker_norm": _normalize_marker_name("Dysbiosis Index (DI)"),
+        })
+    if diversity is not None:
+        # encode diversity as ordinal
+        # as_expected=0 (normal), slightly_lower=1, lower=2
+        dv = {"as_expected": 0, "slightly_lower_than_expected": 1, "lower_than_expected": 2}[diversity]
+        rows.append({
+            "marker": "Shannon Diversity Index",
+            "value": float(dv),
+            "unit": "ordinal_proxy",
+            "ref_low": 0.0,
+            "ref_high": 0.0,
+            "source": filename,
+            "marker_norm": _normalize_marker_name("Shannon Diversity Index"),
+        })
+
+    df = pd.DataFrame(rows)
+    return df, meta
+
+
+# -----------------------------
+# Public API
+# -----------------------------
+def extract_biology_any(file_bytes: bytes, filename: str) -> ExtractionResult:
+    ext = _ext(filename)
+    if ext in {"xlsx", "xls", "csv"}:
+        df = _read_table_from_excel_or_csv(file_bytes, filename)
+        return ExtractionResult(data=df, meta={"kind": "biology", "input": ext}, raw_text="")
+    elif ext == "pdf":
+        txt = _read_text_from_pdf(file_bytes)
+        df = _extract_biology_from_text(txt, filename)
+        return ExtractionResult(data=df, meta={"kind": "biology", "input": "pdf"}, raw_text=txt)
+    else:
+        raise ValueError(f"Format non supporté pour biologie: {filename}")
+
+def extract_microbiome_any(file_bytes: bytes, filename: str) -> ExtractionResult:
+    ext = _ext(filename)
+    if ext in {"xlsx", "xls", "csv"}:
+        df = _read_table_from_excel_or_csv(file_bytes, filename)
+        meta = {"kind": "microbiome", "input": ext}
+        return ExtractionResult(data=df, meta=meta, raw_text="")
+    elif ext == "pdf":
+        txt = _read_text_from_pdf(file_bytes)
+        df, meta = _extract_microbiome_from_text(txt, filename)
+        meta["kind"] = "microbiome"
+        meta["input"] = "pdf"
+        return ExtractionResult(data=df, meta=meta, raw_text=txt)
+    else:
+        raise ValueError(f"Format non supporté pour microbiote: {filename}")
