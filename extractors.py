@@ -1,314 +1,478 @@
-from __future__ import annotations
+"""
+Module d'extraction pour les rapports de biologie Synlab et microbiote IDK GutMAP
+"""
 
-import io
 import re
-from dataclasses import dataclass
-from typing import Dict, Any, Optional, List, Tuple
-
 import pandas as pd
+import pdfplumber
+from typing import Dict, List, Optional, Union
 
-# Optional PDF libs
-try:
-    import pdfplumber  # type: ignore
-except Exception:
-    pdfplumber = None
-
-try:
-    import PyPDF2  # type: ignore
-except Exception:
-    PyPDF2 = None
-
-
-@dataclass
-class ExtractionResult:
-    data: pd.DataFrame
-    meta: Dict[str, Any]
-    raw_text: str
-
-
-def _ext(filename: str) -> str:
-    return filename.lower().split(".")[-1].strip()
-
-
-def _read_text_from_pdf(file_bytes: bytes) -> str:
-    # Prefer pdfplumber (often better extraction), fallback PyPDF2
-    if pdfplumber is not None:
-        out = []
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages:
-                txt = page.extract_text() or ""
-                out.append(txt)
-        return "\n".join(out)
-
-    if PyPDF2 is not None:
-        reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-        out = []
-        for p in reader.pages:
-            out.append((p.extract_text() or ""))
-        return "\n".join(out)
-
-    raise RuntimeError("Aucune lib PDF dispo (installe pdfplumber ou PyPDF2).")
-
-
-def _to_float(x: Any) -> Optional[float]:
-    if x is None:
-        return None
-    s = str(x).strip()
-    s = s.replace(",", ".")
-    s = re.sub(r"[^\d\.\-]+", "", s)
-    if not s or s in {".", "-", "-."}:
-        return None
+def extract_synlab_biology(pdf_path: str) -> pd.DataFrame:
+    """
+    Extrait les données d'un rapport de biologie Synlab (PDF)
+    
+    Args:
+        pdf_path: Chemin vers le fichier PDF Synlab
+        
+    Returns:
+        DataFrame avec les colonnes: Biomarqueur, Valeur, Unité, Référence, Catégorie
+    """
+    results = []
+    current_category = None
+    
     try:
-        return float(s)
-    except Exception:
-        return None
-
-
-def _clean_spaces(s: str) -> str:
-    return re.sub(r"[ \t]+", " ", s).strip()
-
-
-def _normalize_marker_name(s: str) -> str:
-    s = s or ""
-    s = s.upper()
-    s = re.sub(r"\(.*?\)", "", s)  # drop parentheses content
-    s = re.sub(r"[^A-Z0-9ÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸÆŒ \-\/]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
-# -----------------------------
-# Excel/CSV import
-# -----------------------------
-def _read_table_from_excel_or_csv(file_bytes: bytes, filename: str) -> pd.DataFrame:
-    ext = _ext(filename)
-    bio = io.BytesIO(file_bytes)
-
-    if ext == "csv":
-        df = pd.read_csv(bio)
-    else:
-        df = pd.read_excel(bio)
-
-    # Try to standardize columns if possible
-    cols = {c.lower().strip(): c for c in df.columns}
-
-    name_col = (
-        cols.get("biomarqueur")
-        or cols.get("marqueur")
-        or cols.get("analyte")
-        or cols.get("nom")
-        or cols.get("test")
-    )
-    value_col = (
-        cols.get("valeur")
-        or cols.get("resultat")
-        or cols.get("résultat")
-        or cols.get("result")
-        or cols.get("value")
-    )
-    unit_col = cols.get("unité") or cols.get("unite") or cols.get("unit")
-    ref_low_col = cols.get("ref_low") or cols.get("bas") or cols.get("low") or cols.get("min") or cols.get("borne_inf")
-    ref_high_col = cols.get("ref_high") or cols.get("haut") or cols.get("high") or cols.get("max") or cols.get("borne_sup")
-
-    if name_col and value_col:
-        out = pd.DataFrame(
-            {
-                "marker": df[name_col].astype(str),
-                "value": df[value_col].apply(_to_float),
-                "unit": (df[unit_col].astype(str) if unit_col else None),
-                "ref_low": (df[ref_low_col].apply(_to_float) if ref_low_col else None),
-                "ref_high": (df[ref_high_col].apply(_to_float) if ref_high_col else None),
-                "source": filename,
-            }
-        )
-        if unit_col is None:
-            out["unit"] = None
-        if ref_low_col is None:
-            out["ref_low"] = None
-        if ref_high_col is None:
-            out["ref_high"] = None
-
-        out = out.dropna(subset=["marker", "value"], how="any")
-        out["marker_norm"] = out["marker"].apply(_normalize_marker_name)
-        return out.reset_index(drop=True)
-
-    df = df.copy()
-    df["source"] = filename
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                
+                if not text:
+                    continue
+                
+                lines = text.split('\n')
+                
+                for line in lines:
+                    line = line.strip()
+                    
+                    # Détecter les catégories
+                    if any(cat in line.upper() for cat in ['BIOCHIMIE', 'CHIMIE', 'HORMONOLOGIE', 
+                                                            'IMMUNOLOGIE', 'HEMATOLOGIE']):
+                        current_category = line
+                        continue
+                    
+                    # Pattern pour les biomarqueurs avec valeur
+                    # Format: BIOMARQUEUR    valeur  unité   (ref_min à ref_max)  [valeur_precedente]
+                    
+                    # Glycémie à jeun
+                    if 'GLYCEMIE' in line.upper() or 'GLUCOSE' in line.upper():
+                        match = re.search(r'(\d+\.?\d*)\s*(g/L|mmol/L)', line)
+                        ref_match = re.search(r'\((\d+\.?\d*)\s*à\s*(\d+\.?\d*)\)', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            unit = match.group(2)
+                            reference = f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "N/A"
+                            
+                            results.append({
+                                'Catégorie': current_category or 'Biochimie',
+                                'Biomarqueur': 'Glycémie à jeun',
+                                'Valeur': value,
+                                'Unité': unit,
+                                'Référence': reference
+                            })
+                    
+                    # Ferritine
+                    elif 'FERRITINE' in line.upper():
+                        match = re.search(r'(\d+)\s*µg/L', line)
+                        ref_match = re.search(r'\((\d+)\s*à\s*(\d+)\)', line)
+                        
+                        if match:
+                            value = int(match.group(1))
+                            results.append({
+                                'Catégorie': current_category or 'Biochimie',
+                                'Biomarqueur': 'Ferritine',
+                                'Valeur': value,
+                                'Unité': 'µg/L',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "10-291"
+                            })
+                    
+                    # CRP ultrasensible
+                    elif 'CRP' in line.upper() and 'ULTRASENSIBLE' in line.upper():
+                        match = re.search(r'(\d+\.?\d*)\s*mg/L', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            results.append({
+                                'Catégorie': current_category or 'Chimie',
+                                'Biomarqueur': 'CRP Ultrasensible',
+                                'Valeur': value,
+                                'Unité': 'mg/L',
+                                'Référence': '<5'
+                            })
+                    
+                    # Insuline
+                    elif 'INSULINE' in line.upper() and 'HOMA' not in line.upper():
+                        match = re.search(r'(\d+\.?\d*)\s*mUI/L', line)
+                        ref_match = re.search(r'\((\d+)\s*à\s*(\d+)\)', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            results.append({
+                                'Catégorie': current_category or 'Hormonologie',
+                                'Biomarqueur': 'Insuline',
+                                'Valeur': value,
+                                'Unité': 'mUI/L',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "3-25"
+                            })
+                    
+                    # HOMA-IR
+                    elif 'HOMA' in line.upper():
+                        match = re.search(r':\s*(\d+\.?\d*)', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            results.append({
+                                'Catégorie': current_category or 'Hormonologie',
+                                'Biomarqueur': 'HOMA-IR',
+                                'Valeur': value,
+                                'Unité': '',
+                                'Référence': '<2.4'
+                            })
+                    
+                    # Vitamine D
+                    elif 'VITAMINE D' in line.upper() or '25-OH' in line.upper():
+                        match = re.search(r'(\d+\.?\d*)\s*ng/mL', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            results.append({
+                                'Catégorie': current_category or 'Immunologie',
+                                'Biomarqueur': 'Vitamine D (25-OH)',
+                                'Valeur': value,
+                                'Unité': 'ng/mL',
+                                'Référence': '30-60'
+                            })
+                    
+                    # Magnésium érythrocytaire
+                    elif 'MAGNÉSIUM' in line.upper() and 'ÉRYTHROCYTAIRE' in line.upper():
+                        match = re.search(r'(\d+\.?\d*)\s*mg/dL', line)
+                        ref_match = re.search(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            results.append({
+                                'Catégorie': 'Équilibre hydro-minéral',
+                                'Biomarqueur': 'Magnésium érythrocytaire',
+                                'Valeur': value,
+                                'Unité': 'mg/dL',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "4.4-5.8"
+                            })
+                    
+                    # GPX (Glutathion peroxydase)
+                    elif 'GPX' in line.upper() or 'GLUTATHION PEROXYDASE' in line.upper():
+                        match = re.search(r'(\d+)\s*U/g\s*Hb', line)
+                        ref_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
+                        
+                        if match:
+                            value = int(match.group(1))
+                            results.append({
+                                'Catégorie': 'Statut antioxydant',
+                                'Biomarqueur': 'GPX (Glutathion peroxydase)',
+                                'Valeur': value,
+                                'Unité': 'U/g Hb',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "40-62"
+                            })
+                    
+                    # Glutathion total
+                    elif 'GLUTATHION TOTAL' in line.upper():
+                        match = re.search(r'(\d+)\s*µmol/L', line)
+                        ref_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
+                        
+                        if match:
+                            value = int(match.group(1))
+                            results.append({
+                                'Catégorie': 'Statut antioxydant',
+                                'Biomarqueur': 'Glutathion total',
+                                'Valeur': value,
+                                'Unité': 'µmol/L',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "1200-1750"
+                            })
+                    
+                    # Coenzyme Q10
+                    elif 'COENZYME Q10' in line.upper() or 'COQ10' in line.upper():
+                        match = re.search(r'(\d+)\s*μg/L', line)
+                        ref_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
+                        
+                        if match:
+                            value = int(match.group(1))
+                            results.append({
+                                'Catégorie': 'Statut antioxydant',
+                                'Biomarqueur': 'Coenzyme Q10',
+                                'Valeur': value,
+                                'Unité': 'μg/L',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "670-990"
+                            })
+                    
+                    # Zinc
+                    elif 'ZINC' in line.upper() and 'PLASMA' not in line.upper():
+                        match = re.search(r'(\d+)\s*μg/dL', line)
+                        ref_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
+                        
+                        if match:
+                            value = int(match.group(1))
+                            results.append({
+                                'Catégorie': 'Statut antioxydant',
+                                'Biomarqueur': 'Zinc',
+                                'Valeur': value,
+                                'Unité': 'μg/dL',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "88-146"
+                            })
+                    
+                    # Sélénium
+                    elif 'SÉLÉNIUM' in line.upper() or 'SELENIUM' in line.upper():
+                        match = re.search(r'(\d+)\s*μg/L', line)
+                        ref_match = re.search(r'(\d+)\s*-\s*(\d+)', line)
+                        
+                        if match:
+                            value = int(match.group(1))
+                            results.append({
+                                'Catégorie': 'Statut antioxydant',
+                                'Biomarqueur': 'Sélénium',
+                                'Valeur': value,
+                                'Unité': 'μg/L',
+                                'Référence': f"{ref_match.group(1)}-{ref_match.group(2)}" if ref_match else "90-143"
+                            })
+                    
+                    # LBP (LPS-Binding protein)
+                    elif 'LBP' in line.upper():
+                        match = re.search(r'(\d+\.?\d*)\s*mg/L', line)
+                        
+                        if match:
+                            value = float(match.group(1))
+                            results.append({
+                                'Catégorie': 'Perméabilité intestinale',
+                                'Biomarqueur': 'LBP (LPS-Binding protein)',
+                                'Valeur': value,
+                                'Unité': 'mg/L',
+                                'Référence': '0-6.8 (optimal) / 2.3-8.3 (normal)'
+                            })
+    
+    except Exception as e:
+        raise Exception(f"Erreur lors de l'extraction du PDF Synlab: {str(e)}")
+    
+    # Créer le DataFrame
+    df = pd.DataFrame(results)
+    
+    # Trier par catégorie
+    if not df.empty:
+        df = df.sort_values('Catégorie')
+    
     return df
 
 
-# -----------------------------
-# BIOLOGY PDF extraction (Synlab-like)
-# -----------------------------
-def _extract_biology_from_text(txt: str, filename: str) -> pd.DataFrame:
-    rows: List[Dict[str, Any]] = []
-    lines = [l.strip() for l in txt.splitlines() if l.strip()]
+def extract_idk_microbiome(pdf_path: str) -> Dict:
+    """
+    Extrait les données d'un rapport IDK GutMAP (PDF)
+    
+    Args:
+        pdf_path: Chemin vers le fichier PDF IDK GutMAP
+        
+    Returns:
+        Dictionnaire avec: dysbiosis_index, diversity, bacteria (liste de dict)
+    """
+    result = {
+        'dysbiosis_index': None,
+        'diversity': None,
+        'bacteria': []
+    }
+    
+    current_category = None
+    current_group = None
+    
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                
+                if not text:
+                    continue
+                
+                lines = text.split('\n')
+                
+                for i, line in enumerate(lines):
+                    line = line.strip()
+                    
+                    # Extraire le Dysbiosis Index
+                    if 'DYSBIOSIS INDEX' in line.upper():
+                        # Chercher le niveau dans les lignes suivantes
+                        for j in range(i+1, min(i+10, len(lines))):
+                            next_line = lines[j].strip()
+                            
+                            if 'normobiotic' in next_line.lower():
+                                result['dysbiosis_index'] = 1
+                                break
+                            elif 'mildly dysbiotic' in next_line.lower():
+                                result['dysbiosis_index'] = 3
+                                break
+                            elif 'severely dysbiotic' in next_line.lower():
+                                result['dysbiosis_index'] = 5
+                                break
+                    
+                    # Extraire la Diversité
+                    if 'DIVERSITY' in line.upper():
+                        for j in range(i+1, min(i+5, len(lines))):
+                            next_line = lines[j].strip()
+                            
+                            if 'as expected' in next_line.lower():
+                                result['diversity'] = 'As expected'
+                                break
+                            elif 'slightly lower' in next_line.lower():
+                                result['diversity'] = 'Slightly lower than expected'
+                                break
+                            elif 'lower than expected' in next_line.lower():
+                                result['diversity'] = 'Lower than expected'
+                                break
+                    
+                    # Détecter les catégories de bactéries
+                    if 'Category A' in line or 'A. Broad commensals' in line:
+                        current_category = 'A. Broad commensals'
+                    elif 'Category B' in line or 'B. Enriched on animal-based diet' in line:
+                        current_category = 'B. Enriched on animal-based diet'
+                    elif 'Category C' in line or 'C. Essential cross-feeders' in line:
+                        current_category = 'C. Essential cross-feeders'
+                    elif 'Category D' in line or 'D. Anti-inflammatory' in line:
+                        current_category = 'D. Anti-inflammatory bacteria'
+                    elif 'Category E' in line or 'E. Pro-inflammatory' in line:
+                        current_category = 'E. Pro-inflammatory & opportunistic pathogens'
+                    
+                    # Détecter les groupes
+                    if 'A1. Prominent gut microbes' in line:
+                        current_group = 'A1. Prominent gut microbes'
+                    elif 'A2. Diverse gut bacterial communities' in line:
+                        current_group = 'A2. Diverse gut bacterial communities'
+                    elif 'B1. Enriched on animal-based diet' in line:
+                        current_group = 'B1. Enriched on animal-based diet'
+                    elif 'C1. Complex carbohydrate degraders' in line:
+                        current_group = 'C1. Complex carbohydrate degraders'
+                    elif 'C2. Lactic acid bacteria and probiotics' in line:
+                        current_group = 'C2. Lactic acid bacteria and probiotics'
+                    elif 'D1. Gut epithelial integrity marker' in line:
+                        current_group = 'D1. Gut epithelial integrity marker'
+                    elif 'D2. Major SCFA producers' in line:
+                        current_group = 'D2. Major SCFA producers'
+                    elif 'E1. Inflammation indicator' in line:
+                        current_group = 'E1. Inflammation indicator'
+                    elif 'E2. Potentially virulent' in line:
+                        current_group = 'E2. Potentially virulent'
+                    elif 'E3. Facultative anaerobes' in line:
+                        current_group = 'E3. Facultative anaerobes'
+                    elif 'E4. Predominantly oral bacteria' in line:
+                        current_group = 'E4. Predominantly oral bacteria'
+                    elif 'E5. Genital, respiratory, and skin bacteria' in line:
+                        current_group = 'E5. Genital, respiratory, and skin bacteria'
+                    
+                    # Extraire les résultats de groupes (Expected/Slightly deviating/Deviating)
+                    if current_group and ('Expected' in line or 'Slightly deviating' in line or 'Deviating' in line):
+                        # Déterminer le résultat
+                        if 'Expected' in line and 'Slightly' not in line and 'Deviating' not in line:
+                            group_result = 'Expected'
+                        elif 'Slightly deviating' in line:
+                            group_result = 'Slightly deviating'
+                        elif 'Deviating' in line and 'Slightly' not in line:
+                            group_result = 'Deviating'
+                        else:
+                            continue
+                        
+                        # Ajouter l'entrée
+                        result['bacteria'].append({
+                            'category': current_category,
+                            'group': current_group,
+                            'result': group_result
+                        })
+                        
+                        # Réinitialiser le groupe pour éviter les doublons
+                        current_group = None
+    
+    except Exception as e:
+        raise Exception(f"Erreur lors de l'extraction du PDF IDK GutMAP: {str(e)}")
+    
+    return result
 
-    rx_paren = re.compile(
-        r"^(?P<marker>[A-ZÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸÆŒ0-9\.\-\s\/]+?)\s+[*]?\s*(?P<value>-?\d+(?:[.,]\d+)?)\s*(?P<unit>[A-Za-zµ/%·\.\-\s]+)?\s*\(\s*(?P<low>-?\d+(?:[.,]\d+)?)\s*(?:à|a|\-)\s*(?P<high>-?\d+(?:[.,]\d+)?)\s*\)",
-        re.IGNORECASE,
-    )
 
-    rx_belg = re.compile(
-        r"^>\s*(?P<marker>.+?)\s+(?P<value>-?\d+(?:[.,]\d+)?)\s+(?P<low>-?\d+(?:[.,]\d+)?)\s*[\-–]\s*(?P<high>-?\d+(?:[.,]\d+)?)\s+(?P<unit>[A-Za-zµ/%·\.\-]+)$",
-        re.IGNORECASE,
-    )
-
-    ignore_prefix = (
-        "EDITION", "NOM", "PRENOM", "DDN", "DOSSIER", "LABORATOIRE", "TEL", "WEB",
-        "SITES", "DR", "ANALYSES", "BIOCHIMIE", "CHIMIE", "IMMUNOLOGIE",
-        "HORMONOLOGIE", "HEMATOLOGIE", "VALIDÉ", "VALIDE", "FIN DE", "PAGE"
-    )
-
-    def is_noise(line: str) -> bool:
-        up = line.upper()
-        if any(up.startswith(p) for p in ignore_prefix):
-            return True
-        if len(line) > 140 and not re.search(r"\d", line):
-            return True
-        return False
-
-    for line in lines:
-        if is_noise(line):
-            continue
-
-        m = rx_paren.match(line)
-        if m:
-            marker = _clean_spaces(m.group("marker"))
-            value = _to_float(m.group("value"))
-            unit = _clean_spaces(m.group("unit") or "")
-            low = _to_float(m.group("low"))
-            high = _to_float(m.group("high"))
-            if marker and value is not None:
-                rows.append(
-                    {
-                        "marker": marker,
-                        "value": value,
-                        "unit": unit if unit else None,
-                        "ref_low": low,
-                        "ref_high": high,
-                        "source": filename,
-                    }
-                )
-            continue
-
-        m = rx_belg.match(line)
-        if m:
-            marker = _clean_spaces(m.group("marker"))
-            value = _to_float(m.group("value"))
-            low = _to_float(m.group("low"))
-            high = _to_float(m.group("high"))
-            unit = _clean_spaces(m.group("unit") or "")
-            if marker and value is not None:
-                rows.append(
-                    {
-                        "marker": marker,
-                        "value": value,
-                        "unit": unit if unit else None,
-                        "ref_low": low,
-                        "ref_high": high,
-                        "source": filename,
-                    }
-                )
-            continue
-
-    df = pd.DataFrame(rows)
-    if df.empty:
+def extract_data_from_excel(file_path: str, sheet_name: Optional[str] = None) -> pd.DataFrame:
+    """
+    Extrait les données d'un fichier Excel
+    
+    Args:
+        file_path: Chemin vers le fichier Excel
+        sheet_name: Nom de la feuille à lire (optionnel)
+        
+    Returns:
+        DataFrame avec les données
+    """
+    try:
+        if sheet_name:
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+        else:
+            df = pd.read_excel(file_path)
+        
         return df
-
-    df["marker_norm"] = df["marker"].astype(str).apply(_normalize_marker_name)
-    df = df.drop_duplicates(subset=["marker_norm", "value", "unit"], keep="first")
-    return df.reset_index(drop=True)
-
-
-# -----------------------------
-# MICROBIOME PDF extraction (GutMAP: functional markers)
-# -----------------------------
-def _extract_microbiome_from_text(txt: str, filename: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    meta: Dict[str, Any] = {"source": filename}
-    t = txt
-
-    di_status = None
-    if re.search(r"\bnormobiotic\b", t, flags=re.I):
-        di_status = "normobiotic"
-        di_score = 2
-    elif re.search(r"\bmildly\s+dysbiotic\b", t, flags=re.I):
-        di_status = "mildly_dysbiotic"
-        di_score = 3
-    elif re.search(r"\bseverely\s+dysbiotic\b", t, flags=re.I):
-        di_status = "severely_dysbiotic"
-        di_score = 5
-    else:
-        di_score = None
-
-    meta["dysbiosis_status"] = di_status
-    meta["dysbiosis_index_score_proxy"] = di_score
-
-    diversity = None
-    if re.search(r"diversity is as expected", t, flags=re.I):
-        diversity = "as_expected"
-    elif re.search(r"slightly lower than expected", t, flags=re.I):
-        diversity = "slightly_lower_than_expected"
-    elif re.search(r"lower than expected", t, flags=re.I):
-        diversity = "lower_than_expected"
-    meta["diversity_status"] = diversity
-
-    rows = []
-    if di_score is not None:
-        rows.append(
-            {
-                "marker": "Dysbiosis Index (DI)",
-                "value": float(di_score),
-                "unit": "score_proxy",
-                "ref_low": 1.0,
-                "ref_high": 2.0,
-                "source": filename,
-                "marker_norm": _normalize_marker_name("Dysbiosis Index (DI)"),
-            }
-        )
-    if diversity is not None:
-        dv = {"as_expected": 0, "slightly_lower_than_expected": 1, "lower_than_expected": 2}[diversity]
-        rows.append(
-            {
-                "marker": "Shannon Diversity Index",
-                "value": float(dv),
-                "unit": "ordinal_proxy",
-                "ref_low": 0.0,
-                "ref_high": 0.0,
-                "source": filename,
-                "marker_norm": _normalize_marker_name("Shannon Diversity Index"),
-            }
-        )
-
-    df = pd.DataFrame(rows)
-    return df, meta
+    
+    except Exception as e:
+        raise Exception(f"Erreur lors de la lecture du fichier Excel: {str(e)}")
 
 
-# -----------------------------
-# Public API
-# -----------------------------
-def extract_biology_any(file_bytes: bytes, filename: str) -> ExtractionResult:
-    ext = _ext(filename)
-    if ext in {"xlsx", "xls", "csv"}:
-        df = _read_table_from_excel_or_csv(file_bytes, filename)
-        return ExtractionResult(data=df, meta={"kind": "biology", "input": ext}, raw_text="")
-    if ext == "pdf":
-        txt = _read_text_from_pdf(file_bytes)
-        df = _extract_biology_from_text(txt, filename)
-        return ExtractionResult(data=df, meta={"kind": "biology", "input": "pdf"}, raw_text=txt)
-    raise ValueError(f"Format non supporté pour biologie: {filename}")
+def normalize_biomarker_name(name: str) -> str:
+    """
+    Normalise le nom d'un biomarqueur pour faciliter la correspondance avec les règles
+    
+    Args:
+        name: Nom du biomarqueur
+        
+    Returns:
+        Nom normalisé
+    """
+    # Supprimer les accents, mettre en majuscules, supprimer les espaces multiples
+    normalized = name.upper().strip()
+    
+    # Remplacements courants
+    replacements = {
+        'GLYCÉMIE': 'GLYCEMIE',
+        'ÉRYTHROCYTAIRE': 'ERYTHROCYTAIRE',
+        'HÉMOGLOBINE': 'HEMOGLOBINE',
+        'PROTÉINE': 'PROTEINE',
+    }
+    
+    for old, new in replacements.items():
+        normalized = normalized.replace(old, new)
+    
+    return normalized
 
 
-def extract_microbiome_any(file_bytes: bytes, filename: str) -> ExtractionResult:
-    ext = _ext(filename)
-    if ext in {"xlsx", "xls", "csv"}:
-        df = _read_table_from_excel_or_csv(file_bytes, filename)
-        meta = {"kind": "microbiome", "input": ext}
-        return ExtractionResult(data=df, meta=meta, raw_text="")
-    if ext == "pdf":
-        txt = _read_text_from_pdf(file_bytes)
-        df, meta = _extract_microbiome_from_text(txt, filename)
-        meta["kind"] = "microbiome"
-        meta["input"] = "pdf"
-        return ExtractionResult(data=df, meta=meta, raw_text=txt)
-    raise ValueError(f"Format non supporté pour microbiote: {filename}")
+def determine_biomarker_status(value: float, reference: str, biomarker: str) -> str:
+    """
+    Détermine le statut d'un biomarqueur (Bas/Normal/Élevé)
+    
+    Args:
+        value: Valeur mesurée
+        reference: Valeur de référence (format "min-max" ou "<max")
+        biomarker: Nom du biomarqueur
+        
+    Returns:
+        Statut: 'Bas', 'Normal', ou 'Élevé'
+    """
+    try:
+        # Gérer les références avec "<"
+        if reference.startswith('<'):
+            max_val = float(reference.replace('<', '').strip())
+            if value < max_val:
+                return 'Normal'
+            else:
+                return 'Élevé'
+        
+        # Gérer les références avec ">"
+        elif reference.startswith('>'):
+            min_val = float(reference.replace('>', '').strip())
+            if value > min_val:
+                return 'Normal'
+            else:
+                return 'Bas'
+        
+        # Gérer les plages "min-max"
+        elif '-' in reference:
+            parts = reference.split('-')
+            min_val = float(parts[0].strip())
+            max_val = float(parts[1].strip())
+            
+            if value < min_val:
+                return 'Bas'
+            elif value > max_val:
+                return 'Élevé'
+            else:
+                return 'Normal'
+        
+        else:
+            # Format non reconnu, retourner Normal par défaut
+            return 'Normal'
+    
+    except:
+        return 'Normal'
