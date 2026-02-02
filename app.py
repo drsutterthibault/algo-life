@@ -1,3 +1,8 @@
+"""
+ALGO-LIFE - Plateforme Médecin
+Application Streamlit pour l'analyse multimodale de santé
+"""
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -87,7 +92,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Informations de l'utilisateur
-    st.markdown("### 👤 Thibault SU")
+    st.markdown("### 👤 Thibault VIGNIER")
     st.caption("Biologiste - Product Manager")
     
     st.markdown("---")
@@ -264,10 +269,19 @@ if page == "Import & Données":
         if st.session_state.biology_data is not None or st.session_state.microbiome_data is not None:
             with st.spinner("Analyse en cours..."):
                 try:
-                    # ===== MODIFICATION ICI =====
-                    # Charger le fichier de règles depuis le dossier data/
-                    rules_path = "data/Bases_règles_Synlab.xlsx"
-                    # ===========================
+                    # ===== CORRECTION DU CHEMIN =====
+                    # Construire le chemin absolu basé sur l'emplacement du script
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    rules_path = os.path.join(script_dir, "data", "Bases_règles_Synlab.xlsx")
+                    
+                    # Vérifier que le fichier existe
+                    if not os.path.exists(rules_path):
+                        st.error(f"❌ Fichier de règles introuvable : {rules_path}")
+                        st.info(f"📁 Répertoire actuel : {os.getcwd()}")
+                        st.info(f"📁 Répertoire du script : {script_dir}")
+                        st.info(f"📁 Contenu du dossier data : {os.listdir(os.path.join(script_dir, 'data')) if os.path.exists(os.path.join(script_dir, 'data')) else 'Dossier data introuvable'}")
+                        raise FileNotFoundError(f"Fichier de règles introuvable: {rules_path}")
+                    # ================================
                     
                     # Initialiser le moteur de règles
                     engine = RulesEngine(rules_path)
@@ -443,4 +457,4 @@ elif page == "Export PDF":
 
 # Footer
 st.markdown("---")
-st.caption("ALGO-LIFE © 2026 - Thibault SU | Version Beta v1.0")
+st.caption("ALGO-LIFE © 2026 - Thibault VIGNIER | Version Beta v1.0")
