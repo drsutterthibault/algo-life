@@ -45,6 +45,121 @@ except Exception as e:
     UNIVERSAL_EXTRACTOR_AVAILABLE = False
     _UNIVERSAL_IMPORT_ERROR = str(e)
 
+
+# ----------------------------------------------------------------------------
+# Fallback extractor (si advanced_pdf_extractor_universal absent sur Streamlit Cloud)
+# ----------------------------------------------------------------------------
+ADVANCED_UNIVERSAL_AVAILABLE = UNIVERSAL_EXTRACTOR_AVAILABLE
+
+if not UNIVERSAL_EXTRACTOR_AVAILABLE:
+    # NOTE: on garde l'app utilisable même si le module "advanced_pdf_extractor_universal.py"
+    # n'est pas présent / pas importable sur Streamlit Cloud.
+    if " _UNIVERSAL_IMPORT_ERROR" not in globals():
+        _UNIVERSAL_IMPORT_ERROR = "unknown import error"
+
+    class UniversalPDFExtractor:  # type: ignore
+        """
+        Fallback minimal compatible avec l'API utilisée dans app.py.
+        - extract_text_from_pdf(pdf_file)
+        - __init__(known_biomarkers=...)
+        - extract_complete(text)
+        - extract_microbiome_data(text)
+        """
+        def __init__(self, known_biomarkers: Dict[str, Dict] | None = None, *args, **kwargs):
+            self.known_biomarkers = known_biomarkers or {}
+
+        @staticmethod
+        def extract_text_from_pdf(pdf_file) -> str:
+            # pdf_file est un UploadedFile streamlit (BytesIO-like)
+            data = pdf_file.read()
+            # Important: remettre le curseur au début pour d'autres lectures
+            try:
+                pdf_file.seek(0)
+            except Exception:
+                pass
+
+            text_out = ""
+
+            if PDF_AVAILABLE:
+                # 1) pdfplumber (meilleur sur tableaux)
+                try:
+                    import pdfplumber  # type: ignore
+                    from io import BytesIO as _BytesIO
+                    with pdfplumber.open(_BytesIO(data)) as pdf:
+                        pages = []
+                        for p in pdf.pages:
+                            pages.append(p.extract_text() or "")
+                        text_out = "\n".join(pages)
+                    if text_out.strip():
+                        return text_out
+                except Exception:
+                    pass
+
+                # 2) PyPDF2 (fallback)
+                try:
+                    import PyPDF2  # type: ignore
+                    from io import BytesIO as _BytesIO
+                    reader = PyPDF2.PdfReader(_BytesIO(data))
+                    pages = []
+                    for page in reader.pages:
+                        pages.append(page.extract_text() or "")
+                    text_out = "\n".join(pages)
+                    return text_out
+                except Exception:
+                    pass
+
+            raise RuntimeError("Impossible d'extraire le texte: installe pdfplumber/PyPDF2 ou active l'extracteur universel.")
+
+        def _parse_value_from_line(self, line: str) -> float | None:
+            # Cherche un nombre (virgule ou point) éventuellement précédé de < ou >
+            m = re.search(r'([<>]?\s*\d+(?:[\\.,]\\d+)?)', line)
+            if not m:
+                return None
+            raw = m.group(1).replace(" ", "").replace(",", ".").replace("<", "").replace(">", "")
+            try:
+                return float(raw)
+            except Exception:
+                return None
+
+        def extract_complete(self, text: str, debug: bool = False):
+            """
+            Retourne (known, all_biomarkers)
+            Format attendu:
+              known = {key: {"value": float, ...}, ...}
+              all_biomarkers = idem (incluant nouveaux)
+            Ici: extraction simple uniquement sur biomarqueurs connus.
+            """
+            known: Dict[str, Dict] = {}
+            all_biomarkers: Dict[str, Dict] = {}
+
+            lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+            # Accélération: text lower une fois
+            for key, meta in self.known_biomarkers.items():
+                lab_names = meta.get("lab_names", [])
+                if not lab_names:
+                    continue
+                found_val = None
+                for ln in lines:
+                    lnl = ln.lower()
+                    if any(name.lower() in lnl for name in lab_names):
+                        val = self._parse_value_from_line(ln)
+                        if val is not None:
+                            found_val = val
+                            break
+                if found_val is not None:
+                    known[key] = {"value": float(found_val)}
+                    all_biomarkers[key] = {"value": float(found_val)}
+
+            return known, all_biomarkers
+
+        # Microbiote: non supporté en fallback (retourne dict vide)
+        def extract_microbiome_data(self, text: str, debug: bool = False) -> Dict:
+            return {}
+
+    # On ré-active un "UNIVERSAL_EXTRACTOR_AVAILABLE" pour ne pas bloquer l'app
+    UNIVERSAL_EXTRACTOR_AVAILABLE = True
+
+
 # ✅ PATCH: force reload module PDF (évite ancienne version / cache / doublon)
 import algolife_pdf_generator as pdfgen
 pdfgen = importlib.reload(pdfgen)
