@@ -1,229 +1,211 @@
 """
-ALGO-LIFE - App minimale (RESET)
-- Import Biologie & Microbiote: PDF ou Excel
-- Extraction robuste (bio + micro)
-- Recommandations via règles multimodales (Bases rèlgles Synlab.xlsx)
+ALGO-LIFE - Minimal Clean App (Bio + Microbiote)
+Import PDF + Excel (pas uniquement PDF)
+Extraction multimodale + recommandations via règles Excel
 
-Auteur: Dr Thibault SUTTER
+Auteur: Dr Thibault SUTTER, PhD
+Version: Clean reboot - Feb 2026
 """
 
 from __future__ import annotations
 
-import streamlit as st
+import io
+from dataclasses import asdict
+from typing import Optional, Dict, Any, Tuple, List
+
 import pandas as pd
-from datetime import datetime
-from typing import Dict, Any, Optional
+import streamlit as st
 
 from extractors import (
-    extract_biology_from_file,
-    extract_microbiome_from_file,
+    extract_biology_any,
+    extract_microbiome_any,
+    ExtractionResult,
 )
-from rules_engine_multimodal import (
-    MultimodalRulesEngine,
+from rules_engine import (
+    load_rules_from_excel_bytes,
+    generate_recommendations_multimodal,
 )
 
-# =========================
+# -----------------------------
 # Streamlit config
-# =========================
+# -----------------------------
 st.set_page_config(
-    page_title="ALGO-LIFE | RESET",
-    page_icon="🧬",
+    page_title="ALGO-LIFE (Clean) - Bio + Microbiote",
     layout="wide",
 )
 
-st.title("🧬 ALGO-LIFE — Reset GitHub (Import PDF + Excel)")
-st.caption("Biologie + Microbiote → Extraction → Recommandations via règles (multimodal)")
+st.title("ALGO-LIFE — Import multimodal (Biologie + Microbiote)")
+st.caption("Importe un fichier Biologie (PDF ou Excel) + un fichier Microbiote (PDF ou Excel), applique les règles Excel, et génère des recommandations.")
 
-# =========================
-# Session state
-# =========================
-def _init_state():
-    if "bio" not in st.session_state:
-        st.session_state.bio = {}
-    if "micro" not in st.session_state:
-        st.session_state.micro = {}
-    if "patient" not in st.session_state:
-        st.session_state.patient = {"age": 45, "sex": "H"}  # H/F
-    if "reco" not in st.session_state:
-        st.session_state.reco = None
-    if "rules_ready" not in st.session_state:
-        st.session_state.rules_ready = False
+# -----------------------------
+# Helpers
+# -----------------------------
+def _read_upload(upload) -> Tuple[bytes, str]:
+    if upload is None:
+        return b"", ""
+    return upload.read(), upload.name
 
-_init_state()
+def _download_json_button(label: str, payload: Dict[str, Any], filename: str):
+    import json
+    raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    st.download_button(label, data=raw, file_name=filename, mime="application/json")
 
-# =========================
-# Sidebar patient + rules
-# =========================
+def _download_csv_button(label: str, df: pd.DataFrame, filename: str):
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button(label, data=csv, file_name=filename, mime="text/csv")
+
+# -----------------------------
+# Sidebar: global inputs
+# -----------------------------
 with st.sidebar:
-    st.header("👤 Patient (minimal)")
-    st.session_state.patient["age"] = st.number_input("Âge", min_value=1, max_value=120, value=int(st.session_state.patient["age"]))
-    st.session_state.patient["sex"] = st.selectbox("Sexe", ["H", "F"], index=0 if st.session_state.patient["sex"] == "H" else 1)
-
-    st.divider()
-    st.header("📚 Règles")
-    st.caption("Option 1: uploader ton xlsx. Option 2: chemin local (ex: data/Bases rèlgles Synlab.xlsx)")
-
+    st.header("Paramètres")
+    sex = st.selectbox("Sexe (pour normes H/F)", ["F", "H"], index=0)
+    st.markdown("---")
+    st.subheader("Règles (Excel)")
     rules_upload = st.file_uploader(
-        "Fichier règles (Bases rèlgles Synlab.xlsx)",
+        "Importer le fichier de règles (.xlsx)",
         type=["xlsx"],
         accept_multiple_files=False,
-        key="rules_xlsx",
+    )
+    st.caption("Astuce: utilise ton fichier 'Bases règles Synlab.xlsx'.")
+
+# -----------------------------
+# Main: uploads
+# -----------------------------
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("1) Fichier Biologie")
+    bio_upload = st.file_uploader(
+        "PDF ou Excel (biologie)",
+        type=["pdf", "xlsx", "xls", "csv"],
+        accept_multiple_files=False,
+        key="bio_file",
     )
 
-    default_rules_path = st.text_input(
-        "Chemin local (si pas d'upload)",
-        value="Bases rèlgles Synlab.xlsx",
-        help="Si tu mets le fichier dans /data, mets: data/Bases rèlgles Synlab.xlsx",
+with col2:
+    st.subheader("2) Fichier Microbiote")
+    micro_upload = st.file_uploader(
+        "PDF ou Excel (microbiote)",
+        type=["pdf", "xlsx", "xls", "csv"],
+        accept_multiple_files=False,
+        key="micro_file",
     )
 
-    st.session_state.rules_source = {"upload": rules_upload, "path": default_rules_path}
+st.markdown("---")
 
-    st.divider()
-    if st.button("🧹 Reset (vider extraction + reco)", use_container_width=True):
-        st.session_state.bio = {}
-        st.session_state.micro = {}
-        st.session_state.reco = None
-        st.success("Reset OK ✅")
+# -----------------------------
+# Run button
+# -----------------------------
+run = st.button("🚀 Extraire + Générer les recommandations", type="primary")
 
-# =========================
-# Helpers
-# =========================
-def _pretty_df(d: Dict[str, Any], col_name: str) -> pd.DataFrame:
-    if not d:
-        return pd.DataFrame(columns=[col_name, "Valeur"])
-    return pd.DataFrame([{col_name: k, "Valeur": v} for k, v in d.items()]).sort_values(col_name)
+if run:
+    if rules_upload is None:
+        st.error("Tu dois importer le fichier de règles Excel (.xlsx).")
+        st.stop()
+    if bio_upload is None and micro_upload is None:
+        st.error("Importe au moins un fichier (biologie ou microbiote).")
+        st.stop()
 
-def _load_rules_engine() -> Optional[MultimodalRulesEngine]:
-    src = st.session_state.rules_source
+    # Read rules
+    rules_bytes, rules_name = _read_upload(rules_upload)
     try:
-        if src["upload"] is not None:
-            engine = MultimodalRulesEngine.from_uploaded_xlsx(src["upload"])
-        else:
-            engine = MultimodalRulesEngine.from_path(src["path"])
-        st.session_state.rules_ready = True
-        return engine
+        rules = load_rules_from_excel_bytes(rules_bytes)
     except Exception as e:
-        st.session_state.rules_ready = False
-        st.error(f"❌ Impossible de charger les règles: {e}")
-        return None
+        st.exception(e)
+        st.stop()
 
-# =========================
-# Layout
-# =========================
-tab1, tab2, tab3 = st.tabs(["📥 Import & Extraction", "🧾 Recommandations", "🛠️ Debug"])
+    bio_res: Optional[ExtractionResult] = None
+    micro_res: Optional[ExtractionResult] = None
 
-# =========================
-# TAB 1 - Import
-# =========================
-with tab1:
-    st.subheader("📥 Import Biologie + Microbiote (PDF ou Excel)")
+    # Extract bio
+    if bio_upload is not None:
+        bio_bytes, bio_name = _read_upload(bio_upload)
+        try:
+            bio_res = extract_biology_any(bio_bytes, bio_name)
+        except Exception as e:
+            st.error("Erreur extraction Biologie")
+            st.exception(e)
+            st.stop()
 
-    c1, c2 = st.columns(2)
+    # Extract microbiome
+    if micro_upload is not None:
+        micro_bytes, micro_name = _read_upload(micro_upload)
+        try:
+            micro_res = extract_microbiome_any(micro_bytes, micro_name)
+        except Exception as e:
+            st.error("Erreur extraction Microbiote")
+            st.exception(e)
+            st.stop()
 
-    with c1:
-        st.markdown("### 🧪 Biologie")
-        bio_file = st.file_uploader(
-            "Import biologie",
-            type=["pdf", "xlsx", "xls", "csv"],
-            key="bio_file",
-            help="PDF résultats labo OU Excel/CSV (2 colonnes: biomarqueur/valeur).",
-        )
-        if st.button("🔍 Extraire biologie", use_container_width=True):
-            if bio_file is None:
-                st.warning("Ajoute un fichier biologie.")
-            else:
-                with st.spinner("Extraction biologie..."):
-                    bio = extract_biology_from_file(bio_file)
-                    st.session_state.bio = bio
-                st.success(f"✅ Biologie: {len(st.session_state.bio)} marqueurs extraits")
+    # Display extractions
+    st.subheader("Extraction — Résultats structurés")
 
-        st.dataframe(_pretty_df(st.session_state.bio, "Biomarqueur"), use_container_width=True, height=380)
-
-    with c2:
-        st.markdown("### 🦠 Microbiote")
-        micro_file = st.file_uploader(
-            "Import microbiote",
-            type=["pdf", "xlsx", "xls", "csv"],
-            key="micro_file",
-            help="PDF microbiote OU Excel/CSV (2 colonnes: marqueur/valeur).",
-        )
-        if st.button("🔍 Extraire microbiote", use_container_width=True):
-            if micro_file is None:
-                st.warning("Ajoute un fichier microbiote.")
-            else:
-                with st.spinner("Extraction microbiote..."):
-                    micro = extract_microbiome_from_file(micro_file)
-                    st.session_state.micro = micro
-                st.success(f"✅ Microbiote: {len(st.session_state.micro)} marqueurs extraits")
-
-        st.dataframe(_pretty_df(st.session_state.micro, "Marqueur"), use_container_width=True, height=380)
-
-    st.divider()
-    st.markdown("### 🚀 Lancer recommandations (multimodal)")
-    if st.button("⚡ Générer recommandations via règles", type="primary", use_container_width=True):
-        if not st.session_state.bio and not st.session_state.micro:
-            st.error("Il faut au moins une extraction (biologie ou microbiote).")
+    cA, cB = st.columns(2)
+    with cA:
+        st.markdown("### Biologie")
+        if bio_res is None or bio_res.data is None or bio_res.data.empty:
+            st.info("Aucun biomarqueur extrait.")
         else:
-            engine = _load_rules_engine()
-            if engine is None:
-                st.stop()
+            st.dataframe(bio_res.data, use_container_width=True, height=420)
+            _download_csv_button("⬇️ Télécharger extraction bio (CSV)", bio_res.data, "extraction_bio.csv")
 
-            with st.spinner("Application des règles..."):
-                reco = engine.run(
-                    biology=st.session_state.bio,
-                    microbiome=st.session_state.micro,
-                    sex=st.session_state.patient["sex"],
-                )
-                st.session_state.reco = reco
+    with cB:
+        st.markdown("### Microbiote")
+        if micro_res is None:
+            st.info("Aucun fichier microbiote importé.")
+        else:
+            if micro_res.data is not None and not micro_res.data.empty:
+                st.dataframe(micro_res.data, use_container_width=True, height=420)
+                _download_csv_button("⬇️ Télécharger extraction microbiote (CSV)", micro_res.data, "extraction_microbiote.csv")
+            else:
+                st.info("Extraction microbiote: pas de table bactérienne exploitable, mais les marqueurs fonctionnels peuvent être présents.")
+            if micro_res.meta:
+                st.markdown("**Marqueurs fonctionnels détectés**")
+                st.json(micro_res.meta)
 
-            st.success("✅ Recommandations générées")
+    st.markdown("---")
 
-# =========================
-# TAB 2 - Reco
-# =========================
-with tab2:
-    st.subheader("🧾 Recommandations (issues du fichier de règles)")
+    # Generate recos
+    st.subheader("Recommandations — moteur de règles multimodal")
+    recos = generate_recommendations_multimodal(
+        rules=rules,
+        sex=sex,
+        bio_df=(bio_res.data if bio_res else pd.DataFrame()),
+        micro_meta=(micro_res.meta if micro_res else {}),
+        micro_df=(micro_res.data if (micro_res and micro_res.data is not None) else pd.DataFrame()),
+    )
 
-    if not st.session_state.reco:
-        st.info("Aucune recommandation pour l'instant. Va dans l'onglet Import & Extraction → Générer.")
+    # Render recos
+    if not recos:
+        st.info("Aucune recommandation déclenchée (soit tout est normal, soit matching règles ↔ biomarqueurs à ajuster).")
     else:
-        reco = st.session_state.reco
+        for i, r in enumerate(recos, start=1):
+            with st.expander(f"#{i} — {r.get('title','Reco')}", expanded=(i <= 3)):
+                st.write(f"**Modalité :** {r.get('modality')}")
+                st.write(f"**Biomarqueur / Marqueur :** {r.get('marker')}")
+                st.write(f"**Statut :** {r.get('status')}")
+                st.write(f"**Sévérité :** {r.get('severity')}")
+                st.markdown("**Interprétation**")
+                st.write(r.get("interpretation", ""))
+                st.markdown("**Nutrition**")
+                st.write(r.get("nutrition", ""))
+                st.markdown("**Micronutrition / Supplementation**")
+                st.write(r.get("supplementation", ""))
+                st.markdown("**Lifestyle**")
+                st.write(r.get("lifestyle", ""))
+                if r.get("notes"):
+                    st.markdown("**Notes**")
+                    st.write(r.get("notes"))
 
-        colA, colB, colC = st.columns(3)
-        colA.metric("Biologie (hits)", reco["summary"]["biology_hits"])
-        colB.metric("Microbiote (hits)", reco["summary"]["microbiome_hits"])
-        colC.metric("Total (hits)", reco["summary"]["total_hits"])
-
-        st.divider()
-
-        st.markdown("### 🎯 Priorités (top)")
-        if reco["priorities"]:
-            st.dataframe(pd.DataFrame(reco["priorities"]), use_container_width=True, height=260)
-        else:
-            st.info("Pas de priorités détectées.")
-
-        st.divider()
-
-        st.markdown("### 🧪 Détails Biologie")
-        if reco["biology_hits"]:
-            st.dataframe(pd.DataFrame(reco["biology_hits"]), use_container_width=True, height=360)
-        else:
-            st.info("Aucun hit biologie.")
-
-        st.markdown("### 🦠 Détails Microbiote")
-        if reco["microbiome_hits"]:
-            st.dataframe(pd.DataFrame(reco["microbiome_hits"]), use_container_width=True, height=360)
-        else:
-            st.info("Aucun hit microbiote.")
-
-# =========================
-# TAB 3 - Debug
-# =========================
-with tab3:
-    st.subheader("🛠️ Debug")
-    st.write("Horodatage:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    st.write("Bio keys sample:", list(st.session_state.bio.keys())[:30])
-    st.write("Micro keys sample:", list(st.session_state.micro.keys())[:30])
-
-    st.markdown("### Reco brute (JSON)")
-    st.json(st.session_state.reco or {})
+    # Downloads
+    st.markdown("---")
+    payload = {
+        "rules_file": rules_name,
+        "sex": sex,
+        "bio_extraction": (bio_res.data.to_dict(orient="records") if (bio_res and bio_res.data is not None) else []),
+        "micro_meta": (micro_res.meta if micro_res else {}),
+        "micro_extraction": (micro_res.data.to_dict(orient="records") if (micro_res and micro_res.data is not None) else []),
+        "recommendations": recos,
+    }
+    _download_json_button("⬇️ Télécharger (JSON complet)", payload, "algolife_multimodal_output.json")
