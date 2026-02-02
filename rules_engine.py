@@ -5,6 +5,7 @@ basées sur les résultats biologiques et microbiote
 
 import pandas as pd
 import numpy as np
+import os
 from typing import Dict, List, Optional, Union
 from extractors import normalize_biomarker_name, determine_biomarker_status
 
@@ -33,25 +34,54 @@ class RulesEngine:
     def _load_rules(self):
         """Charge toutes les feuilles de règles depuis le fichier Excel"""
         try:
+            # Vérifier que le fichier existe
+            if not os.path.exists(self.rules_excel_path):
+                raise FileNotFoundError(f"Le fichier {self.rules_excel_path} n'existe pas")
+            
+            print(f"📂 Tentative de chargement: {self.rules_excel_path}")
+            print(f"📏 Taille du fichier: {os.path.getsize(self.rules_excel_path)} bytes")
+            
             # Charger les règles biologiques
-            self.rules_bio_base = pd.read_excel(self.rules_excel_path, sheet_name='BASE_40')
-            self.rules_bio_extended = pd.read_excel(self.rules_excel_path, sheet_name='EXTENDED_92')
-            self.rules_bio_functional = pd.read_excel(self.rules_excel_path, sheet_name='FONCTIONNEL_134')
+            print("⏳ Chargement BASE_40...")
+            self.rules_bio_base = pd.read_excel(self.rules_excel_path, sheet_name='BASE_40', engine='openpyxl')
+            print(f"✅ BASE_40 chargé: {len(self.rules_bio_base)} lignes")
             
-            # Charger les règles microbiome
-            self.rules_microbiome = pd.read_excel(self.rules_excel_path, sheet_name='Microbiote')
+            print("⏳ Chargement EXTENDED_92...")
+            self.rules_bio_extended = pd.read_excel(self.rules_excel_path, sheet_name='EXTENDED_92', engine='openpyxl')
+            print(f"✅ EXTENDED_92 chargé: {len(self.rules_bio_extended)} lignes")
             
-            # Charger les règles métabolites salivaires
-            self.rules_metabolites = pd.read_excel(self.rules_excel_path, sheet_name='Métabolites salivaire')
+            print("⏳ Chargement FONCTIONNEL_134...")
+            self.rules_bio_functional = pd.read_excel(self.rules_excel_path, sheet_name='FONCTIONNEL_134', engine='openpyxl')
+            print(f"✅ FONCTIONNEL_134 chargé: {len(self.rules_bio_functional)} lignes")
             
-            print("✅ Règles chargées avec succès")
-            print(f"  - Biologie BASE: {len(self.rules_bio_base)} biomarqueurs")
-            print(f"  - Biologie EXTENDED: {len(self.rules_bio_extended)} biomarqueurs")
-            print(f"  - Biologie FONCTIONNEL: {len(self.rules_bio_functional)} biomarqueurs")
-            print(f"  - Microbiome: {len(self.rules_microbiome)} règles")
+            print("⏳ Chargement Microbiote...")
+            self.rules_microbiome = pd.read_excel(self.rules_excel_path, sheet_name='Microbiote', engine='openpyxl')
+            print(f"✅ Microbiote chargé: {len(self.rules_microbiome)} lignes")
             
+            print("⏳ Chargement Métabolites salivaire...")
+            self.rules_metabolites = pd.read_excel(self.rules_excel_path, sheet_name='Métabolites salivaire', engine='openpyxl')
+            print(f"✅ Métabolites chargé: {len(self.rules_metabolites)} lignes")
+            
+            print("✅ Toutes les règles chargées avec succès")
+            
+        except FileNotFoundError as e:
+            print(f"❌ ERREUR: Fichier non trouvé - {str(e)}")
+            raise
+        except ValueError as e:
+            print(f"❌ ERREUR: Feuille Excel introuvable - {str(e)}")
+            print("📋 Feuilles disponibles dans le fichier:")
+            try:
+                xl_file = pd.ExcelFile(self.rules_excel_path, engine='openpyxl')
+                for sheet in xl_file.sheet_names:
+                    print(f"   - {sheet}")
+            except:
+                pass
+            raise
         except Exception as e:
-            raise Exception(f"Erreur lors du chargement des règles: {str(e)}")
+            print(f"❌ ERREUR DÉTAILLÉE lors du chargement: {type(e).__name__}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            raise
     
     def _find_biomarker_rules(self, biomarker_name: str, gender: str = 'H') -> Optional[pd.Series]:
         """
