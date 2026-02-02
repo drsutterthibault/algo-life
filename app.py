@@ -132,6 +132,8 @@ if page == "Import & Données":
         if poids > 0 and taille > 0:
             imc = poids / ((taille/100) ** 2)
             st.info(f"**IMC calculé:** {imc:.1f} kg/m²")
+        else:
+            imc = 0
         
         # Symptômes
         st.markdown("**Symptômes:**")
@@ -144,9 +146,11 @@ if page == "Import & Données":
         )
         
         # Antécédents médicaux
-        antecedents = st.text_area("Antécédents médicaux", 
-                                   placeholder="Exemple: Hypothyroïdie, traitement en cours...",
-                                   height=100)
+        antecedents = st.text_area(
+            "Antécédents médicaux",
+            placeholder="Exemple: Hypothyroïdie, traitement en cours...",
+            height=100
+        )
         
         # Sauvegarder les données patient
         st.session_state.patient_data = {
@@ -154,7 +158,7 @@ if page == "Import & Données":
             'date_naissance': date_naissance,
             'poids': poids,
             'taille': taille,
-            'imc': imc if poids > 0 and taille > 0 else 0,
+            'imc': imc,
             'activite': activite,
             'symptomes': symptomes,
             'antecedents': antecedents
@@ -269,17 +273,19 @@ if page == "Import & Données":
         if st.session_state.biology_data is not None or st.session_state.microbiome_data is not None:
             with st.spinner("Analyse en cours..."):
                 try:
-                    # ===== CORRECTION DU CHEMIN =====
-                    # Construire le chemin absolu basé sur l'emplacement du script
+                    # ===== CHEMIN FIX SANS ACCENTS =====
                     script_dir = os.path.dirname(os.path.abspath(__file__))
-                    rules_path = os.path.join(script_dir, "data", "Bases_règles_Synlab.xlsx")
+                    rules_path = os.path.join(script_dir, "data", "Bases_regles_Synlab.xlsx")
                     
                     # Vérifier que le fichier existe
                     if not os.path.exists(rules_path):
                         st.error(f"❌ Fichier de règles introuvable : {rules_path}")
                         st.info(f"📁 Répertoire actuel : {os.getcwd()}")
                         st.info(f"📁 Répertoire du script : {script_dir}")
-                        st.info(f"📁 Contenu du dossier data : {os.listdir(os.path.join(script_dir, 'data')) if os.path.exists(os.path.join(script_dir, 'data')) else 'Dossier data introuvable'}")
+                        st.info(
+                            f"📁 Contenu du dossier data : "
+                            f"{os.listdir(os.path.join(script_dir, 'data')) if os.path.exists(os.path.join(script_dir, 'data')) else 'Dossier data introuvable'}"
+                        )
                         raise FileNotFoundError(f"Fichier de règles introuvable: {rules_path}")
                     # ================================
                     
@@ -317,22 +323,21 @@ elif page == "Interprétation":
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Biomarqueurs analysés", 
-                     len(reco.get('biology_interpretations', [])))
+            st.metric("Biomarqueurs analysés", len(reco.get('biology_interpretations', [])))
         
         with col2:
-            st.metric("Dysbiosis Index",
-                     reco.get('microbiome_summary', {}).get('dysbiosis_index', 'N/A'))
+            st.metric("Dysbiosis Index", reco.get('microbiome_summary', {}).get('dysbiosis_index', 'N/A'))
         
         with col3:
-            anomalies = len([b for b in reco.get('biology_interpretations', []) 
-                           if b.get('status') != 'Normal'])
+            anomalies = len([b for b in reco.get('biology_interpretations', []) if b.get('status') != 'Normal'])
             st.metric("Anomalies détectées", anomalies)
         
         with col4:
-            st.metric("Niveau de priorité",
-                     "Élevé" if anomalies > 5 else "Modéré" if anomalies > 2 else "Faible",
-                     delta=None)
+            st.metric(
+                "Niveau de priorité",
+                "Élevé" if anomalies > 5 else "Modéré" if anomalies > 2 else "Faible",
+                delta=None
+            )
         
         # Interprétations biologiques
         if reco.get('biology_interpretations'):
@@ -340,8 +345,7 @@ elif page == "Interprétation":
             st.markdown("### 🧪 Interprétations Biologiques")
             
             for interp in reco['biology_interpretations']:
-                with st.expander(f"{interp['biomarker']} - {interp['status']}", 
-                               expanded=interp['status'] != 'Normal'):
+                with st.expander(f"{interp['biomarker']} - {interp['status']}", expanded=interp['status'] != 'Normal'):
                     col1, col2 = st.columns([1, 2])
                     
                     with col1:
@@ -360,8 +364,7 @@ elif page == "Interprétation":
             st.markdown("### 🦠 Interprétations Microbiote")
             
             for interp in reco['microbiome_interpretations']:
-                with st.expander(f"{interp['group']} - {interp['result']}", 
-                               expanded=interp['result'] != 'Expected'):
+                with st.expander(f"{interp['group']} - {interp['result']}", expanded=interp['result'] != 'Expected'):
                     st.markdown(f"**Groupe:** {interp['group']}")
                     st.markdown(f"**Résultat:** {interp['result']}")
                     
