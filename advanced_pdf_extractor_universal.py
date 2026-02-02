@@ -357,3 +357,40 @@ class UniversalPDFExtractor:
 # Backward compatible aliases (in case old code imports another name)
 AdvancedPDFExtractorUniversal = UniversalPDFExtractor
 __all__ = ["UniversalPDFExtractor", "AdvancedPDFExtractorUniversal", "BiomarkerHit"]
+
+# ============================================================
+# ✅ EXPORT STABLE POUR APP.PY
+# ============================================================
+# Objectif: garantir que "from advanced_pdf_extractor_universal import UniversalPDFExtractor"
+# fonctionne TOUJOURS, même si la classe interne s'appelle différemment.
+
+def _resolve_universal_extractor_class():
+    # Liste de noms possibles déjà présents dans ton module
+    candidates = [
+        "UniversalPDFExtractor",
+        "AdvancedPDFExtractor",
+        "AdvancedPDFExtractorUniversal",
+        "UniversalExtractor",
+        "PDFExtractor",
+        "Extractor",
+    ]
+    for name in candidates:
+        obj = globals().get(name)
+        if isinstance(obj, type):
+            return obj
+    return None
+
+_cls = _resolve_universal_extractor_class()
+
+if _cls is None:
+    # On crée un fallback explicite: l'import ne casse plus,
+    # et tu auras une erreur claire au moment de l'utilisation.
+    class UniversalPDFExtractor:  # noqa: N801
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "UniversalPDFExtractor introuvable dans advanced_pdf_extractor_universal.py. "
+                "Ajoute ta classe extractor (ou renomme-la), ou assure-toi qu'elle est définie au niveau global."
+            )
+else:
+    # Alias officiel: c'est CE symbole que ton app importe
+    UniversalPDFExtractor = _cls  # noqa: N816
