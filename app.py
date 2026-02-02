@@ -264,8 +264,10 @@ if page == "Import & Données":
         if st.session_state.biology_data is not None or st.session_state.microbiome_data is not None:
             with st.spinner("Analyse en cours..."):
                 try:
-                    # Charger le fichier de règles (à adapter selon votre chemin)
-                    rules_path = "/mnt/user-data/uploads/1770033776484_Bases_re_lgles_Synlab.xlsx"
+                    # ===== MODIFICATION ICI =====
+                    # Charger le fichier de règles depuis le dossier data/
+                    rules_path = "data/Bases_règles_Synlab.xlsx"
+                    # ===========================
                     
                     # Initialiser le moteur de règles
                     engine = RulesEngine(rules_path)
