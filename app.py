@@ -460,4 +460,4 @@ elif page == "Export PDF":
 
 # Footer
 st.markdown("---")
-st.caption("ALGO-LIFE © 2026 - Thibault VIGNIER | Version Beta v1.0")
+st.caption("ALGO-LIFE © 2026 - Dr Thibault SUTTER, Dr en biologie spécialisé en biologie fonctionnelle | Version Beta v1.0")
