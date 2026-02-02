@@ -8,8 +8,8 @@ Intégration multimodale:
 - Imagerie DXA (composition corporelle, densité osseuse)
 
 Auteur: Dr Thibault SUTTER - Biologiste
-Organisation: ALGO-LIFE / Espace Lab SA (Unilabs Group)
-Email: contact@bilan-hormonal.com
+Organisation: Laboratoire
+
 """
 
 from __future__ import annotations
@@ -44,6 +44,10 @@ try:
 except Exception as e:
     UNIVERSAL_EXTRACTOR_AVAILABLE = False
     _UNIVERSAL_IMPORT_ERROR = str(e)
+
+# ✅ Microbiote Extractor (IDK GutMAP)
+from microbiome_extractor_idk_gutmap import extract_microbiome_data
+
 
 
 # ----------------------------------------------------------------------------
