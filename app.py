@@ -46,9 +46,17 @@ except Exception as e:
     _UNIVERSAL_IMPORT_ERROR = str(e)
 
 # ✅ Microbiote Extractor (IDK GutMAP)
-from microbiome_extractor_idk_gutmap import extract_microbiome_data
+# ✅ Microbiome extractor (IDK GutMAP / PDF microbiote)
+try:
+    from microbiome_extractor_idk_gutmap import extract_microbiome_data  # type: ignore
+    MICROBIOME_EXTRACTOR_AVAILABLE = True
+except Exception as e:
+    MICROBIOME_EXTRACTOR_AVAILABLE = False
+    _MICROBIOME_IMPORT_ERROR = str(e)
 
-
+    def extract_microbiome_data(*args, **kwargs):  # type: ignore
+        """Fallback: returns empty dict if extractor module is unavailable."""
+        return {}
 
 # ----------------------------------------------------------------------------
 # Fallback extractor (si advanced_pdf_extractor_universal absent sur Streamlit Cloud)
@@ -1222,6 +1230,10 @@ with st.sidebar:
         st.error("❌ UniversalPDFExtractor indisponible (import failed).")
         st.code(_UNIVERSAL_IMPORT_ERROR, language="text")
 
+    if not MICROBIOME_EXTRACTOR_AVAILABLE:
+        st.warning("⚠️ Microbiome extractor indisponible (import failed).")
+        st.code(_MICROBIOME_IMPORT_ERROR, language="text")
+
     if st.button("🧹 Reset (cache + rerun)", use_container_width=True):
         try:
             st.cache_data.clear()
@@ -1474,14 +1486,14 @@ with tab1:
                         try:
                             extractor = UniversalPDFExtractor(known_biomarkers=known_db)
                         except TypeError:
-                            extractor = UniversalPDFExtractor()
-
-                        if hasattr(extractor, "extract_microbiome_data"):
-                            microbiome_data = extractor.extract_microbiome_data(text, debug=True)
-                        else:
+                        # ✅ Extraction microbiote via module dédié (GitHub / standalone)
+                        if not MICROBIOME_EXTRACTOR_AVAILABLE:
+                            st.error("❌ Extracteur microbiote indisponible (import failed).")
+                            st.code(_MICROBIOME_IMPORT_ERROR, language="text")
                             microbiome_data = {}
-                        
-                        if microbiome_data:
+                        else:
+                            microbiome_data = extract_microbiome_data(text, debug=True)
+if microbiome_data:
                             st.session_state.extracted_data.setdefault("microbiome", {})
                             st.session_state.extracted_data["microbiome"] = microbiome_data
                             st.session_state.patient_data.setdefault("microbiome_data", {}).update(microbiome_data)
