@@ -10,21 +10,50 @@ Version: Clean reboot - Feb 2026
 from __future__ import annotations
 
 import io
-from dataclasses import asdict
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple
 
 import pandas as pd
-import streamlit as st
 
-from extractors import (
-    extract_biology_any,
-    extract_microbiome_any,
-    ExtractionResult,
-)
-from rules_engine import (
-    load_rules_from_excel_bytes,
-    generate_recommendations_multimodal,
-)
+# -----------------------------
+# Streamlit import (with clear error)
+# -----------------------------
+try:
+    import streamlit as st
+except Exception as e:
+    raise RuntimeError(
+        "Streamlit n'est pas installé dans ton environnement.\n"
+        "Installe-le avec: pip install streamlit\n"
+        "Ou ajoute streamlit dans requirements.txt si tu déploies."
+    ) from e
+
+# -----------------------------
+# Local modules import (with clear error)
+# -----------------------------
+try:
+    from extractors import (
+        extract_biology_any,
+        extract_microbiome_any,
+        ExtractionResult,
+    )
+except Exception as e:
+    raise RuntimeError(
+        "Impossible d'importer 'extractors.py'.\n"
+        "Vérifie que le fichier 'extractors.py' est bien à la racine, au même niveau que app.py.\n"
+        "Et qu'il s'appelle exactement: extractors.py"
+    ) from e
+
+try:
+    from rules_engine import (
+        load_rules_from_excel_bytes,
+        generate_recommendations_multimodal,
+    )
+except Exception as e:
+    raise RuntimeError(
+        "Impossible d'importer 'rules_engine.py'.\n"
+        "Vérifie que le fichier 'rules_engine.py' est bien à la racine, au même niveau que app.py.\n"
+        "Et qu'il s'appelle exactement: rules_engine.py"
+    ) from e
+
 
 # -----------------------------
 # Streamlit config
@@ -35,7 +64,10 @@ st.set_page_config(
 )
 
 st.title("ALGO-LIFE — Import multimodal (Biologie + Microbiote)")
-st.caption("Importe un fichier Biologie (PDF ou Excel) + un fichier Microbiote (PDF ou Excel), applique les règles Excel, et génère des recommandations.")
+st.caption(
+    "Importe un fichier Biologie (PDF ou Excel) + un fichier Microbiote (PDF ou Excel), "
+    "applique les règles Excel, et génère des recommandations."
+)
 
 # -----------------------------
 # Helpers
@@ -45,14 +77,18 @@ def _read_upload(upload) -> Tuple[bytes, str]:
         return b"", ""
     return upload.read(), upload.name
 
+
 def _download_json_button(label: str, payload: Dict[str, Any], filename: str):
     import json
+
     raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     st.download_button(label, data=raw, file_name=filename, mime="application/json")
+
 
 def _download_csv_button(label: str, df: pd.DataFrame, filename: str):
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(label, data=csv, file_name=filename, mime="text/csv")
+
 
 # -----------------------------
 # Sidebar: global inputs
@@ -68,6 +104,7 @@ with st.sidebar:
         accept_multiple_files=False,
     )
     st.caption("Astuce: utilise ton fichier 'Bases règles Synlab.xlsx'.")
+
 
 # -----------------------------
 # Main: uploads
@@ -103,6 +140,7 @@ if run:
     if rules_upload is None:
         st.error("Tu dois importer le fichier de règles Excel (.xlsx).")
         st.stop()
+
     if bio_upload is None and micro_upload is None:
         st.error("Importe au moins un fichier (biologie ou microbiote).")
         st.stop()
@@ -112,6 +150,7 @@ if run:
     try:
         rules = load_rules_from_excel_bytes(rules_bytes)
     except Exception as e:
+        st.error("Erreur lors du chargement du fichier de règles.")
         st.exception(e)
         st.stop()
 
@@ -142,6 +181,7 @@ if run:
     st.subheader("Extraction — Résultats structurés")
 
     cA, cB = st.columns(2)
+
     with cA:
         st.markdown("### Biologie")
         if bio_res is None or bio_res.data is None or bio_res.data.empty:
@@ -159,7 +199,7 @@ if run:
                 st.dataframe(micro_res.data, use_container_width=True, height=420)
                 _download_csv_button("⬇️ Télécharger extraction microbiote (CSV)", micro_res.data, "extraction_microbiote.csv")
             else:
-                st.info("Extraction microbiote: pas de table bactérienne exploitable, mais les marqueurs fonctionnels peuvent être présents.")
+                st.info("Extraction microbiote: pas de table bactérienne exploitable, mais des marqueurs fonctionnels peuvent être présents.")
             if micro_res.meta:
                 st.markdown("**Marqueurs fonctionnels détectés**")
                 st.json(micro_res.meta)
@@ -168,20 +208,27 @@ if run:
 
     # Generate recos
     st.subheader("Recommandations — moteur de règles multimodal")
-    recos = generate_recommendations_multimodal(
-        rules=rules,
-        sex=sex,
-        bio_df=(bio_res.data if bio_res else pd.DataFrame()),
-        micro_meta=(micro_res.meta if micro_res else {}),
-        micro_df=(micro_res.data if (micro_res and micro_res.data is not None) else pd.DataFrame()),
-    )
+
+    try:
+        recos = generate_recommendations_multimodal(
+            rules=rules,
+            sex=sex,
+            bio_df=(bio_res.data if bio_res else pd.DataFrame()),
+            micro_meta=(micro_res.meta if micro_res else {}),
+            micro_df=(micro_res.data if (micro_res and micro_res.data is not None) else pd.DataFrame()),
+        )
+    except Exception as e:
+        st.error("Erreur dans le moteur de règles.")
+        st.exception(e)
+        st.stop()
 
     # Render recos
     if not recos:
         st.info("Aucune recommandation déclenchée (soit tout est normal, soit matching règles ↔ biomarqueurs à ajuster).")
     else:
         for i, r in enumerate(recos, start=1):
-            with st.expander(f"#{i} — {r.get('title','Reco')}", expanded=(i <= 3)):
+            title = r.get("title", "Reco")
+            with st.expander(f"#{i} — {title}", expanded=(i <= 3)):
                 st.write(f"**Modalité :** {r.get('modality')}")
                 st.write(f"**Biomarqueur / Marqueur :** {r.get('marker')}")
                 st.write(f"**Statut :** {r.get('status')}")
@@ -208,4 +255,5 @@ if run:
         "micro_extraction": (micro_res.data.to_dict(orient="records") if (micro_res and micro_res.data is not None) else []),
         "recommendations": recos,
     }
+
     _download_json_button("⬇️ Télécharger (JSON complet)", payload, "algolife_multimodal_output.json")
