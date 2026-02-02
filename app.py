@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from extractors import extract_synlab_biology, extract_idk_microbiome
 from rules_engine import RulesEngine
-from pdf_generator import generate_multimodal_report  # ← NOUVEAU !
+from pdf_generator import generate_multimodal_report
 
 # Configuration de la page
 st.set_page_config(
@@ -67,9 +67,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== FONCTION HELPER POUR TRANSFORMER LES DONNÉES ===== 
+# ===== FONCTION HELPER POUR TRANSFORMER LES DONNÉES - VERSION CORRIGÉE ===== 
 def prepare_pdf_data():
-    """Transforme les données de session en format pour le PDF generator"""
+    """Transforme les données de session en format pour le PDF generator - VERSION CORRIGÉE"""
     
     # Données patient
     patient_data = st.session_state.patient_data.copy()
@@ -125,15 +125,22 @@ def prepare_pdf_data():
         if st.session_state.microbiome_data and 'phyla' in st.session_state.microbiome_data:
             microbiome_data['phyla'] = st.session_state.microbiome_data['phyla']
         
-        # Espèces clés
+        # Espèces clés - BUG CORRIGÉ ICI
         if st.session_state.recommendations.get('microbiome_interpretations'):
             microbiome_data['especes_cles'] = []
             for interp in st.session_state.recommendations['microbiome_interpretations']:
                 if interp.get('result') != 'Expected':
-                    impact = 'positif' if 'beneficial' in interp.get('interpretation', '').lower() else 'negatif'
+                    # FIX: Vérifier que interpretation existe et n'est pas None
+                    interpretation = interp.get('interpretation', '')
+                    if interpretation is None:
+                        interpretation = ''
+                    
+                    # Conversion safe en lowercase
+                    impact = 'positif' if 'beneficial' in interpretation.lower() else 'negatif'
+                    
                     microbiome_data['especes_cles'].append({
                         'nom': interp['group'],
-                        'description': interp.get('interpretation', ''),
+                        'description': interpretation,
                         'impact': impact
                     })
     
@@ -147,8 +154,18 @@ def prepare_pdf_data():
                 'biomarqueur': analysis.get('biology_marker', 'N/A'),
                 'microbiote_element': analysis.get('microbiome_marker', 'N/A'),
                 'interpretation': analysis.get('description', ''),
+                'mecanisme': analysis.get('mechanism', ''),
                 'severite': 'moyenne'
             })
+        
+        # Ajouter des axes d'intervention si disponibles
+        if st.session_state.recommendations.get('intervention_axes'):
+            for axe in st.session_state.recommendations['intervention_axes']:
+                cross_analysis['axes_intervention'].append({
+                    'titre': axe.get('title', ''),
+                    'description': axe.get('description', ''),
+                    'impact': axe.get('expected_impact', '')
+                })
     
     # Recommandations
     recommendations = {
@@ -579,7 +596,7 @@ elif page == "Suivi":
     st.markdown("## 📈 Suivi")
     st.info("Fonctionnalité de suivi en développement. Permettra de tracker l'évolution des biomarqueurs dans le temps.")
 
-# ===== PAGE 5: EXPORT PDF (MODIFIÉ) =====
+# ===== PAGE 5: EXPORT PDF =====
 elif page == "Export PDF":
     st.markdown("## 📄 Export PDF")
     
