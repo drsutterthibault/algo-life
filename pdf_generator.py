@@ -1,40 +1,204 @@
 """
-ALGO-LIFE - Générateur de Rapports PDF Multimodaux
-Version Beta v1.0
+ALGO-LIFE - Générateur de Rapports PDF Multimodaux ULTRA-AMÉLIORÉ
+Version Beta v1.0 - AVEC JAUGES VISUELLES
 Dr Thibault SUTTER - Biologiste spécialisé en biologie fonctionnelle
-
-Génère des rapports PDF professionnels intégrant:
-- Analyses biologiques (Synlab, MGD, etc.)
-- Analyses microbiote (IDK GutMAP, etc.)
-- Analyses croisées et corrélations
-- Recommandations personnalisées
 """
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm, mm
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, 
-    PageBreak, Image, KeepTogether, ListFlowable, ListItem
+    PageBreak, Image, KeepTogether, ListFlowable, Flowable
 )
-from reportlab.graphics.shapes import Drawing, Rect, Line, Circle
-from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.shapes import Drawing, Rect, Line, Circle, String
+from reportlab.graphics.charts.barcharts import VerticalBarChart, HorizontalBarChart
 from reportlab.graphics.charts.piecharts import Pie
-from reportlab.graphics.charts.linecharts import HorizontalLineChart
-from reportlab.pdfgen import canvas
+from reportlab.graphics.widgets.markers import makeMarker
 from datetime import datetime
 import os
 from typing import Dict, List, Any, Optional
 
 
+class BiomarkerGauge(Flowable):
+    """Jauge visuelle pour afficher un biomarqueur avec sa position par rapport aux valeurs de référence"""
+    
+    def __init__(self, name: str, value: float, ref_min: float, ref_max: float, unit: str = "", 
+                 width: float = 15*cm, height: float = 1.5*cm):
+        Flowable.__init__(self)
+        self.name = name
+        self.value = value
+        self.ref_min = ref_min
+        self.ref_max = ref_max
+        self.unit = unit
+        self.width = width
+        self.height = height
+        
+    def draw(self):
+        # Définir les couleurs
+        COLOR_LOW = colors.HexColor('#FF9800')  # Orange
+        COLOR_NORMAL = colors.HexColor('#4CAF50')  # Vert
+        COLOR_HIGH = colors.HexColor('#F44336')  # Rouge
+        COLOR_BG = colors.HexColor('#E0E0E0')  # Gris clair
+        
+        # Dimensions de la jauge
+        gauge_width = self.width - 3*cm
+        gauge_height = 0.8*cm
+        gauge_x = 2.5*cm
+        gauge_y = 0.3*cm
+        
+        # Nom du biomarqueur
+        self.canv.setFont('Helvetica-Bold', 10)
+        self.canv.drawString(0, gauge_y + 0.3*cm, self.name)
+        
+        # Calculer la position de la valeur sur la jauge
+        # Étendre la plage pour inclure des valeurs hors normes
+        display_min = self.ref_min * 0.5
+        display_max = self.ref_max * 1.5
+        range_width = display_max - display_min
+        
+        # Position de la zone normale
+        normal_start = (self.ref_min - display_min) / range_width * gauge_width
+        normal_width = (self.ref_max - self.ref_min) / range_width * gauge_width
+        
+        # Position de la valeur
+        if self.value < display_min:
+            value_pos = 0
+        elif self.value > display_max:
+            value_pos = gauge_width
+        else:
+            value_pos = (self.value - display_min) / range_width * gauge_width
+        
+        # Dessiner le fond de la jauge (zones colorées)
+        # Zone basse (orange)
+        self.canv.setFillColor(COLOR_LOW)
+        self.canv.setStrokeColor(COLOR_LOW)
+        self.canv.rect(gauge_x, gauge_y, normal_start, gauge_height, fill=1, stroke=0)
+        
+        # Zone normale (vert)
+        self.canv.setFillColor(COLOR_NORMAL)
+        self.canv.setStrokeColor(COLOR_NORMAL)
+        self.canv.rect(gauge_x + normal_start, gauge_y, normal_width, gauge_height, fill=1, stroke=0)
+        
+        # Zone haute (rouge)
+        self.canv.setFillColor(COLOR_HIGH)
+        self.canv.setStrokeColor(COLOR_HIGH)
+        high_start = normal_start + normal_width
+        high_width = gauge_width - high_start
+        self.canv.rect(gauge_x + high_start, gauge_y, high_width, gauge_height, fill=1, stroke=0)
+        
+        # Bordure de la jauge
+        self.canv.setStrokeColor(colors.HexColor('#757575'))
+        self.canv.setLineWidth(1)
+        self.canv.rect(gauge_x, gauge_y, gauge_width, gauge_height, fill=0, stroke=1)
+        
+        # Marqueur de la valeur (triangle inversé)
+        marker_x = gauge_x + value_pos
+        marker_y = gauge_y + gauge_height
+        
+        self.canv.setFillColor(colors.HexColor('#1976D2'))  # Bleu foncé
+        self.canv.setStrokeColor(colors.HexColor('#1976D2'))
+        
+        # Triangle
+        path = self.canv.beginPath()
+        path.moveTo(marker_x, marker_y + 0.3*cm)
+        path.lineTo(marker_x - 0.15*cm, marker_y)
+        path.lineTo(marker_x + 0.15*cm, marker_y)
+        path.close()
+        self.canv.drawPath(path, fill=1, stroke=1)
+        
+        # Ligne verticale du marqueur
+        self.canv.setLineWidth(2)
+        self.canv.line(marker_x, marker_y, marker_x, gauge_y)
+        
+        # Afficher la valeur et l'unité
+        self.canv.setFont('Helvetica-Bold', 11)
+        self.canv.setFillColor(colors.HexColor('#1976D2'))
+        value_text = f"{self.value} {self.unit}"
+        self.canv.drawString(marker_x - 0.7*cm, marker_y + 0.4*cm, value_text)
+        
+        # Afficher les valeurs de référence
+        self.canv.setFont('Helvetica', 8)
+        self.canv.setFillColor(colors.HexColor('#757575'))
+        
+        # Min
+        self.canv.drawString(gauge_x, gauge_y - 0.3*cm, f"{self.ref_min}")
+        # Max
+        max_text = f"{self.ref_max}"
+        self.canv.drawRightString(gauge_x + gauge_width, gauge_y - 0.3*cm, max_text)
+        # Label "Référence"
+        self.canv.drawCentredString(gauge_x + gauge_width/2, gauge_y - 0.3*cm, f"Référence: {self.ref_min}-{self.ref_max} {self.unit}")
+
+
+class ScoreCircle(Flowable):
+    """Cercle de score pour afficher un pourcentage (ex: diversité microbiote)"""
+    
+    def __init__(self, score: float, title: str, width: float = 4*cm, height: float = 4*cm):
+        Flowable.__init__(self)
+        self.score = score
+        self.title = title
+        self.width = width
+        self.height = height
+        
+    def draw(self):
+        # Centre du cercle
+        cx = self.width / 2
+        cy = self.height / 2 - 0.3*cm
+        radius = 1.2*cm
+        
+        # Couleur selon le score
+        if self.score >= 80:
+            color = colors.HexColor('#4CAF50')
+        elif self.score >= 60:
+            color = colors.HexColor('#FF9800')
+        else:
+            color = colors.HexColor('#F44336')
+        
+        # Fond gris
+        self.canv.setFillColor(colors.HexColor('#E0E0E0'))
+        self.canv.setStrokeColor(colors.HexColor('#E0E0E0'))
+        self.canv.circle(cx, cy, radius, fill=1, stroke=0)
+        
+        # Arc de progression
+        self.canv.setFillColor(color)
+        self.canv.setStrokeColor(color)
+        self.canv.setLineWidth(8)
+        
+        # Dessiner l'arc (approximation avec wedge)
+        angle = (self.score / 100) * 360
+        path = self.canv.beginPath()
+        path.moveTo(cx, cy)
+        path.arcTo(cx - radius, cy - radius, cx + radius, cy + radius, 90, angle)
+        path.close()
+        self.canv.drawPath(path, fill=1, stroke=0)
+        
+        # Cercle intérieur blanc
+        self.canv.setFillColor(colors.white)
+        self.canv.circle(cx, cy, radius - 0.25*cm, fill=1, stroke=0)
+        
+        # Score au centre
+        self.canv.setFont('Helvetica-Bold', 20)
+        self.canv.setFillColor(color)
+        score_text = f"{int(self.score)}"
+        self.canv.drawCentredString(cx, cy - 0.2*cm, score_text)
+        
+        self.canv.setFont('Helvetica', 9)
+        self.canv.drawCentredString(cx, cy - 0.5*cm, "/100")
+        
+        # Titre en dessous
+        self.canv.setFont('Helvetica-Bold', 10)
+        self.canv.setFillColor(colors.HexColor('#333333'))
+        self.canv.drawCentredString(cx, cy - radius - 0.5*cm, self.title)
+
+
 class PDFGenerator:
-    """Générateur de rapports PDF multimodaux pour ALGO-LIFE"""
+    """Générateur de rapports PDF multimodaux ultra-amélioré pour ALGO-LIFE"""
     
     # Couleurs ALGO-LIFE
-    COLOR_PRIMARY = colors.HexColor('#5B5FCF')  # Violet
-    COLOR_SECONDARY = colors.HexColor('#8B7FCF')  # Violet clair
+    COLOR_PRIMARY = colors.HexColor('#5B5FCF')
+    COLOR_SECONDARY = colors.HexColor('#8B7FCF')
     COLOR_SUCCESS = colors.HexColor('#4CAF50')
     COLOR_WARNING = colors.HexColor('#FF9800')
     COLOR_DANGER = colors.HexColor('#F44336')
@@ -43,12 +207,6 @@ class PDFGenerator:
     COLOR_LIGHT_GREY = colors.HexColor('#E0E0E0')
     
     def __init__(self, output_path: str):
-        """
-        Initialise le générateur PDF
-        
-        Args:
-            output_path: Chemin du fichier PDF à générer
-        """
         self.output_path = output_path
         self.doc = SimpleDocTemplate(
             output_path,
@@ -66,7 +224,6 @@ class PDFGenerator:
     def _setup_custom_styles(self):
         """Configure les styles personnalisés"""
         
-        # Titre principal
         self.styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=self.styles['Heading1'],
@@ -77,7 +234,6 @@ class PDFGenerator:
             fontName='Helvetica-Bold'
         ))
         
-        # Sous-titre
         self.styles.add(ParagraphStyle(
             name='CustomSubtitle',
             parent=self.styles['Heading2'],
@@ -88,7 +244,6 @@ class PDFGenerator:
             fontName='Helvetica'
         ))
         
-        # Section
         self.styles.add(ParagraphStyle(
             name='SectionTitle',
             parent=self.styles['Heading2'],
@@ -103,7 +258,6 @@ class PDFGenerator:
             backColor=colors.HexColor('#F5F5F5')
         ))
         
-        # Sous-section
         self.styles.add(ParagraphStyle(
             name='SubsectionTitle',
             parent=self.styles['Heading3'],
@@ -114,7 +268,6 @@ class PDFGenerator:
             fontName='Helvetica-Bold'
         ))
         
-        # Corps de texte
         self.styles.add(ParagraphStyle(
             name='CustomBody',
             parent=self.styles['BodyText'],
@@ -124,7 +277,6 @@ class PDFGenerator:
             leading=14
         ))
         
-        # Recommandation
         self.styles.add(ParagraphStyle(
             name='Recommendation',
             parent=self.styles['BodyText'],
@@ -136,7 +288,6 @@ class PDFGenerator:
             leading=14
         ))
         
-        # Alerte
         self.styles.add(ParagraphStyle(
             name='Alert',
             parent=self.styles['BodyText'],
@@ -148,7 +299,6 @@ class PDFGenerator:
             fontName='Helvetica-Bold'
         ))
         
-        # Info
         self.styles.add(ParagraphStyle(
             name='InfoBox',
             parent=self.styles['BodyText'],
@@ -163,11 +313,7 @@ class PDFGenerator:
     def add_header(self, patient_data: Dict[str, Any]):
         """Ajoute l'en-tête du rapport"""
         
-        # Logo et titre
-        title = Paragraph(
-            "🧬 ALGO-LIFE",
-            self.styles['CustomTitle']
-        )
+        title = Paragraph("🧬 ALGO-LIFE", self.styles['CustomTitle'])
         subtitle = Paragraph(
             "PLATEFORME MÉDECIN - Analyse Multimodale de Santé<br/>Beta v1.0",
             self.styles['CustomSubtitle']
@@ -186,15 +332,13 @@ class PDFGenerator:
             ["Genre:", patient_data.get('genre', 'N/A')],
             ["Poids:", f"{patient_data.get('poids', 'N/A')} kg"],
             ["Taille:", f"{patient_data.get('taille', 'N/A')} cm"],
-            ["IMC:", f"{patient_data.get('imc', 'N/A')} kg/m²"],
+            ["IMC:", f"{patient_data.get('imc', 'N/A'):.1f} kg/m²"],
             ["Activité:", patient_data.get('activite', 'N/A')],
         ]
         
-        # Date du rapport
         date_rapport = datetime.now().strftime("%d/%m/%Y")
         patient_info.append(["Date du rapport:", date_rapport])
         
-        # Symptômes
         if 'symptomes' in patient_data and patient_data['symptomes']:
             symptomes_str = ", ".join(patient_data['symptomes'])
             patient_info.append(["Symptômes:", symptomes_str])
@@ -223,82 +367,104 @@ class PDFGenerator:
         style = 'SectionTitle' if level == 1 else 'SubsectionTitle'
         self.story.append(Paragraph(title, self.styles[style]))
         
+    def _parse_reference_range(self, reference: str) -> tuple:
+        """Parse la plage de référence"""
+        try:
+            if '-' in reference:
+                parts = reference.split('-')
+                return float(parts[0]), float(parts[1])
+            elif '<' in reference:
+                max_val = float(reference.replace('<', '').strip())
+                return 0, max_val
+            elif '>' in reference:
+                min_val = float(reference.replace('>', '').strip())
+                return min_val, min_val * 2
+            else:
+                val = float(reference)
+                return val * 0.8, val * 1.2
+        except:
+            return 0, 100
+    
     def add_biology_section(self, bio_data: Dict[str, Any]):
-        """Section analyse biologique"""
+        """Section analyse biologique AVEC JAUGES VISUELLES"""
         
         self.add_section("📊 ANALYSE BIOLOGIQUE", level=1)
         
-        # Résumé
         if 'resume' in bio_data:
             self.story.append(Paragraph(
                 f"<b>Résumé:</b> {bio_data['resume']}",
                 self.styles['CustomBody']
             ))
-            self.story.append(Spacer(1, 0.3*cm))
+            self.story.append(Spacer(1, 0.5*cm))
         
-        # Tableaux des biomarqueurs par catégorie
         if 'categories' in bio_data:
             for category, markers in bio_data['categories'].items():
                 self.add_section(f"🔬 {category}", level=2)
                 
-                marker_data = [["Biomarqueur", "Valeur", "Unité", "Référence", "Statut"]]
-                
                 for marker in markers:
-                    status = self._get_status_symbol(marker.get('statut', 'normal'))
-                    marker_data.append([
-                        marker.get('nom', 'N/A'),
-                        str(marker.get('valeur', 'N/A')),
-                        marker.get('unite', ''),
-                        marker.get('reference', 'N/A'),
-                        status
-                    ])
-                
-                table = Table(marker_data, colWidths=[5*cm, 2.5*cm, 2*cm, 3*cm, 2*cm])
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), self.COLOR_PRIMARY),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 9),
-                    ('FONTSIZE', (0, 1), (-1, -1), 8),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                    ('TOPPADDING', (0, 1), (-1, -1), 5),
-                    ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
-                    ('GRID', (0, 0), (-1, -1), 0.5, self.COLOR_LIGHT_GREY),
-                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FAFAFA')])
-                ]))
-                
-                self.story.append(table)
-                self.story.append(Spacer(1, 0.5*cm))
-                
-                # Interprétations
-                if 'interpretations' in marker and marker['interpretations']:
-                    for interp in marker['interpretations']:
-                        self.story.append(Paragraph(
-                            f"→ {interp}",
-                            self.styles['Recommendation']
-                        ))
+                    # Extraire les valeurs min/max de référence
+                    ref_str = marker.get('reference', '0-100')
+                    ref_min, ref_max = self._parse_reference_range(ref_str)
+                    
+                    value = marker.get('valeur', 0)
+                    if isinstance(value, str):
+                        try:
+                            value = float(value)
+                        except:
+                            value = 0
+                    
+                    # Ajouter la jauge
+                    gauge = BiomarkerGauge(
+                        name=marker.get('nom', 'N/A'),
+                        value=value,
+                        ref_min=ref_min,
+                        ref_max=ref_max,
+                        unit=marker.get('unite', ''),
+                        width=16*cm,
+                        height=1.8*cm
+                    )
+                    self.story.append(gauge)
                     self.story.append(Spacer(1, 0.3*cm))
-        
+                    
+                    # Interprétations
+                    if marker.get('interpretations'):
+                        for interp in marker['interpretations']:
+                            if interp:  # Vérifier que l'interprétation n'est pas vide
+                                self.story.append(Paragraph(
+                                    f"→ {interp}",
+                                    self.styles['Recommendation']
+                                ))
+                        self.story.append(Spacer(1, 0.5*cm))
+    
     def add_microbiome_section(self, microbiome_data: Dict[str, Any]):
         """Section analyse microbiote"""
         
         self.add_section("🦠 ANALYSE MICROBIOTE", level=1)
         
-        # Score de diversité
+        # Score de diversité avec cercle visuel
         if 'diversite' in microbiome_data:
             div_score = microbiome_data['diversite'].get('score', 0)
-            div_status = self._get_diversity_status(div_score)
             
-            self.story.append(Paragraph(
-                f"<b>Score de Diversité:</b> {div_score}/100 - {div_status}",
-                self.styles['CustomBody']
-            ))
-            self.story.append(Spacer(1, 0.3*cm))
+            score_circle = ScoreCircle(
+                score=div_score,
+                title="Score de Diversité",
+                width=5*cm,
+                height=5*cm
+            )
+            
+            self.story.append(score_circle)
+            self.story.append(Spacer(1, 0.5*cm))
+            
+            interp = microbiome_data['diversite'].get('interpretation', '')
+            if interp:
+                self.story.append(Paragraph(
+                    f"<b>Interprétation:</b> {interp}",
+                    self.styles['CustomBody']
+                ))
+                self.story.append(Spacer(1, 0.5*cm))
         
         # Phyla dominants
-        if 'phyla' in microbiome_data:
+        if 'phyla' in microbiome_data and microbiome_data['phyla']:
             self.add_section("Répartition des Phyla", level=2)
             
             phyla_data = [["Phylum", "Abondance (%)", "Statut"]]
@@ -327,7 +493,7 @@ class PDFGenerator:
             self.story.append(Spacer(1, 0.5*cm))
         
         # Espèces clés
-        if 'especes_cles' in microbiome_data:
+        if 'especes_cles' in microbiome_data and microbiome_data['especes_cles']:
             self.add_section("Espèces Clés Identifiées", level=2)
             
             for espece in microbiome_data['especes_cles']:
@@ -341,7 +507,7 @@ class PDFGenerator:
                 self.story.append(Spacer(1, 0.2*cm))
         
         # Fonctions métaboliques
-        if 'fonctions_metaboliques' in microbiome_data:
+        if 'fonctions_metaboliques' in microbiome_data and microbiome_data['fonctions_metaboliques']:
             self.add_section("Capacités Métaboliques", level=2)
             
             for fonction in microbiome_data['fonctions_metaboliques']:
@@ -352,52 +518,60 @@ class PDFGenerator:
             self.story.append(Spacer(1, 0.3*cm))
     
     def add_cross_analysis_section(self, cross_data: Dict[str, Any]):
-        """Section analyse croisée biologie × microbiote"""
+        """Section analyse croisée biologie × microbiote AMÉLIORÉE"""
         
         self.add_section("🔗 ANALYSE CROISÉE MULTIMODALE", level=1)
         
         self.story.append(Paragraph(
             "Cette section présente les corrélations identifiées entre vos analyses biologiques et votre profil microbiote, "
-            "permettant une compréhension intégrée de votre santé.",
+            "permettant une compréhension intégrée de votre santé métabolique.",
             self.styles['CustomBody']
         ))
         self.story.append(Spacer(1, 0.5*cm))
         
         # Corrélations majeures
-        if 'correlations' in cross_data:
-            self.add_section("Corrélations Identifiées", level=2)
+        if 'correlations' in cross_data and cross_data['correlations']:
+            self.add_section("🔍 Corrélations Identifiées", level=2)
             
             for i, corr in enumerate(cross_data['correlations'], 1):
                 severity = corr.get('severite', 'faible')
                 icon = "🔴" if severity == "elevee" else "🟡" if severity == "moyenne" else "🟢"
                 
-                self.story.append(Paragraph(
+                # Encadré pour chaque corrélation
+                corr_title = Paragraph(
                     f"{icon} <b>Corrélation {i}:</b> {corr.get('titre', '')}",
                     self.styles['SubsectionTitle']
-                ))
+                )
+                self.story.append(corr_title)
                 
-                self.story.append(Paragraph(
-                    f"<b>Biomarqueur:</b> {corr.get('biomarqueur', 'N/A')} - "
-                    f"<b>Microbiote:</b> {corr.get('microbiote_element', 'N/A')}",
-                    self.styles['CustomBody']
-                ))
+                # Tableau détaillé
+                corr_data = [
+                    ["Biomarqueur", corr.get('biomarqueur', 'N/A')],
+                    ["Élément microbiote", corr.get('microbiote_element', 'N/A')],
+                    ["Interprétation", corr.get('interpretation', '')],
+                ]
                 
-                self.story.append(Paragraph(
-                    f"<b>Interprétation:</b> {corr.get('interpretation', '')}",
-                    self.styles['CustomBody']
-                ))
+                if corr.get('mecanisme'):
+                    corr_data.append(["Mécanisme", corr.get('mecanisme', '')])
                 
-                if 'mecanisme' in corr:
-                    self.story.append(Paragraph(
-                        f"<i>Mécanisme:</i> {corr.get('mecanisme', '')}",
-                        self.styles['InfoBox']
-                    ))
+                table = Table(corr_data, colWidths=[4*cm, 12*cm])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F5F5F5')),
+                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('GRID', (0, 0), (-1, -1), 0.5, self.COLOR_LIGHT_GREY),
+                    ('TOPPADDING', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ]))
                 
-                self.story.append(Spacer(1, 0.4*cm))
+                self.story.append(table)
+                self.story.append(Spacer(1, 0.5*cm))
         
         # Axes d'intervention prioritaires
-        if 'axes_intervention' in cross_data:
-            self.add_section("Axes d'Intervention Prioritaires", level=2)
+        if 'axes_intervention' in cross_data and cross_data['axes_intervention']:
+            self.add_section("🎯 Axes d'Intervention Prioritaires", level=2)
             
             for i, axe in enumerate(cross_data['axes_intervention'], 1):
                 self.story.append(Paragraph(
@@ -410,7 +584,7 @@ class PDFGenerator:
                     self.styles['CustomBody']
                 ))
                 
-                if 'impact' in axe:
+                if axe.get('impact'):
                     self.story.append(Paragraph(
                         f"<b>Impact attendu:</b> {axe.get('impact', '')}",
                         self.styles['Recommendation']
@@ -424,8 +598,8 @@ class PDFGenerator:
         self.add_section("💡 RECOMMANDATIONS PERSONNALISÉES", level=1)
         
         # Priorités
-        if 'priorites' in recommendations:
-            self.add_section("Priorités d'Action", level=2)
+        if 'priorites' in recommendations and recommendations['priorites']:
+            self.add_section("🎯 Priorités d'Action", level=2)
             
             for i, priorite in enumerate(recommendations['priorites'], 1):
                 self.story.append(Paragraph(
@@ -443,8 +617,7 @@ class PDFGenerator:
         if 'nutrition' in recommendations:
             self.add_section("🥗 Nutrition et Alimentation", level=2)
             
-            # Aliments à privilégier
-            if 'privilegier' in recommendations['nutrition']:
+            if 'privilegier' in recommendations['nutrition'] and recommendations['nutrition']['privilegier']:
                 self.story.append(Paragraph(
                     "<b>À PRIVILÉGIER:</b>",
                     self.styles['SubsectionTitle']
@@ -457,8 +630,7 @@ class PDFGenerator:
                     ))
                 self.story.append(Spacer(1, 0.3*cm))
             
-            # Aliments à limiter
-            if 'limiter' in recommendations['nutrition']:
+            if 'limiter' in recommendations['nutrition'] and recommendations['nutrition']['limiter']:
                 self.story.append(Paragraph(
                     "<b>À LIMITER:</b>",
                     self.styles['SubsectionTitle']
@@ -472,7 +644,7 @@ class PDFGenerator:
                 self.story.append(Spacer(1, 0.3*cm))
         
         # Supplémentation
-        if 'supplementation' in recommendations:
+        if 'supplementation' in recommendations and recommendations['supplementation']:
             self.add_section("💊 Supplémentation Suggérée", level=2)
             
             suppl_data = [["Supplément", "Dosage", "Fréquence", "Durée", "Objectif"]]
@@ -511,21 +683,22 @@ class PDFGenerator:
             self.story.append(Spacer(1, 0.5*cm))
         
         # Hygiène de vie
-        if 'hygiene_vie' in recommendations:
+        if 'hygiene_vie' in recommendations and recommendations['hygiene_vie']:
             self.add_section("🏃 Hygiène de Vie", level=2)
             
             for categorie, conseils in recommendations['hygiene_vie'].items():
-                self.story.append(Paragraph(
-                    f"<b>{categorie.upper()}:</b>",
-                    self.styles['SubsectionTitle']
-                ))
-                
-                for conseil in conseils:
+                if conseils:  # Vérifier que la liste n'est pas vide
                     self.story.append(Paragraph(
-                        f"→ {conseil}",
-                        self.styles['Recommendation']
+                        f"<b>{categorie.upper()}:</b>",
+                        self.styles['SubsectionTitle']
                     ))
-                self.story.append(Spacer(1, 0.3*cm))
+                    
+                    for conseil in conseils:
+                        self.story.append(Paragraph(
+                            f"→ {conseil}",
+                            self.styles['Recommendation']
+                        ))
+                    self.story.append(Spacer(1, 0.3*cm))
     
     def add_follow_up_section(self, follow_up: Dict[str, Any]):
         """Section suivi et contrôles"""
@@ -538,7 +711,7 @@ class PDFGenerator:
         ))
         self.story.append(Spacer(1, 0.3*cm))
         
-        if 'controles' in follow_up:
+        if 'controles' in follow_up and follow_up['controles']:
             controle_data = [["Analyse", "Timing", "Biomarqueurs à Surveiller"]]
             
             for controle in follow_up['controles']:
@@ -568,7 +741,6 @@ class PDFGenerator:
         """Ajoute le pied de page"""
         
         self.story.append(PageBreak())
-        
         self.story.append(Spacer(1, 2*cm))
         
         footer_text = """
@@ -597,54 +769,32 @@ class PDFGenerator:
             'critique_haut': '⚠️ Très haut',
             'attention': '⚡ Attention'
         }
-        return status_map.get(status.lower(), '• N/A')
-    
-    def _get_diversity_status(self, score: float) -> str:
-        """Évalue le statut de diversité"""
-        if score >= 80:
-            return "Excellente diversité"
-        elif score >= 60:
-            return "Bonne diversité"
-        elif score >= 40:
-            return "Diversité moyenne"
-        else:
-            return "Diversité faible"
+        return status_map.get(status.lower() if status else 'normal', '• N/A')
     
     def generate(self, data: Dict[str, Any]):
-        """
-        Génère le rapport PDF complet
-        
-        Args:
-            data: Dictionnaire contenant toutes les données du rapport
-                - patient: informations patient
-                - biologie: données biologiques
-                - microbiote: données microbiome
-                - cross_analysis: analyses croisées
-                - recommendations: recommandations
-                - follow_up: plan de suivi
-        """
+        """Génère le rapport PDF complet"""
         
         # En-tête
         self.add_header(data.get('patient', {}))
         
         # Sections
-        if 'biologie' in data:
+        if 'biologie' in data and data['biologie']:
             self.add_biology_section(data['biologie'])
             self.story.append(PageBreak())
         
-        if 'microbiote' in data:
+        if 'microbiote' in data and data['microbiote']:
             self.add_microbiome_section(data['microbiote'])
             self.story.append(PageBreak())
         
-        if 'cross_analysis' in data:
+        if 'cross_analysis' in data and data['cross_analysis']:
             self.add_cross_analysis_section(data['cross_analysis'])
             self.story.append(PageBreak())
         
-        if 'recommendations' in data:
+        if 'recommendations' in data and data['recommendations']:
             self.add_recommendations_section(data['recommendations'])
             self.story.append(PageBreak())
         
-        if 'follow_up' in data:
+        if 'follow_up' in data and data['follow_up']:
             self.add_follow_up_section(data['follow_up'])
         
         # Pied de page
@@ -657,7 +807,6 @@ class PDFGenerator:
         return self.output_path
 
 
-# Fonction helper pour générer rapidement un rapport
 def generate_multimodal_report(
     patient_data: Dict[str, Any],
     biology_data: Dict[str, Any],
@@ -667,12 +816,7 @@ def generate_multimodal_report(
     follow_up: Dict[str, Any],
     output_path: str = "rapport_multimodal.pdf"
 ) -> str:
-    """
-    Fonction helper pour générer un rapport complet
-    
-    Returns:
-        str: Chemin du fichier PDF généré
-    """
+    """Fonction helper pour générer un rapport complet"""
     
     data = {
         'patient': patient_data,
@@ -688,191 +832,4 @@ def generate_multimodal_report(
 
 
 if __name__ == "__main__":
-    # Exemple d'utilisation avec données de test
-    
-    patient_example = {
-        'nom': 'DUPONT',
-        'prenom': 'Jean',
-        'date_naissance': '03/10/1987',
-        'age': 38,
-        'genre': 'Homme',
-        'poids': 73.0,
-        'taille': 175.0,
-        'imc': 23.8,
-        'activite': 'Sédentaire (0-1h/semaine)',
-        'symptomes': ['Fatigue chronique', 'Troubles digestifs']
-    }
-    
-    biology_example = {
-        'resume': 'Profil biologique montrant des signes de stress oxydatif et déséquilibre thyroïdien léger.',
-        'categories': {
-            'Thyroïde': [
-                {
-                    'nom': 'TSH',
-                    'valeur': 3.8,
-                    'unite': 'mUI/L',
-                    'reference': '0.4-4.0',
-                    'statut': 'haut',
-                    'interpretations': [
-                        'TSH en limite haute, suggère une légère hypothyroïdie subclinique',
-                        'Vérifier T3/T4 libres pour confirmation'
-                    ]
-                }
-            ],
-            'Inflammation': [
-                {
-                    'nom': 'CRP',
-                    'valeur': 5.2,
-                    'unite': 'mg/L',
-                    'reference': '<3.0',
-                    'statut': 'haut',
-                    'interpretations': [
-                        'Inflammation chronique de bas grade détectée',
-                        'Lien possible avec déséquilibre microbiote'
-                    ]
-                }
-            ]
-        }
-    }
-    
-    microbiome_example = {
-        'diversite': {
-            'score': 65,
-            'interpretation': 'Diversité modérée nécessitant amélioration'
-        },
-        'phyla': [
-            {'nom': 'Firmicutes', 'abondance': 58.0, 'statut': 'normal'},
-            {'nom': 'Bacteroidetes', 'abondance': 32.0, 'statut': 'normal'},
-            {'nom': 'Proteobacteria', 'abondance': 8.0, 'statut': 'haut'},
-            {'nom': 'Actinobacteria', 'abondance': 2.0, 'statut': 'bas'}
-        ],
-        'especes_cles': [
-            {
-                'nom': 'Akkermansia muciniphila',
-                'description': 'Espèce protectrice de la barrière intestinale - abondance sous-optimale',
-                'impact': 'negatif'
-            },
-            {
-                'nom': 'Faecalibacterium prausnitzii',
-                'description': 'Producteur majeur de butyrate - niveau satisfaisant',
-                'impact': 'positif'
-            }
-        ],
-        'fonctions_metaboliques': [
-            {'nom': 'Production de SCFA', 'evaluation': 'Capacité modérée'},
-            {'nom': 'Métabolisme des vitamines B', 'evaluation': 'Capacité réduite'},
-            {'nom': 'Dégradation des fibres', 'evaluation': 'Capacité normale'}
-        ]
-    }
-    
-    cross_analysis_example = {
-        'correlations': [
-            {
-                'titre': 'Inflammation et dysbiose',
-                'biomarqueur': 'CRP élevée (5.2 mg/L)',
-                'microbiote_element': 'Proteobacteria élevés (8%)',
-                'interpretation': 'L\'excès de Proteobacteria pro-inflammatoires corrèle avec l\'élévation de la CRP',
-                'mecanisme': 'Les lipopolysaccharides (LPS) bactériens stimulent la réponse inflammatoire systémique',
-                'severite': 'moyenne'
-            },
-            {
-                'titre': 'Fonction thyroïdienne et microbiote',
-                'biomarqueur': 'TSH limite haute (3.8 mUI/L)',
-                'microbiote_element': 'Faible diversité générale',
-                'interpretation': 'La dysbiose peut affecter la conversion périphérique T4→T3',
-                'mecanisme': 'Le microbiote influence le métabolisme des hormones thyroïdiennes via les déiodinases',
-                'severite': 'faible'
-            }
-        ],
-        'axes_intervention': [
-            {
-                'titre': 'Restauration barrière intestinale',
-                'description': 'Renforcer l\'intégrité de la muqueuse intestinale pour réduire l\'inflammation systémique',
-                'impact': 'Diminution attendue de la CRP et amélioration des symptômes digestifs'
-            },
-            {
-                'titre': 'Optimisation thyroïdienne',
-                'description': 'Support nutritionnel pour la fonction thyroïdienne (sélénium, zinc, iode)',
-                'impact': 'Normalisation potentielle de la TSH et amélioration de l\'énergie'
-            }
-        ]
-    }
-    
-    recommendations_example = {
-        'priorites': [
-            {
-                'titre': 'Réduction de l\'inflammation',
-                'description': 'Protocole anti-inflammatoire combinant alimentation, supplémentation et restauration du microbiote'
-            }
-        ],
-        'nutrition': {
-            'privilegier': [
-                {'nom': 'Poissons gras (saumon, maquereau)', 'raison': 'Oméga-3 anti-inflammatoires et support thyroïdien'},
-                {'nom': 'Légumes crucifères cuits', 'raison': 'Support détox et thyroïde (cuisson réduit goitrogènes)'},
-                {'nom': 'Aliments fermentés', 'raison': 'Probiotiques naturels pour restaurer le microbiote'},
-                {'nom': 'Fibres prébiotiques', 'raison': 'Nourriture pour bactéries bénéfiques'}
-            ],
-            'limiter': [
-                {'nom': 'Sucres raffinés', 'raison': 'Favorisent l\'inflammation et la dysbiose'},
-                {'nom': 'Gluten et produits laitiers', 'raison': 'Potentiellement pro-inflammatoires (test élimination 4 semaines)'},
-                {'nom': 'Aliments ultra-transformés', 'raison': 'Additifs néfastes pour le microbiote'}
-            ]
-        },
-        'supplementation': [
-            {'nom': 'Oméga-3 EPA/DHA', 'dosage': '2-3g', 'frequence': '1x/jour', 'duree': '3 mois', 'objectif': 'Anti-inflammatoire'},
-            {'nom': 'Probiotiques multi-souches', 'dosage': '20-50 milliards UFC', 'frequence': '1x/jour', 'duree': '3 mois', 'objectif': 'Restauration microbiote'},
-            {'nom': 'L-Glutamine', 'dosage': '5g', 'frequence': '2x/jour', 'duree': '2 mois', 'objectif': 'Barrière intestinale'},
-            {'nom': 'Sélénium', 'dosage': '100-200µg', 'frequence': '1x/jour', 'duree': '3 mois', 'objectif': 'Fonction thyroïdienne'},
-            {'nom': 'Vitamine D3', 'dosage': '2000-4000 UI', 'frequence': '1x/jour', 'duree': 'Long terme', 'objectif': 'Immunité et inflammation'}
-        ],
-        'hygiene_vie': {
-            'Activité physique': [
-                'Marche quotidienne 30 minutes minimum',
-                'Exercices de résistance 2-3x/semaine',
-                'Éviter surmenage (stress oxydatif)'
-            ],
-            'Sommeil': [
-                'Viser 7-8h par nuit',
-                'Coucher avant 23h pour optimiser récupération',
-                'Éviter écrans 1h avant coucher'
-            ],
-            'Gestion du stress': [
-                'Techniques de respiration (cohérence cardiaque)',
-                'Méditation ou yoga 10-15 min/jour',
-                'Activités plaisir régulières'
-            ]
-        }
-    }
-    
-    follow_up_example = {
-        'controles': [
-            {
-                'type': 'Bilan biologique',
-                'delai': '6-8 semaines',
-                'biomarqueurs': ['TSH', 'T3 libre', 'T4 libre', 'CRP', 'Vitamine D']
-            },
-            {
-                'type': 'Analyse microbiote',
-                'delai': '3 mois',
-                'biomarqueurs': ['Diversité', 'Ratio F/B', 'Akkermansia', 'Proteobacteria']
-            },
-            {
-                'type': 'Bilan complet',
-                'delai': '6 mois',
-                'biomarqueurs': ['Panel hormonal', 'Stress oxydatif', 'Micronutriments']
-            }
-        ]
-    }
-    
-    # Génération du rapport
-    output = generate_multimodal_report(
-        patient_data=patient_example,
-        biology_data=biology_example,
-        microbiome_data=microbiome_example,
-        cross_analysis=cross_analysis_example,
-        recommendations=recommendations_example,
-        follow_up=follow_up_example,
-        output_path="exemple_rapport_algo_life.pdf"
-    )
-    
-    print(f"\n🎉 Rapport d'exemple généré: {output}")
+    print("PDF Generator chargé avec succès - Version ultra-améliorée avec jauges visuelles!")
