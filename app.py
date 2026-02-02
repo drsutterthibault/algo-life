@@ -19,22 +19,83 @@ from pdf_generator import generate_multimodal_report
 
 # Configuration de la page
 st.set_page_config(
-    page_title="ALGO-LIFE - Plateforme Médecin",
+    page_title="Unilabs - Plateforme Médecin",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personnalisé pour ressembler à l'interface ALGO-LIFE
+# CSS personnalisé pour le nouveau design
 st.markdown("""
 <style>
+    /* Header principal */
     .main-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
+        padding: 2rem;
         border-radius: 10px;
         color: white;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
     }
+    
+    /* Sidebar améliorée */
+    .css-1d391kg, [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+    }
+    
+    .sidebar-profile {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+        text-align: center;
+    }
+    
+    .profile-name {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #667eea;
+        margin-bottom: 0.3rem;
+    }
+    
+    .profile-title {
+        font-size: 0.85rem;
+        color: #6c757d;
+        line-height: 1.4;
+    }
+    
+    /* Navigation tabs horizontale */
+    .nav-tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 2rem;
+        border-bottom: 2px solid #e9ecef;
+        padding-bottom: 0.5rem;
+    }
+    
+    .nav-tab {
+        padding: 0.75rem 1.5rem;
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 8px 8px 0 0;
+        cursor: pointer;
+        font-weight: 500;
+        color: #495057;
+        transition: all 0.3s;
+    }
+    
+    .nav-tab:hover {
+        background: #f8f9fa;
+        border-color: #667eea;
+        color: #667eea;
+    }
+    
+    .nav-tab.active {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-color: #667eea;
+    }
+    
     .patient-card {
         background: #f8f9fa;
         padding: 1.5rem;
@@ -42,6 +103,7 @@ st.markdown("""
         border-left: 4px solid #667eea;
         margin-bottom: 1rem;
     }
+    
     .upload-zone {
         border: 2px dashed #667eea;
         border-radius: 8px;
@@ -50,6 +112,7 @@ st.markdown("""
         background: #f8f9fa;
         margin: 1rem 0;
     }
+    
     .metric-card {
         background: white;
         padding: 1rem;
@@ -57,19 +120,17 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         margin: 0.5rem 0;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2rem;
-    }
-    .stTabs [data-baseweb="tab"] {
-        padding: 1rem 2rem;
-        font-weight: 600;
+    
+    /* Styling pour les radio buttons */
+    .stRadio > label {
+        display: none;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ===== FONCTION HELPER POUR TRANSFORMER LES DONNÉES - VERSION CORRIGÉE ===== 
+# ===== FONCTION HELPER POUR TRANSFORMER LES DONNÉES ===== 
 def prepare_pdf_data():
-    """Transforme les données de session en format pour le PDF generator - VERSION CORRIGÉE"""
+    """Transforme les données de session en format pour le PDF generator"""
     
     # Données patient
     patient_data = st.session_state.patient_data.copy()
@@ -125,7 +186,7 @@ def prepare_pdf_data():
         if st.session_state.microbiome_data and 'phyla' in st.session_state.microbiome_data:
             microbiome_data['phyla'] = st.session_state.microbiome_data['phyla']
         
-        # Espèces clés - BUG CORRIGÉ ICI
+        # Espèces clés - VERSION CORRIGÉE
         if st.session_state.recommendations.get('microbiome_interpretations'):
             microbiome_data['especes_cles'] = []
             for interp in st.session_state.recommendations['microbiome_interpretations']:
@@ -231,34 +292,79 @@ if 'rules_engine' not in st.session_state:
     st.session_state.rules_engine = None
 if 'recommendations' not in st.session_state:
     st.session_state.recommendations = None
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "Import & Données"
 
-# En-tête
+# Sidebar avec profil utilisateur amélioré
+with st.sidebar:
+    st.markdown("""
+    <div class="sidebar-profile">
+        <div class="profile-name">Dr Thibault SUTTER</div>
+        <div class="profile-title">Biologiste<br>spécialisé en biologie fonctionnelle</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Informations complémentaires
+    st.markdown("### 📊 Statistiques")
+    st.metric("Analyses en cours", "0")
+    st.metric("Rapports générés", "0")
+    
+    st.markdown("---")
+    
+    # Liens utiles
+    st.markdown("### 🔗 Liens utiles")
+    st.markdown("• [Documentation](https://algo-life.com)")
+    st.markdown("• [Support](mailto:support@algo-life.com)")
+    st.markdown("• [FAQ](https://algo-life.com/faq)")
+
+# En-tête principal avec Unilabs
 st.markdown("""
 <div class="main-header">
-    <h1>🧬 ALGO-LIFE</h1>
+    <h1>🧬 Unilabs</h1>
     <p style="margin: 0; opacity: 0.9;">PLATEFORME MÉDECIN - Analyse Multimodale de Santé</p>
-    <p style="margin: 0; font-size: 0.85rem; opacity: 0.8;">Beta v1.0</p>
+    <p style="margin: 0; font-size: 0.85rem; opacity: 0.8;">Beta v1.0 - Powered by ALGO-LIFE</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar pour la navigation
-with st.sidebar:
-    st.image("https://via.placeholder.com/150x50/667eea/ffffff?text=ALGO-LIFE", width=150)
-    st.markdown("---")
-    
-    # Informations de l'utilisateur
-    st.markdown("### 👤 Thibault VIGNIER")
-    st.caption("Biologiste - Product Manager")
-    
-    st.markdown("---")
-    
-    # Menu de navigation
-    st.markdown("### 📋 Navigation")
-    page = st.radio(
-        "",
-        ["Import & Données", "Interprétation", "Recommandations", "Suivi", "Export PDF"],
-        label_visibility="collapsed"
-    )
+# Navigation horizontale sous le header
+col1, col2, col3, col4, col5, col_spacer = st.columns([1.5, 1.2, 1.3, 0.8, 1.2, 3])
+
+with col1:
+    if st.button("📥 Import & Données", use_container_width=True, 
+                 type="primary" if st.session_state.current_page == "Import & Données" else "secondary"):
+        st.session_state.current_page = "Import & Données"
+        st.rerun()
+
+with col2:
+    if st.button("🔍 Interprétation", use_container_width=True,
+                 type="primary" if st.session_state.current_page == "Interprétation" else "secondary"):
+        st.session_state.current_page = "Interprétation"
+        st.rerun()
+
+with col3:
+    if st.button("💊 Recommandations", use_container_width=True,
+                 type="primary" if st.session_state.current_page == "Recommandations" else "secondary"):
+        st.session_state.current_page = "Recommandations"
+        st.rerun()
+
+with col4:
+    if st.button("📈 Suivi", use_container_width=True,
+                 type="primary" if st.session_state.current_page == "Suivi" else "secondary"):
+        st.session_state.current_page = "Suivi"
+        st.rerun()
+
+with col5:
+    if st.button("📄 Export PDF", use_container_width=True,
+                 type="primary" if st.session_state.current_page == "Export PDF" else "secondary"):
+        st.session_state.current_page = "Export PDF"
+        st.rerun()
+
+st.markdown("---")
+
+# Récupérer la page courante
+page = st.session_state.current_page
 
 # PAGE 1: IMPORT & DONNÉES
 if page == "Import & Données":
@@ -343,23 +449,19 @@ if page == "Import & Données":
                 
                 with st.spinner("Extraction des données biologiques..."):
                     if file_extension == 'pdf':
-                        # Sauvegarder temporairement le PDF
                         temp_path = f"/tmp/{biology_file.name}"
                         with open(temp_path, 'wb') as f:
                             f.write(biology_file.getbuffer())
                         
-                        # Extraire les données
                         biology_data = extract_synlab_biology(temp_path)
                         st.session_state.biology_data = biology_data
                         
                         st.success(f"✅ {len(biology_data)} biomarqueurs extraits")
                         
-                        # Aperçu des données
                         if st.checkbox("Afficher les données extraites", key="show_bio"):
                             st.dataframe(biology_data, use_container_width=True)
                     
                     elif file_extension in ['xlsx', 'xls']:
-                        # Lire le fichier Excel
                         df = pd.read_excel(biology_file)
                         st.session_state.biology_data = df
                         
@@ -390,19 +492,16 @@ if page == "Import & Données":
                 
                 with st.spinner("Extraction des données microbiote..."):
                     if file_extension == 'pdf':
-                        # Sauvegarder temporairement le PDF
                         temp_path = f"/tmp/{microbiome_file.name}"
                         with open(temp_path, 'wb') as f:
                             f.write(microbiome_file.getbuffer())
                         
-                        # Extraire les données
                         microbiome_data = extract_idk_microbiome(temp_path)
                         st.session_state.microbiome_data = microbiome_data
                         
                         st.success(f"✅ Dysbiosis Index: {microbiome_data.get('dysbiosis_index', 'N/A')}")
                         st.info(f"Diversité: {microbiome_data.get('diversity', 'N/A')}")
                         
-                        # Aperçu des bactéries
                         if st.checkbox("Afficher les bactéries extraites", key="show_microbiome"):
                             bacteria_df = pd.DataFrame(microbiome_data.get('bacteria', []))
                             if not bacteria_df.empty:
@@ -428,27 +527,16 @@ if page == "Import & Données":
         if st.session_state.biology_data is not None or st.session_state.microbiome_data is not None:
             with st.spinner("Analyse en cours..."):
                 try:
-                    # ===== CHEMIN FIX SANS ACCENTS =====
                     script_dir = os.path.dirname(os.path.abspath(__file__))
                     rules_path = os.path.join(script_dir, "data", "Bases_regles_Synlab.xlsx")
                     
-                    # Vérifier que le fichier existe
                     if not os.path.exists(rules_path):
                         st.error(f"❌ Fichier de règles introuvable : {rules_path}")
-                        st.info(f"📁 Répertoire actuel : {os.getcwd()}")
-                        st.info(f"📁 Répertoire du script : {script_dir}")
-                        st.info(
-                            f"📁 Contenu du dossier data : "
-                            f"{os.listdir(os.path.join(script_dir, 'data')) if os.path.exists(os.path.join(script_dir, 'data')) else 'Dossier data introuvable'}"
-                        )
                         raise FileNotFoundError(f"Fichier de règles introuvable: {rules_path}")
-                    # ================================
                     
-                    # Initialiser le moteur de règles
                     engine = RulesEngine(rules_path)
                     st.session_state.rules_engine = engine
                     
-                    # Générer les recommandations
                     recommendations = engine.generate_recommendations(
                         biology_data=st.session_state.biology_data,
                         microbiome_data=st.session_state.microbiome_data,
@@ -536,7 +624,6 @@ elif page == "Recommandations":
     else:
         reco = st.session_state.recommendations
         
-        # Tabs pour les différents types de recommandations
         tab1, tab2, tab3, tab4 = st.tabs(["🥗 Nutrition", "💊 Micronutrition", "🏃 Lifestyle", "🔄 Multimodal"])
         
         with tab1:
@@ -596,7 +683,7 @@ elif page == "Suivi":
     st.markdown("## 📈 Suivi")
     st.info("Fonctionnalité de suivi en développement. Permettra de tracker l'évolution des biomarqueurs dans le temps.")
 
-# ===== PAGE 5: EXPORT PDF =====
+# PAGE 5: EXPORT PDF
 elif page == "Export PDF":
     st.markdown("## 📄 Export PDF")
     
@@ -641,14 +728,11 @@ elif page == "Export PDF":
         if st.button("🚀 Générer le Rapport PDF", type="primary", use_container_width=True):
             try:
                 with st.spinner("📄 Génération du rapport PDF en cours..."):
-                    # Préparer les données
                     pdf_data = prepare_pdf_data()
                     
-                    # Créer un fichier temporaire
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
                         pdf_path = tmp_file.name
                     
-                    # Générer le PDF
                     generate_multimodal_report(
                         patient_data=pdf_data['patient'],
                         biology_data=pdf_data['biologie'] if include_bio else {},
@@ -659,18 +743,15 @@ elif page == "Export PDF":
                         output_path=pdf_path
                     )
                     
-                    # Lire le PDF généré
                     with open(pdf_path, 'rb') as f:
                         pdf_bytes = f.read()
                     
                     st.success("✅ Rapport PDF généré avec succès !")
                     
-                    # Nom du fichier pour le téléchargement
                     patient_name = st.session_state.patient_data.get('nom', 'Patient')
                     date_str = datetime.now().strftime("%Y%m%d")
-                    filename = f"Rapport_ALGOLIFE_{patient_name}_{date_str}.pdf"
+                    filename = f"Rapport_Unilabs_{patient_name}_{date_str}.pdf"
                     
-                    # Bouton de téléchargement
                     st.download_button(
                         label="📥 Télécharger le Rapport PDF",
                         data=pdf_bytes,
@@ -679,7 +760,6 @@ elif page == "Export PDF":
                         use_container_width=True
                     )
                     
-                    # Nettoyage
                     os.unlink(pdf_path)
                     
             except Exception as e:
@@ -691,4 +771,4 @@ elif page == "Export PDF":
 
 # Footer
 st.markdown("---")
-st.caption("ALGO-LIFE © 2026 - Dr Thibault SUTTER, Dr en biologie spécialisé en biologie fonctionnelle | Version Beta v1.0")
+st.caption("Unilabs © 2026 - Dr Thibault SUTTER, Biologiste spécialisé en biologie fonctionnelle | Version Beta v1.0 - Powered by ALGO-LIFE")
