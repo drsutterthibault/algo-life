@@ -8,12 +8,14 @@ import pandas as pd
 from datetime import datetime
 import sys
 import os
+import tempfile
 
 # Ajouter le répertoire courant au path pour les imports
 sys.path.insert(0, os.path.dirname(__file__))
 
 from extractors import extract_synlab_biology, extract_idk_microbiome
 from rules_engine import RulesEngine
+from pdf_generator import generate_multimodal_report  # ← NOUVEAU !
 
 # Configuration de la page
 st.set_page_config(
@@ -64,6 +66,142 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# ===== FONCTION HELPER POUR TRANSFORMER LES DONNÉES ===== 
+def prepare_pdf_data():
+    """Transforme les données de session en format pour le PDF generator"""
+    
+    # Données patient
+    patient_data = st.session_state.patient_data.copy()
+    if 'date_naissance' in patient_data:
+        patient_data['date_naissance'] = patient_data['date_naissance'].strftime('%d/%m/%Y')
+        # Calculer l'âge
+        today = datetime.now()
+        birth_date = datetime.strptime(patient_data['date_naissance'], '%d/%m/%Y')
+        patient_data['age'] = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    
+    patient_data['nom'] = patient_data.get('nom', 'Patient')
+    patient_data['prenom'] = patient_data.get('prenom', '')
+    
+    # Données biologiques
+    biology_data = {'categories': {}, 'resume': ''}
+    
+    if st.session_state.recommendations and st.session_state.recommendations.get('biology_interpretations'):
+        # Grouper par catégorie
+        categories = {}
+        for interp in st.session_state.recommendations['biology_interpretations']:
+            category = interp.get('category', 'Général')
+            if category not in categories:
+                categories[category] = []
+            
+            marker = {
+                'nom': interp['biomarker'],
+                'valeur': interp['value'],
+                'unite': interp.get('unit', ''),
+                'reference': interp.get('reference', ''),
+                'statut': 'normal' if interp['status'] == 'Normal' else 'haut' if '↑' in interp['status'] else 'bas',
+                'interpretations': [interp.get('interpretation', '')] if interp.get('interpretation') else []
+            }
+            categories[category].append(marker)
+        
+        biology_data['categories'] = categories
+        
+        # Résumé
+        anomalies = len([i for i in st.session_state.recommendations['biology_interpretations'] if i['status'] != 'Normal'])
+        biology_data['resume'] = f"Analyse de {len(st.session_state.recommendations['biology_interpretations'])} biomarqueurs avec {anomalies} anomalie(s) détectée(s)."
+    
+    # Données microbiote
+    microbiome_data = {}
+    
+    if st.session_state.recommendations and st.session_state.recommendations.get('microbiome_summary'):
+        microbiome_summary = st.session_state.recommendations['microbiome_summary']
+        
+        microbiome_data['diversite'] = {
+            'score': microbiome_summary.get('diversity_score', 0),
+            'interpretation': microbiome_summary.get('diversity_interpretation', '')
+        }
+        
+        # Phyla (si disponible)
+        if st.session_state.microbiome_data and 'phyla' in st.session_state.microbiome_data:
+            microbiome_data['phyla'] = st.session_state.microbiome_data['phyla']
+        
+        # Espèces clés
+        if st.session_state.recommendations.get('microbiome_interpretations'):
+            microbiome_data['especes_cles'] = []
+            for interp in st.session_state.recommendations['microbiome_interpretations']:
+                if interp.get('result') != 'Expected':
+                    impact = 'positif' if 'beneficial' in interp.get('interpretation', '').lower() else 'negatif'
+                    microbiome_data['especes_cles'].append({
+                        'nom': interp['group'],
+                        'description': interp.get('interpretation', ''),
+                        'impact': impact
+                    })
+    
+    # Analyse croisée
+    cross_analysis = {'correlations': [], 'axes_intervention': []}
+    
+    if st.session_state.recommendations and st.session_state.recommendations.get('cross_analysis'):
+        for idx, analysis in enumerate(st.session_state.recommendations['cross_analysis'], 1):
+            cross_analysis['correlations'].append({
+                'titre': analysis.get('title', f'Corrélation {idx}'),
+                'biomarqueur': analysis.get('biology_marker', 'N/A'),
+                'microbiote_element': analysis.get('microbiome_marker', 'N/A'),
+                'interpretation': analysis.get('description', ''),
+                'severite': 'moyenne'
+            })
+    
+    # Recommandations
+    recommendations = {
+        'priorites': [],
+        'nutrition': {'privilegier': [], 'limiter': []},
+        'supplementation': [],
+        'hygiene_vie': {}
+    }
+    
+    if st.session_state.recommendations:
+        # Nutrition
+        if st.session_state.recommendations.get('biology_interpretations'):
+            for interp in st.session_state.recommendations['biology_interpretations']:
+                if interp.get('nutrition_reco'):
+                    recommendations['nutrition']['privilegier'].append({
+                        'nom': interp['biomarker'],
+                        'raison': interp['nutrition_reco']
+                    })
+                
+                if interp.get('micronutrition_reco'):
+                    recommendations['supplementation'].append({
+                        'nom': interp['biomarker'],
+                        'dosage': 'Voir protocole',
+                        'frequence': '1x/jour',
+                        'duree': '3 mois',
+                        'objectif': interp['micronutrition_reco'][:100]
+                    })
+    
+    # Suivi
+    follow_up = {
+        'controles': [
+            {
+                'type': 'Bilan biologique de contrôle',
+                'delai': '6-8 semaines',
+                'biomarqueurs': ['Biomarqueurs anormaux identifiés']
+            },
+            {
+                'type': 'Analyse microbiote (si applicable)',
+                'delai': '3 mois',
+                'biomarqueurs': ['Diversité', 'Espèces clés']
+            }
+        ]
+    }
+    
+    return {
+        'patient': patient_data,
+        'biologie': biology_data,
+        'microbiote': microbiome_data,
+        'cross_analysis': cross_analysis,
+        'recommendations': recommendations,
+        'follow_up': follow_up
+    }
+# ========================================================
 
 # Initialisation de la session
 if 'patient_data' not in st.session_state:
@@ -441,22 +579,98 @@ elif page == "Suivi":
     st.markdown("## 📈 Suivi")
     st.info("Fonctionnalité de suivi en développement. Permettra de tracker l'évolution des biomarqueurs dans le temps.")
 
-# PAGE 5: EXPORT PDF
+# ===== PAGE 5: EXPORT PDF (MODIFIÉ) =====
 elif page == "Export PDF":
     st.markdown("## 📄 Export PDF")
     
     if st.session_state.recommendations is None:
         st.info("ℹ️ Aucune donnée à exporter. Importez des données et lancez l'analyse.")
     else:
-        st.markdown("### Générer le Rapport PDF")
+        st.markdown("### 📥 Générer le Rapport PDF Multimodal")
+        
+        # Aperçu des données à exporter
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            bio_count = len(st.session_state.recommendations.get('biology_interpretations', []))
+            st.metric("📊 Biomarqueurs", bio_count)
+        
+        with col2:
+            micro_count = len(st.session_state.recommendations.get('microbiome_interpretations', []))
+            st.metric("🦠 Analyses microbiote", micro_count)
+        
+        with col3:
+            cross_count = len(st.session_state.recommendations.get('cross_analysis', []))
+            st.metric("🔗 Analyses croisées", cross_count)
+        
+        st.markdown("---")
         
         # Options d'export
-        include_bio = st.checkbox("Inclure les résultats biologiques", value=True)
-        include_micro = st.checkbox("Inclure les résultats microbiote", value=True)
-        include_reco = st.checkbox("Inclure les recommandations", value=True)
+        st.markdown("### ⚙️ Options du rapport")
         
-        if st.button("📥 Générer le PDF", type="primary"):
-            st.info("Fonctionnalité d'export PDF en développement.")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            include_bio = st.checkbox("✅ Inclure les résultats biologiques", value=True)
+            include_micro = st.checkbox("✅ Inclure les résultats microbiote", value=True)
+        
+        with col2:
+            include_cross = st.checkbox("✅ Inclure les analyses croisées", value=True)
+            include_reco = st.checkbox("✅ Inclure les recommandations", value=True)
+        
+        st.markdown("---")
+        
+        # Génération du PDF
+        if st.button("🚀 Générer le Rapport PDF", type="primary", use_container_width=True):
+            try:
+                with st.spinner("📄 Génération du rapport PDF en cours..."):
+                    # Préparer les données
+                    pdf_data = prepare_pdf_data()
+                    
+                    # Créer un fichier temporaire
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                        pdf_path = tmp_file.name
+                    
+                    # Générer le PDF
+                    generate_multimodal_report(
+                        patient_data=pdf_data['patient'],
+                        biology_data=pdf_data['biologie'] if include_bio else {},
+                        microbiome_data=pdf_data['microbiote'] if include_micro else {},
+                        cross_analysis=pdf_data['cross_analysis'] if include_cross else {},
+                        recommendations=pdf_data['recommendations'] if include_reco else {},
+                        follow_up=pdf_data['follow_up'],
+                        output_path=pdf_path
+                    )
+                    
+                    # Lire le PDF généré
+                    with open(pdf_path, 'rb') as f:
+                        pdf_bytes = f.read()
+                    
+                    st.success("✅ Rapport PDF généré avec succès !")
+                    
+                    # Nom du fichier pour le téléchargement
+                    patient_name = st.session_state.patient_data.get('nom', 'Patient')
+                    date_str = datetime.now().strftime("%Y%m%d")
+                    filename = f"Rapport_ALGOLIFE_{patient_name}_{date_str}.pdf"
+                    
+                    # Bouton de téléchargement
+                    st.download_button(
+                        label="📥 Télécharger le Rapport PDF",
+                        data=pdf_bytes,
+                        file_name=filename,
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                    
+                    # Nettoyage
+                    os.unlink(pdf_path)
+                    
+            except Exception as e:
+                st.error(f"❌ Erreur lors de la génération du PDF: {str(e)}")
+                st.exception(e)
+        
+        st.markdown("---")
+        st.info("💡 **Conseil**: Le rapport PDF inclut toutes les analyses, interprétations et recommandations personnalisées.")
 
 # Footer
 st.markdown("---")
