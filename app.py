@@ -1,12 +1,11 @@
 """
 ALGO-LIFE - Plateforme Multimodale d'Analyse de Santé Fonctionnelle
-Version 4.1 - Janvier 2026 - EXTRACTION UNIVERSELLE + MICROBIOTE
+Version 4.1 - Janvier 2026 - EXTRACTION UNIVERSELLE
 
 Intégration multimodale:
 - Biologie fonctionnelle (hormones, métabolisme, inflammation, microbiote)
 - Épigénétique (âge biologique, méthylation, télomères)
 - Imagerie DXA (composition corporelle, densité osseuse)
-- Microbiote (analyse du microbiome intestinal)
 
 Auteur: Dr Thibault SUTTER - Biologiste
 Organisation: ALGO-LIFE / Espace Lab SA (Unilabs Group)
@@ -222,424 +221,693 @@ class BiomarkerDatabase:
             },
             "cortisol_car_30": {
                 "unit": "nmol/L",
-                "optimal": (15, 50),
-                "normal": (10, 60),
+                "optimal": (20, 45),
+                "normal": (10, 55),
                 "category": "Hormones",
-                "lab_names": ["cortisol car+30", "cortisol 30min", "cortisol awakening response"],
+                "lab_names": ["cortisol CAR (+30min)", "cortisol réveil +30", "cortisol +30min"],
             },
             "cortisol_12h": {
                 "unit": "nmol/L",
-                "optimal": (3, 12),
-                "normal": (2, 15),
+                "optimal": (3, 10),
+                "normal": (1.5, 15),
                 "category": "Hormones",
-                "lab_names": ["cortisol 12h", "cortisol midi", "cortisol noon"],
+                "lab_names": ["cortisol 12h", "cortisol midi"],
             },
             "cortisol_18h": {
                 "unit": "nmol/L",
-                "optimal": (1, 8),
-                "normal": (0.5, 10),
+                "optimal": (1.5, 7.64),
+                "normal": (1, 10),
                 "category": "Hormones",
                 "lab_names": ["cortisol 18h", "cortisol soir"],
             },
             "cortisol_22h": {
                 "unit": "nmol/L",
-                "optimal": (0.5, 5),
-                "normal": (0.2, 8),
+                "optimal": (0.5, 3),
+                "normal": (0.3, 5),
                 "category": "Hormones",
-                "lab_names": ["cortisol 22h", "cortisol coucher", "cortisol bedtime"],
+                "lab_names": ["cortisol 22h", "cortisol nuit", "cortisol coucher"],
             },
             "dhea": {
-                "unit": "pg/mL",
-                "optimal": (500, 2500),
-                "normal": (200, 3500),
+                "unit": "ng/mL",
+                "optimal_male": (6, 10),
+                "optimal_female": (4, 8),
+                "normal_male": (3, 15),
+                "normal_female": (2, 12),
                 "category": "Hormones",
-                "lab_names": ["dhea", "dhea-s", "dehydroepiandrosterone"],
+                "lab_names": ["dhea", "dhea salivaire", "dehydroepiandrosterone"],
             },
-            "melatonine": {
-                "unit": "pg/mL",
-                "optimal": (10, 50),
-                "normal": (5, 80),
-                "category": "Hormones",
-                "lab_names": ["mélatonine", "melatonin"],
-            },
-            "testosterone": {
-                "unit": "nmol/L",
-                "optimal": (12, 35),
-                "normal": (8, 40),
-                "category": "Hormones",
-                "lab_names": ["testostérone", "testosterone", "testo"],
-            },
+
             # INFLAMMATION
             "crp": {
                 "unit": "mg/L",
                 "optimal": (0, 1),
                 "normal": (0, 3),
+                "elevated": (3, 10),
+                "high": (10, None),
                 "category": "Inflammation",
-                "lab_names": ["crp", "crp ultrasensible", "crp-us", "c-reactive protein"],
+                "lab_names": ["crp ultrasensible", "crp us", "crp haute sensibilité", "hs-crp"],
             },
+
+            # MÉTABOLISME GLUCIDIQUE
+            "glycemie": {
+                "unit": "g/L",
+                "optimal": (0.70, 0.95),
+                "normal": (0.70, 1.10),
+                "prediabetes": (1.10, 1.26),
+                "diabetes": (1.26, None),
+                "category": "Métabolisme",
+                "lab_names": ["glycémie à jeun", "glycémie", "glucose"],
+            },
+            "insuline": {
+                "unit": "mUI/L",
+                "optimal": (2, 7),
+                "normal": (2, 25),
+                "category": "Métabolisme",
+                "lab_names": ["insuline à jeun", "insuline"],
+            },
+            "homa_index": {
+                "unit": "",
+                "optimal": (0, 1),
+                "normal": (0, 2.4),
+                "insulin_resistance": (2.4, None),
+                "category": "Métabolisme",
+                "lab_names": ["homa-ir", "index homa", "homa"],
+            },
+            "quicki_index": {
+                "unit": "",
+                "optimal": (0.38, None),
+                "insulin_sensitive": (0.35, None),
+                "insulin_resistance": (None, 0.35),
+                "category": "Métabolisme",
+                "lab_names": ["quicki", "index quicki"],
+            },
+
+            # MICRONUTRIMENTS
+            "ferritine": {
+                "unit": "µg/L",
+                "deficiency": (None, 15),
+                "low": (15, 30),
+                "optimal": (30, 100),
+                "normal_female": (10, 291),
+                "normal_male": (30, 400),
+                "category": "Micronutriments",
+                "lab_names": ["ferritine"],
+            },
+            "vit_d": {
+                "unit": "ng/mL",
+                "deficiency": (None, 20),
+                "insufficient": (20, 30),
+                "optimal": (30, 60),
+                "normal": (30, 100),
+                "toxicity": (150, None),
+                "category": "Micronutriments",
+                "lab_names": ["vitamine d", "25-oh vitamine d", "25-oh d", "vitamin d"],
+            },
+            "zinc": {
+                "unit": "µg/dL",
+                "optimal": (88, 146),
+                "normal": (70, 150),
+                "category": "Micronutriments",
+                "lab_names": ["zinc"],
+            },
+            "selenium": {
+                "unit": "µg/L",
+                "optimal": (90, 143),
+                "normal": (70, 150),
+                "category": "Micronutriments",
+                "lab_names": ["sélénium", "selenium"],
+            },
+            "magnesium_erythrocytaire": {
+                "unit": "mg/dL",
+                "optimal": (4.4, 5.8),
+                "normal": (4.0, 6.0),
+                "category": "Micronutriments",
+                "lab_names": ["magnésium érythrocytaire", "mg érythrocytaire"],
+            },
+
+            # ANTIOXYDANTS
+            "glutathion_total": {
+                "unit": "µmol/L",
+                "optimal": (1200, 1750),
+                "normal": (900, 1800),
+                "category": "Antioxydants",
+                "lab_names": ["glutathion total", "glutathione"],
+            },
+            "coenzyme_q10": {
+                "unit": "µg/L",
+                "optimal": (670, 990),
+                "normal": (500, 1000),
+                "category": "Antioxydants",
+                "lab_names": ["coenzyme q10", "coq10", "ubiquinone"],
+            },
+            "gpx": {
+                "unit": "U/g Hb",
+                "optimal": (40, 62),
+                "normal": (30, 70),
+                "category": "Antioxydants",
+                "lab_names": ["glutathion peroxydase", "gpx"],
+            },
+
+            # PERMÉABILITÉ INTESTINALE
+            "zonuline": {
+                "unit": "ng/mL",
+                "optimal": (0, 30),
+                "normal": (0, 50),
+                "elevated": (50, 100),
+                "high": (100, None),
+                "category": "Intestin",
+                "lab_names": ["zonuline"],
+            },
+            "lbp": {
+                "unit": "mg/L",
+                "optimal": (0, 6.8),
+                "normal": (2.3, 8.3),
+                "category": "Intestin",
+                "lab_names": ["lbp", "lps-binding protein", "lipopolysaccharide binding protein"],
+            },
+
+            # NEUROTRANSMETTEURS
+            "dopamine": {
+                "unit": "µg/24h",
+                "optimal": (150, 400),
+                "normal": (100, 500),
+                "category": "Neurotransmetteurs",
+                "lab_names": ["dopamine"],
+            },
+            "serotonine": {
+                "unit": "µg/24h",
+                "optimal": (100, 250),
+                "normal": (50, 300),
+                "category": "Neurotransmetteurs",
+                "lab_names": ["sérotonine", "serotonine"],
+            },
+            "noradrenaline": {
+                "unit": "µg/24h",
+                "optimal": (15, 80),
+                "normal": (10, 100),
+                "category": "Neurotransmetteurs",
+                "lab_names": ["noradrénaline", "noradrenaline", "norepinephrine"],
+            },
+            "adrenaline": {
+                "unit": "µg/24h",
+                "optimal": (2, 20),
+                "normal": (1, 25),
+                "category": "Neurotransmetteurs",
+                "lab_names": ["adrénaline", "adrenaline", "epinephrine"],
+            },
+
+            # CARDIOVASCULAIRE
             "homocysteine": {
                 "unit": "µmol/L",
                 "optimal": (5, 10),
                 "normal": (5, 15),
-                "category": "Inflammation",
-                "lab_names": ["homocystéine", "homocysteine", "hcy"],
+                "elevated": (15, 30),
+                "high": (30, None),
+                "category": "Cardiovasculaire",
+                "lab_names": ["homocystéine", "homocysteine"],
             },
-            # MÉTABOLISME
-            "glycemie": {
-                "unit": "g/L",
-                "optimal": (0.70, 1.00),
-                "normal": (0.65, 1.10),
-                "category": "Métabolisme",
-                "lab_names": ["glycémie", "glucose", "glycémie à jeun"],
-            },
-            "insuline": {
-                "unit": "mUI/L",
-                "optimal": (2, 10),
-                "normal": (2, 25),
-                "category": "Métabolisme",
-                "lab_names": ["insuline", "insulin"],
-            },
-            "hba1c": {
+            "omega3_index": {
                 "unit": "%",
-                "optimal": (4.0, 5.6),
-                "normal": (4.0, 6.0),
-                "category": "Métabolisme",
-                "lab_names": ["hba1c", "hemoglobine glyquée", "glycated hemoglobin"],
+                "optimal": (8, None),
+                "moderate": (6, 8),
+                "low": (4, 6),
+                "deficient": (None, 4),
+                "category": "Cardiovasculaire",
+                "lab_names": ["index oméga-3", "omega-3 index", "index w3"],
             },
-            "cholesterol_total": {
-                "unit": "g/L",
-                "optimal": (1.50, 2.00),
-                "normal": (1.50, 2.50),
-                "category": "Métabolisme",
-                "lab_names": ["cholestérol total", "total cholesterol"],
-            },
-            "hdl": {
-                "unit": "g/L",
-                "optimal": (0.50, 1.00),
-                "normal": (0.40, 1.50),
-                "category": "Métabolisme",
-                "lab_names": ["hdl", "hdl cholesterol"],
-            },
-            "ldl": {
-                "unit": "g/L",
-                "optimal": (0.70, 1.30),
-                "normal": (0.70, 1.60),
-                "category": "Métabolisme",
-                "lab_names": ["ldl", "ldl cholesterol"],
-            },
-            "triglycerides": {
-                "unit": "g/L",
-                "optimal": (0.50, 1.00),
-                "normal": (0.50, 1.50),
-                "category": "Métabolisme",
-                "lab_names": ["triglycérides", "triglycerides", "tg"],
-            },
-            # MICRONUTRIMENTS
-            "vitamine_d": {
-                "unit": "ng/mL",
-                "optimal": (40, 70),
-                "normal": (30, 100),
-                "category": "Micronutriments",
-                "lab_names": ["vitamine d", "25oh vitamin d", "25-hydroxyvitamin d", "vitamine d3"],
-            },
-            "vitamine_b12": {
-                "unit": "pg/mL",
-                "optimal": (400, 900),
-                "normal": (200, 1100),
-                "category": "Micronutriments",
-                "lab_names": ["vitamine b12", "vitamin b12", "cobalamine"],
-            },
-            "magnesium": {
-                "unit": "mg/L",
-                "optimal": (20, 26),
-                "normal": (18, 30),
-                "category": "Micronutriments",
-                "lab_names": ["magnésium", "magnesium", "mg"],
-            },
-            "zinc": {
-                "unit": "µg/dL",
-                "optimal": (70, 120),
-                "normal": (60, 150),
-                "category": "Micronutriments",
-                "lab_names": ["zinc", "zn"],
-            },
-            "selenium": {
-                "unit": "µg/L",
-                "optimal": (80, 120),
-                "normal": (70, 150),
-                "category": "Micronutriments",
-                "lab_names": ["sélénium", "selenium", "se"],
-            },
-            "ferritine": {
-                "unit": "ng/mL",
-                "optimal": (50, 150),
-                "normal": (30, 300),
-                "category": "Micronutriments",
-                "lab_names": ["ferritine", "ferritin"],
-            },
-            # PERMÉABILITÉ INTESTINALE
-            "zonuline": {
-                "unit": "ng/mL",
-                "optimal": (0, 40),
-                "normal": (0, 60),
-                "category": "Perméabilité intestinale",
-                "lab_names": ["zonuline", "zonulin"],
-            },
-            "lbp": {
-                "unit": "µg/mL",
-                "optimal": (0, 10),
-                "normal": (0, 15),
-                "category": "Perméabilité intestinale",
-                "lab_names": ["lbp", "lipopolysaccharide binding protein"],
-            },
-            # THYROÏDE
-            "tsh": {
-                "unit": "mUI/L",
-                "optimal": (1.0, 2.5),
-                "normal": (0.5, 4.5),
-                "category": "Thyroïde",
-                "lab_names": ["tsh", "thyroid stimulating hormone"],
-            },
-            "t3_libre": {
-                "unit": "pg/mL",
-                "optimal": (3.0, 4.5),
-                "normal": (2.3, 5.0),
-                "category": "Thyroïde",
-                "lab_names": ["t3 libre", "free t3", "ft3"],
-            },
-            "t4_libre": {
-                "unit": "ng/dL",
-                "optimal": (1.0, 1.5),
-                "normal": (0.8, 1.8),
-                "category": "Thyroïde",
-                "lab_names": ["t4 libre", "free t4", "ft4"],
+            "aa_epa": {
+                "unit": "",
+                "optimal": (1, 3),
+                "normal": (1, 5),
+                "elevated": (5, 15),
+                "high": (15, None),
+                "category": "Cardiovasculaire",
+                "lab_names": ["rapport aa/epa", "aa/epa ratio"],
             },
         }
 
     @staticmethod
-    def get_nutrition_recommendations() -> Dict[str, Dict]:
-        """Recommandations nutritionnelles par biomarqueur"""
-        return {
-            "cortisol_reveil": {
-                "high": ["Réduire stress", "Phosphatidylsérine 300mg", "Ashwagandha 600mg", "Rhodiola"],
-                "low": ["Vitamine C 1000mg", "Réglisse DGL", "DHEA (si DHEA bas)", "Augmenter sel rose"],
-            },
-            "dhea": {
-                "high": ["Réduire supplémentation DHEA", "Évaluer axe hormonal"],
-                "low": ["DHEA 25-50mg matin", "Zinc 30mg", "Magnésium 400mg", "Réduire stress chronique"],
-            },
-            "crp": {
-                "high": ["Omega-3 2000mg", "Curcumine 1000mg", "Diète anti-inflammatoire", "Éliminer gluten/laitages", "Probiotiques"],
-                "low": ["RAS - Inflammation contrôlée"],
-            },
-            "vitamine_d": {
-                "high": ["Réduire supplémentation", "Vérifier calcium"],
-                "low": ["Vitamine D3 4000-10000 UI/j", "Exposition soleil 15min/j", "K2-MK7 200mcg"],
-            },
-            "glycemie": {
-                "high": ["Réduire glucides rapides", "Berbérine 500mg x3", "Chrome picolinate 200mcg", "Cannelle 2g/j", "Activité physique"],
-                "low": ["Augmenter féculents complexes", "Collations fréquentes", "Vérifier hypoglycémies"],
-            },
-            "insuline": {
-                "high": ["Jeûne intermittent 16/8", "Réduire glucides", "Berbérine 500mg x3", "Inositol 2000mg", "Activité HIIT"],
-                "low": ["Augmenter féculents", "Chrome", "Magnésium"],
-            },
-            "cholesterol_total": {
-                "high": ["Omega-3 2000mg", "Fibres solubles 30g/j", "Ail noir 1200mg", "Réduire graisses saturées", "Levure riz rouge"],
-                "low": ["Augmenter graisses saines", "Huile coco", "Œufs bio"],
-            },
-            "hdl": {
-                "high": ["RAS - Bon HDL"],
-                "low": ["Omega-3 2000mg", "Activité aérobie", "Augmenter graisses mono-insaturées", "Niacine 500mg"],
-            },
-            "ldl": {
-                "high": ["Omega-3", "Fibres solubles", "Phytostérols", "Ail noir", "Réduire graisses saturées"],
-                "low": ["Augmenter graisses saines", "RAS si pas trop bas"],
-            },
-            "triglycerides": {
-                "high": ["Réduire glucides", "Omega-3 2000-4000mg", "Arrêter alcool", "Berbérine 500mg x3"],
-                "low": ["RAS - Bon contrôle"],
-            },
-            "ferritine": {
-                "high": ["Donner sang", "Curcumine", "Thé vert", "Réduire viande rouge", "Vérifier hémochromatose"],
-                "low": ["Fer bisglycinate 30mg + Vitamine C", "Viande rouge 3x/sem", "Vérifier B12/folates"],
-            },
-            "vitamine_b12": {
-                "high": ["Réduire supplémentation"],
-                "low": ["B12 méthylcobalamine 1000mcg", "Viande rouge", "Œufs", "Vérifier facteur intrinsèque"],
-            },
-            "magnesium": {
-                "high": ["Réduire supplémentation", "Vérifier fonction rénale"],
-                "low": ["Magnésium bisglycinate 400mg", "Légumes verts", "Noix", "Chocolat noir 85%"],
-            },
-            "zinc": {
-                "high": ["Réduire supplémentation", "Vérifier cuivre"],
-                "low": ["Zinc bisglycinate 30mg", "Huîtres", "Viande rouge", "Graines courge"],
-            },
-            "zonuline": {
-                "high": ["Probiotiques multi-souches", "L-glutamine 5g x2", "Éliminer gluten", "Collagène marin", "Curcumine"],
-                "low": ["RAS - Bonne perméabilité"],
-            },
-            "tsh": {
-                "high": ["Sélénium 200mcg", "Iode Lugol (si carence)", "Zinc 30mg", "Réduire goitrogènes", "Vérifier anticorps"],
-                "low": ["Vérifier T3/T4", "Évaluer hyperthyroïdie", "Arrêter suppléments iode"],
-            },
-        }
+    def classify_biomarker(name: str, value: float, age: int = None, sex: str = None) -> Dict:
+        """Classifie un biomarqueur selon sa valeur (robuste + accepte non référencé)"""
+        refs = BiomarkerDatabase.get_reference_ranges()
+
+        if name not in refs:
+            return {
+                "status": "unknown",
+                "interpretation": f"Biomarqueur détecté mais non référencé (valeur: {value})",
+                "color": "gray",
+                "icon": "❓",
+                "value": value,
+                "needs_reference": True,
+            }
+
+        ref = refs[name]
+
+        # Gestion sexe-spécifique
+        if "optimal_male" in ref and "optimal_female" in ref:
+            if sex == "Masculin":
+                optimal = ref["optimal_male"]
+                normal = ref.get("normal_male", optimal)
+            else:
+                optimal = ref["optimal_female"]
+                normal = ref.get("normal_female", optimal)
+        else:
+            optimal = ref.get("optimal", (None, None))
+            normal = ref.get("normal", optimal)
+
+        # Optimal
+        if optimal[0] is not None and optimal[1] is not None and optimal[0] <= value <= optimal[1]:
+            return {"status": "optimal", "interpretation": "Valeur optimale", "color": "green", "icon": "✅"}
+
+        # Normal
+        if normal[0] is not None and normal[1] is not None and normal[0] <= value <= normal[1]:
+            return {"status": "normal", "interpretation": "Valeur normale", "color": "lightgreen", "icon": "✓"}
+
+        # Seuils multiples
+        if "elevated" in ref and ref["elevated"][0] is not None and value >= ref["elevated"][0]:
+            if "high" in ref and ref["high"][0] is not None and value >= ref["high"][0]:
+                return {"status": "high", "interpretation": "Valeur très élevée", "color": "red", "icon": "⚠️"}
+            return {"status": "elevated", "interpretation": "Valeur modérément élevée", "color": "orange", "icon": "⚡"}
+
+        if "deficiency" in ref and ref["deficiency"][1] is not None and value < ref["deficiency"][1]:
+            return {"status": "deficient", "interpretation": "Carence", "color": "red", "icon": "⚠️"}
+
+        if "insufficient" in ref and ref["insufficient"][0] is not None and ref["insufficient"][1] is not None:
+            if ref["insufficient"][0] <= value < ref["insufficient"][1]:
+                return {"status": "insufficient", "interpretation": "Insuffisance", "color": "orange", "icon": "⚡"}
+
+        # Hors norme
+        if normal[0] is not None and value < normal[0]:
+            return {"status": "low", "interpretation": "Valeur basse", "color": "orange", "icon": "⬇️"}
+        if normal[1] is not None and value > normal[1]:
+            return {"status": "high", "interpretation": "Valeur élevée", "color": "red", "icon": "⬆️"}
+
+        return {"status": "abnormal", "interpretation": "Valeur anormale", "color": "red", "icon": "❌"}
 
 
 class AdvancedPDFExtractor:
-    """Wrapper pour UniversalPDFExtractor avec fallback"""
+    """Extracteur PDF universel (wrapper)"""
 
     @staticmethod
     def extract_text(pdf_file) -> str:
-        if UNIVERSAL_EXTRACTOR_AVAILABLE:
-            extractor = UniversalPDFExtractor(pdf_file)
-            return extractor.extract_text()
-        return ""
+        if not UNIVERSAL_EXTRACTOR_AVAILABLE:
+            raise RuntimeError(f"UniversalPDFExtractor indisponible: {_UNIVERSAL_IMPORT_ERROR}")
+        return UniversalPDFExtractor.extract_text_from_pdf(pdf_file)
 
     @staticmethod
     def extract_biomarkers(text: str, debug: bool = False) -> Dict[str, float]:
-        if UNIVERSAL_EXTRACTOR_AVAILABLE:
-            extractor = UniversalPDFExtractor(None)
-            return extractor.extract_biomarkers_universal(text, debug=debug)
-        return {}
+        if not UNIVERSAL_EXTRACTOR_AVAILABLE:
+            raise RuntimeError(f"UniversalPDFExtractor indisponible: {_UNIVERSAL_IMPORT_ERROR}")
+
+        known_db = BiomarkerDatabase.get_reference_ranges()
+        extractor = UniversalPDFExtractor(known_biomarkers=known_db)
+        known, all_biomarkers = extractor.extract_complete(text, debug=debug)
+
+        result: Dict[str, float] = {}
+        for key, data in all_biomarkers.items():
+            result[key] = data["value"]
+
+        if debug:
+            st.write(f"✅ EXTRACTION UNIVERSELLE: {len(result)} biomarqueurs")
+            st.write(f"  - Connus (avec ranges): {len(known)}")
+            st.write(f"  - Nouveaux détectés: {len(result) - len(known)}")
+
+        return result
 
     @staticmethod
-    def extract_patient_info(text: str) -> Dict[str, str]:
-        if UNIVERSAL_EXTRACTOR_AVAILABLE:
-            extractor = UniversalPDFExtractor(None)
-            return extractor.extract_patient_info(text)
-        return {}
+    def extract_patient_info(text: str) -> Dict:
+        info: Dict[str, object] = {}
+        text_lower = text.lower()
+
+        # Nom
+        name_patterns = [
+            r"nom[:\s]+([A-ZÀ-Ÿ\s-]+)",
+            r"patient[:\s]+([A-ZÀ-Ÿ\s-]+)",
+            r"nom d\'usage[:\s]+([A-ZÀ-Ÿ\s-]+)",
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                info["nom"] = match.group(1).strip()
+                break
+
+        # Date de naissance
+        dob_patterns = [
+            r"date de naissance[:\s]+(\d{2}[/.-]\d{2}[/.-]\d{4})",
+            r"ddn[:\s]+(\d{2}[/.-]\d{2}[/.-]\d{4})",
+            r"n[ée]e? le[:\s]+(\d{2}[/.-]\d{2}[/.-]\d{4})",
+        ]
+        for pattern in dob_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                info["date_naissance"] = match.group(1)
+                try:
+                    dob = datetime.strptime(match.group(1).replace(".", "/").replace("-", "/"), "%d/%m/%Y")
+                    info["age"] = (datetime.now() - dob).days // 365
+                except Exception:
+                    pass
+                break
+
+        # Âge direct
+        if "age" not in info:
+            for pattern in [r"(\d{2})\s+ans", r"[âa]ge[:\s]+(\d{2})"]:
+                match = re.search(pattern, text_lower)
+                if match:
+                    try:
+                        info["age"] = int(match.group(1))
+                    except Exception:
+                        pass
+                    break
+
+        # Sexe
+        for pattern in [r"sexe[:\s]+(m|f|h)", r"\((m|f|h)\)"]:
+            match = re.search(pattern, text_lower)
+            if match:
+                sex_char = match.group(1).upper()
+                info["sexe"] = "Masculin" if sex_char in ["M", "H"] else "Féminin"
+                break
+
+        # Date prélèvement
+        sample_patterns = [
+            r"pr[ée]lev[ée] le[:\s]+(\d{2}[/.-]\d{2}[/.-]\d{4})",
+            r"date du pr[ée]l[èe]vement[:\s]+(\d{2}[/.-]\d{2}[/.-]\d{4})",
+        ]
+        for pattern in sample_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE)
+            if match:
+                info["prelevement_date"] = match.group(1)
+                break
+
+        return info
 
 
 class HealthScoreCalculator:
-    """Calcul des scores de santé et âge biologique"""
-
-    @staticmethod
-    def calculate_health_score(biomarkers: Dict[str, float], age: int, sex: str) -> Dict:
-        ref_ranges = BiomarkerDatabase.get_reference_ranges()
-        total_score = 0
-        max_score = 0
-        category_scores = {}
-
-        for marker, value in biomarkers.items():
-            if marker in ref_ranges:
-                ref = ref_ranges[marker]
-                category = ref["category"]
-                optimal = ref["optimal"]
-                normal = ref["normal"]
-
-                if optimal[0] <= value <= optimal[1]:
-                    score = 100
-                elif normal[0] <= value <= normal[1]:
-                    if value < optimal[0]:
-                        score = 70 + 30 * (value - normal[0]) / (optimal[0] - normal[0])
-                    else:
-                        score = 70 + 30 * (normal[1] - value) / (normal[1] - optimal[1])
-                else:
-                    if value < normal[0]:
-                        score = max(0, 70 * value / normal[0])
-                    else:
-                        excess = value - normal[1]
-                        range_width = normal[1] - normal[0]
-                        score = max(0, 70 - 70 * excess / range_width)
-
-                total_score += score
-                max_score += 100
-
-                if category not in category_scores:
-                    category_scores[category] = {"score": 0, "count": 0}
-                category_scores[category]["score"] += score
-                category_scores[category]["count"] += 1
-
-        global_score = round(total_score / max_score * 100, 1) if max_score > 0 else 0
-
-        for cat in category_scores:
-            category_scores[cat]["score"] = round(
-                category_scores[cat]["score"] / category_scores[cat]["count"], 1
-            )
-
-        grade = "A+" if global_score >= 95 else "A" if global_score >= 90 else "B+" if global_score >= 85 else "B" if global_score >= 80 else "C+" if global_score >= 75 else "C" if global_score >= 70 else "D+" if global_score >= 65 else "D" if global_score >= 60 else "E"
-
-        return {
-            "global_score": global_score,
-            "grade": grade,
-            "category_scores": category_scores,
-            "total_markers": len(biomarkers),
-        }
+    """Calculateur avancé (âge biologique + score global + nutrition)"""
 
     @staticmethod
     def calculate_biological_age(biomarkers: Dict[str, float], chronological_age: int, sex: str) -> Dict:
-        ref_ranges = BiomarkerDatabase.get_reference_ranges()
-        age_markers = ["crp", "cortisol_reveil", "dhea", "hba1c", "cholesterol_total", "vitamine_d"]
+        aging_factors = {
+            "inflammation": 0,
+            "oxidative_stress": 0,
+            "metabolic_health": 0,
+            "hormonal_balance": 0,
+            "gut_health": 0,
+            "cardiovascular": 0,
+        }
 
-        aging_score = 0
-        marker_count = 0
+        # Inflammation
+        if "crp" in biomarkers and biomarkers["crp"] is not None:
+            crp = float(biomarkers["crp"])
+            if crp < 1:
+                aging_factors["inflammation"] -= 2
+            elif crp < 3:
+                aging_factors["inflammation"] += 0
+            elif crp < 10:
+                aging_factors["inflammation"] += 3
+            else:
+                aging_factors["inflammation"] += 6
 
-        for marker in age_markers:
-            if marker in biomarkers and marker in ref_ranges:
-                value = biomarkers[marker]
-                optimal = ref_ranges[marker]["optimal"]
+        if "homocysteine" in biomarkers and biomarkers["homocysteine"] is not None:
+            hcy = float(biomarkers["homocysteine"])
+            if hcy < 10:
+                aging_factors["cardiovascular"] -= 1
+            elif hcy < 15:
+                aging_factors["cardiovascular"] += 0
+            else:
+                aging_factors["cardiovascular"] += 3
 
-                if optimal[0] <= value <= optimal[1]:
-                    deviation = 0
-                elif value < optimal[0]:
-                    deviation = (optimal[0] - value) / optimal[0]
-                else:
-                    deviation = (value - optimal[1]) / optimal[1]
+        # Oxydatif
+        if "glutathion_total" in biomarkers and biomarkers["glutathion_total"] is not None:
+            glut = float(biomarkers["glutathion_total"])
+            if glut >= 1200:
+                aging_factors["oxidative_stress"] -= 2
+            elif glut >= 900:
+                aging_factors["oxidative_stress"] += 0
+            else:
+                aging_factors["oxidative_stress"] += 3
 
-                aging_score += deviation
-                marker_count += 1
+        if "coenzyme_q10" in biomarkers and biomarkers["coenzyme_q10"] is not None:
+            coq10 = float(biomarkers["coenzyme_q10"])
+            aging_factors["oxidative_stress"] += (-1 if coq10 >= 670 else 2)
 
-        if marker_count > 0:
-            avg_deviation = aging_score / marker_count
-            biological_age = round(chronological_age * (1 + avg_deviation * 0.3))
+        # Métabolique
+        if "homa_index" in biomarkers and biomarkers["homa_index"] is not None:
+            homa = float(biomarkers["homa_index"])
+            if homa < 1:
+                aging_factors["metabolic_health"] -= 2
+            elif homa < 2.4:
+                aging_factors["metabolic_health"] += 0
+            else:
+                aging_factors["metabolic_health"] += 4
+
+        if "glycemie" in biomarkers and biomarkers["glycemie"] is not None:
+            gluc = float(biomarkers["glycemie"])
+            if gluc < 0.95:
+                aging_factors["metabolic_health"] -= 1
+            elif gluc < 1.10:
+                aging_factors["metabolic_health"] += 0
+            else:
+                aging_factors["metabolic_health"] += 3
+
+        # Hormonal
+        if "dhea" in biomarkers and biomarkers["dhea"] is not None:
+            dhea = float(biomarkers["dhea"])
+            optimal_dhea = 7 if sex == "Masculin" else 6
+            ratio = dhea / optimal_dhea if optimal_dhea else 1
+            if ratio >= 0.8:
+                aging_factors["hormonal_balance"] -= 2
+            elif ratio >= 0.5:
+                aging_factors["hormonal_balance"] += 0
+            else:
+                aging_factors["hormonal_balance"] += 3
+
+        # Intestin
+        if "zonuline" in biomarkers and biomarkers["zonuline"] is not None:
+            zon = float(biomarkers["zonuline"])
+            if zon < 30:
+                aging_factors["gut_health"] -= 1
+            elif zon < 50:
+                aging_factors["gut_health"] += 0
+            else:
+                aging_factors["gut_health"] += 3
+
+        if "lbp" in biomarkers and biomarkers["lbp"] is not None:
+            lbp = float(biomarkers["lbp"])
+            aging_factors["gut_health"] += (-1 if lbp < 6.8 else 2)
+
+        total_aging_score = sum(aging_factors.values())
+        biological_age = chronological_age + (total_aging_score * 0.5)
+
+        delta_age = biological_age - chronological_age
+        delta_percent = (delta_age / chronological_age) * 100 if chronological_age else 0
+
+        if delta_age < -3:
+            status = "Excellent"
+            interpretation = "Âge biologique significativement plus jeune que l'âge chronologique"
+        elif delta_age < -1:
+            status = "Très bon"
+            interpretation = "Âge biologique légèrement plus jeune"
+        elif delta_age <= 1:
+            status = "Bon"
+            interpretation = "Âge biologique en accord avec l'âge chronologique"
+        elif delta_age <= 3:
+            status = "Modéré"
+            interpretation = "Âge biologique légèrement plus élevé"
         else:
-            biological_age = chronological_age
-
-        delta = biological_age - chronological_age
+            status = "Préoccupant"
+            interpretation = "Âge biologique significativement plus élevé"
 
         return {
-            "biological_age": biological_age,
-            "chronological_age": chronological_age,
-            "delta": delta,
-            "markers_used": marker_count,
+            "biological_age": round(float(biological_age), 1),
+            "chronological_age": int(chronological_age),
+            "delta": round(float(delta_age), 1),
+            "delta_percent": round(float(delta_percent), 1),
+            "status": status,
+            "interpretation": interpretation,
+            "aging_factors": aging_factors,
+        }
+
+    @staticmethod
+    def calculate_health_score(biomarkers: Dict[str, float], age: int, sex: str) -> Dict:
+        category_scores = {
+            "metabolism": 0,
+            "inflammation": 0,
+            "hormones": 0,
+            "antioxidants": 0,
+            "micronutrients": 0,
+            "gut_health": 0,
+            "cardiovascular": 0,
+        }
+        category_weights = {
+            "metabolism": 20,
+            "inflammation": 15,
+            "hormones": 15,
+            "antioxidants": 15,
+            "micronutrients": 15,
+            "gut_health": 10,
+            "cardiovascular": 10,
+        }
+
+        # Métabolisme
+        metab_score = 100
+        if "homa_index" in biomarkers and biomarkers["homa_index"] is not None:
+            homa = float(biomarkers["homa_index"])
+            metab_score = 100 if homa < 1 else 80 if homa < 2.4 else 60 if homa < 4 else 30
+
+        if "glycemie" in biomarkers and biomarkers["glycemie"] is not None:
+            gluc = float(biomarkers["glycemie"])
+            gluc_score = 100
+            if gluc > 1.26:
+                gluc_score = 30
+            elif gluc > 1.10:
+                gluc_score = 60
+            elif gluc > 0.95:
+                gluc_score = 80
+            metab_score = (metab_score + gluc_score) / 2
+        category_scores["metabolism"] = metab_score
+
+        # Inflammation
+        inflam_score = 100
+        if "crp" in biomarkers and biomarkers["crp"] is not None:
+            crp = float(biomarkers["crp"])
+            inflam_score = 100 if crp < 1 else 85 if crp < 3 else 60 if crp < 10 else 30
+        category_scores["inflammation"] = inflam_score
+
+        # Hormones (cortisol + DHEA)
+        hormone_score = 100
+        cortisol_scores: List[float] = []
+        for cort_key in ["cortisol_reveil", "cortisol_car_30", "cortisol_12h", "cortisol_18h", "cortisol_22h"]:
+            if cort_key in biomarkers and biomarkers[cort_key] is not None:
+                c = BiomarkerDatabase.classify_biomarker(cort_key, float(biomarkers[cort_key]), age, sex)
+                cortisol_scores.append(100 if c["status"] == "optimal" else 80 if c["status"] == "normal" else 50)
+        if cortisol_scores:
+            hormone_score = float(np.mean(cortisol_scores))
+
+        if "dhea" in biomarkers and biomarkers["dhea"] is not None:
+            dhea_class = BiomarkerDatabase.classify_biomarker("dhea", float(biomarkers["dhea"]), age, sex)
+            dhea_score = 100 if dhea_class["status"] == "optimal" else 80 if dhea_class["status"] == "normal" else 50
+            hormone_score = (hormone_score + dhea_score) / 2
+        category_scores["hormones"] = hormone_score
+
+        # Antiox
+        antiox_list: List[float] = []
+        for k in ["glutathion_total", "coenzyme_q10", "gpx"]:
+            if k in biomarkers and biomarkers[k] is not None:
+                c = BiomarkerDatabase.classify_biomarker(k, float(biomarkers[k]), age, sex)
+                antiox_list.append(100 if c["status"] == "optimal" else 80 if c["status"] == "normal" else 50)
+        category_scores["antioxidants"] = float(np.mean(antiox_list)) if antiox_list else 100
+
+        # Micro
+        micro_list: List[float] = []
+        for k in ["vit_d", "ferritine", "zinc", "selenium", "magnesium_erythrocytaire"]:
+            if k in biomarkers and biomarkers[k] is not None:
+                c = BiomarkerDatabase.classify_biomarker(k, float(biomarkers[k]), age, sex)
+                if c["status"] in ["optimal", "normal"]:
+                    micro_list.append(100)
+                elif c["status"] in ["insufficient", "low", "elevated"]:
+                    micro_list.append(60)
+                else:
+                    micro_list.append(30)
+        category_scores["micronutrients"] = float(np.mean(micro_list)) if micro_list else 100
+
+        # Gut
+        gut_list: List[float] = []
+        for k in ["zonuline", "lbp"]:
+            if k in biomarkers and biomarkers[k] is not None:
+                c = BiomarkerDatabase.classify_biomarker(k, float(biomarkers[k]), age, sex)
+                gut_list.append(100 if c["status"] in ["optimal", "normal"] else 50)
+        category_scores["gut_health"] = float(np.mean(gut_list)) if gut_list else 100
+
+        # Cardio
+        cardio_list: List[float] = []
+        for k in ["homocysteine", "omega3_index", "aa_epa"]:
+            if k in biomarkers and biomarkers[k] is not None:
+                c = BiomarkerDatabase.classify_biomarker(k, float(biomarkers[k]), age, sex)
+                cardio_list.append(100 if c["status"] in ["optimal", "normal"] else 50)
+        category_scores["cardiovascular"] = float(np.mean(cardio_list)) if cardio_list else 100
+
+        # Global pondéré
+        total_score = 0.0
+        total_weight = 0.0
+        for category, score in category_scores.items():
+            w = float(category_weights[category])
+            total_score += float(score) * w
+            total_weight += w
+        global_score = (total_score / total_weight) if total_weight > 0 else 0
+
+        if global_score >= 95:
+            grade, grade_label = "A+", "Excellent"
+        elif global_score >= 90:
+            grade, grade_label = "A", "Très bon"
+        elif global_score >= 85:
+            grade, grade_label = "A-", "Très bon"
+        elif global_score >= 80:
+            grade, grade_label = "B+", "Bon"
+        elif global_score >= 75:
+            grade, grade_label = "B", "Bon"
+        elif global_score >= 70:
+            grade, grade_label = "B-", "Satisfaisant"
+        elif global_score >= 65:
+            grade, grade_label = "C+", "Moyen"
+        elif global_score >= 60:
+            grade, grade_label = "C", "Moyen"
+        else:
+            grade, grade_label = "D", "Faible"
+
+        return {
+            "global_score": round(float(global_score), 1),
+            "grade": grade,
+            "grade_label": grade_label,
+            "category_scores": category_scores,
+            "interpretation": (
+                f"État de santé {grade_label.lower()}. "
+                f"{'Continuez vos bonnes habitudes.' if global_score >= 90 else 'Améliorations possibles selon recommandations.'}"
+            ),
         }
 
     @staticmethod
     def calculate_nutritional_needs(
-        age: int, sex: str, weight: float, height: float, activity_level: str
+        age: int,
+        sex: str,
+        weight: float,
+        height: float,
+        activity_level: str = "moderate",
     ) -> Dict:
+        # Mifflin-St Jeor
         if sex == "Masculin":
             bmr = 10 * weight + 6.25 * height - 5 * age + 5
         else:
             bmr = 10 * weight + 6.25 * height - 5 * age - 161
 
-        activity_multipliers = {
+        activity_factors = {
             "sedentary": 1.2,
             "light": 1.375,
             "moderate": 1.55,
             "active": 1.725,
             "very_active": 1.9,
         }
+        det = bmr * activity_factors.get(activity_level, 1.55)
 
-        det = bmr * activity_multipliers.get(activity_level, 1.55)
+        proteins_g = weight * 1.8
+        lipids_g = (det * 0.27) / 9
 
-        proteins_g = weight * 1.6
-        lipids_g = det * 0.30 / 9
-        carbs_g = (det - proteins_g * 4 - lipids_g * 9) / 4
+        proteins_kcal = proteins_g * 4
+        lipids_kcal = lipids_g * 9
+        carbs_kcal = det - proteins_kcal - lipids_kcal
+        carbs_g = carbs_kcal / 4
 
         return {
-            "bmr": round(bmr, 0),
-            "det": round(det, 0),
-            "proteins_g": round(proteins_g, 0),
-            "lipids_g": round(lipids_g, 0),
-            "carbs_g": round(carbs_g, 0),
+            "bmr": round(float(bmr), 1),
+            "det": round(float(det), 1),
+            "proteins_g": round(float(proteins_g), 1),
+            "lipids_g": round(float(lipids_g), 1),
+            "carbs_g": round(float(carbs_g), 1),
+            "activity_level": activity_level,
         }
 
 
 class RecommendationEngine:
-    """Génération de recommandations personnalisées"""
+    """Moteur de recommandations personnalisées basé sur les biomarqueurs"""
 
     @staticmethod
     def generate_personalized_recommendations(
@@ -649,121 +917,185 @@ class RecommendationEngine:
         health_score: Dict,
         biological_age_data: Dict,
     ) -> Dict:
-        ref_ranges = BiomarkerDatabase.get_reference_ranges()
-        nutrition_reco = BiomarkerDatabase.get_nutrition_recommendations()
-
+        recommendations = {
+            "micronutrition": [],
+            "alimentation": [],
+            "lifestyle": [],
+            "supplements": [],
+        }
         priorities = []
-        supplements_set = set()
-        alimentation_set = set()
-        lifestyle_set = set()
 
-        for marker, value in biomarkers.items():
-            if marker not in ref_ranges:
+        for biomarker_key, value in biomarkers.items():
+            if value is None:
                 continue
 
-            ref = ref_ranges[marker]
-            optimal = ref["optimal"]
-            normal = ref["normal"]
+            classification = BiomarkerDatabase.classify_biomarker(biomarker_key, float(value), age, sex)
 
-            status = "optimal"
-            priority_level = "Normal"
+            if classification["status"] in ["abnormal", "deficient", "high", "elevated", "low"]:
+                recs = RecommendationEngine._get_biomarker_recommendations(biomarker_key, float(value), classification)
 
-            if value < normal[0]:
-                status = "bas"
-                priority_level = "Élevé" if value < optimal[0] * 0.7 else "Modéré"
-            elif value > normal[1]:
-                status = "élevé"
-                priority_level = "Élevé" if value > optimal[1] * 1.3 else "Modéré"
-            elif not (optimal[0] <= value <= optimal[1]):
-                status = "à surveiller"
-                priority_level = "Faible"
+                for rec_type, rec_list in recs.items():
+                    recommendations[rec_type].extend(rec_list)
 
-            if status != "optimal":
-                priorities.append({
-                    "biomarker": marker,
-                    "value": value,
-                    "status": status,
-                    "priority": priority_level,
-                })
+                priorities.append(
+                    {
+                        "biomarker": biomarker_key,
+                        "value": float(value),
+                        "status": classification["status"],
+                        "priority": "Élevé" if classification["status"] in ["deficient", "high"] else "Moyen",
+                    }
+                )
 
-                if marker in nutrition_reco:
-                    reco_type = "high" if status == "élevé" else "low"
-                    if reco_type in nutrition_reco[marker]:
-                        for r in nutrition_reco[marker][reco_type]:
-                            if "mg" in r or "UI" in r or "mcg" in r or "g/j" in r:
-                                supplements_set.add(r)
-                            elif any(food in r.lower() for food in ["réduire", "augmenter", "diète", "éliminer"]):
-                                alimentation_set.add(r)
-                            else:
-                                lifestyle_set.add(r)
+        # Dedup
+        for key in recommendations:
+            recommendations[key] = list(dict.fromkeys(recommendations[key]))
 
-        priorities.sort(key=lambda x: {"Élevé": 3, "Modéré": 2, "Faible": 1}[x["priority"]], reverse=True)
+        return {"recommendations": recommendations, "priorities": priorities}
 
-        return {
-            "priorities": priorities,
-            "recommendations": {
-                "supplements": sorted(list(supplements_set)),
-                "alimentation": sorted(list(alimentation_set)),
-                "lifestyle": sorted(list(lifestyle_set)),
-            },
-        }
+    @staticmethod
+    def _get_biomarker_recommendations(biomarker: str, value: float, classification: Dict) -> Dict:
+        recs = {"micronutrition": [], "alimentation": [], "lifestyle": [], "supplements": []}
+
+        if biomarker == "glutathion_total" and classification["status"] in ["low", "deficient"]:
+            recs["supplements"] += [
+                "N-acétyl-cystéine (NAC) : 600–1200 mg/jour",
+                "Glycine : 2–3 g/jour (soir)",
+                "Vitamine C : 500–1000 mg/jour",
+            ]
+            recs["alimentation"] += [
+                "Privilégiez les protéines soufrées : ail, oignon, crucifères",
+                "Consommez des œufs et du poulet (source de cystéine)",
+            ]
+
+        if biomarker == "coenzyme_q10" and classification["status"] in ["low", "deficient"]:
+            recs["supplements"] += [
+                "Coenzyme Q10 (ubiquinol) : 200 mg/jour avec repas gras",
+                "PQQ : 10–20 mg/jour",
+            ]
+            recs["alimentation"] += ["Mangez des viandes d'organes : cœur, foie", "Intégrez sardines et maquereaux"]
+            recs["lifestyle"].append("Si vous prenez des statines, la supplémentation en CoQ10 est essentielle")
+
+        if biomarker == "selenium" and classification["status"] in ["low", "deficient"]:
+            recs["supplements"].append("Sélénium (sélénométhionine) : 100–200 µg/jour")
+            recs["alimentation"] += [
+                "Consommez 2-3 noix du Brésil par jour",
+                "Mangez des poissons et fruits de mer",
+                "Consommez des abats et œufs bio",
+            ]
+
+        if biomarker == "ferritine":
+            if classification["status"] == "deficient":
+                recs["supplements"].append("Fer bisglycinate : 30 mg/jour (à jeun avec vitamine C)")
+                recs["alimentation"] += ["Viandes rouges 2-3x/semaine", "Évitez thé/café pendant les repas"]
+            elif value > 200:
+                recs["lifestyle"].append("Envisagez des saignées thérapeutiques (suivi médical)")
+                recs["alimentation"].append("Limitez les aliments enrichis en fer")
+
+        if biomarker == "vit_d":
+            if classification["status"] in ["deficient", "insufficient"]:
+                dosage = 4000 if value < 20 else 2000
+                recs["supplements"].append(f"Vitamine D3 : {dosage} UI/jour")
+                recs["lifestyle"].append("Exposition solaire 15-20 min/jour (bras, jambes)")
+            elif value > 100:
+                recs["lifestyle"].append("Réduire la supplémentation en vitamine D")
+
+        if biomarker == "crp" and value > 3:
+            recs["supplements"] += ["Oméga-3 (EPA/DHA) : 2-3 g/jour", "Curcumine : 500-1000 mg/jour"]
+            recs["alimentation"].append("Adoptez un régime anti-inflammatoire (méditerranéen)")
+            recs["lifestyle"].append("Réduisez le stress chronique")
+
+        if biomarker == "homa_index" and value > 2.4:
+            recs["supplements"] += ["Berbérine : 500 mg 3x/jour", "Chrome picolinate : 200 µg/jour"]
+            recs["alimentation"] += ["Adoptez un régime low-carb (<100g glucides/jour)", "Privilégiez l'index glycémique bas"]
+            recs["lifestyle"] += ["Pratiquez le jeûne intermittent (16:8)", "Exercice de résistance 3x/semaine"]
+
+        if biomarker == "zonuline" and value > 50:
+            recs["supplements"] += [
+                "L-glutamine : 5-10 g/jour",
+                "Zinc carnosine : 75 mg 2x/jour",
+                "Probiotiques multi-souches : 50 milliards UFC/jour",
+            ]
+            recs["alimentation"] += ["Évitez gluten et produits laitiers pendant 3 mois", "Bouillon d'os 2-3x/semaine"]
+
+        if biomarker in ["cortisol_reveil", "cortisol_car_30"] and classification["status"] == "low":
+            recs["supplements"] += ["Rhodiola rosea : 200-400 mg/jour", "Ashwagandha : 300-600 mg/jour"]
+            recs["lifestyle"] += ["Optimisez votre sommeil (7-9h)", "Techniques de gestion du stress quotidiennes"]
+
+        if biomarker == "dhea" and classification["status"] in ["low", "deficient"]:
+            recs["supplements"].append("DHEA : 25-50 mg/jour (sous supervision médicale)")
+            recs["lifestyle"].append("Exercice régulier (augmente DHEA naturellement)")
+
+        if biomarker == "homocysteine" and value > 10:
+            recs["supplements"] += [
+                "Complexe vitamines B : B6 (50mg), B9 (800µg), B12 (1000µg)",
+                "TMG (triméthylglycine) : 500-1000 mg/jour",
+            ]
+            recs["alimentation"].append("Légumes verts à feuilles quotidiennement")
+
+        return recs
 
 
 # ============================================================================
 # SESSION STATE
 # ============================================================================
 
-if "extracted_data" not in st.session_state:
-    st.session_state.extracted_data = {
-        "biological": {},
-        "epigenetic": {},
-        "imaging": {},
-        "microbiome": {},  # ✅ AJOUT MICROBIOTE
-        "patient_info": {},
-    }
+def init_session_state() -> None:
+    if "patient_data" not in st.session_state:
+        st.session_state.patient_data = {
+            "patient_info": {},
+            "biological_markers": {},
+            "epigenetic_data": {},
+            "imaging_data": {},
+        }
+    if "extracted_data" not in st.session_state:
+        st.session_state.extracted_data = {
+            "biological": {},
+            "epigenetic": {},
+            "imaging": {},
+            "patient_info": {},
+        }
+    if "analysis_complete" not in st.session_state:
+        st.session_state.analysis_complete = False
+    if "health_score" not in st.session_state:
+        st.session_state.health_score = None
+    if "biological_age" not in st.session_state:
+        st.session_state.biological_age = None
+    if "recommendations" not in st.session_state:
+        st.session_state.recommendations = None
+    if "nutritional_needs" not in st.session_state:
+        st.session_state.nutritional_needs = None
+    if "engine_results" not in st.session_state:
+        st.session_state.engine_results = None
 
-if "patient_data" not in st.session_state:
-    st.session_state.patient_data = {
-        "patient_info": {},
-        "biological_markers": {},
-        "epigenetic_data": {},
-        "imaging_data": {},
-        "microbiome_data": {},  # ✅ AJOUT MICROBIOTE
-    }
 
-if "analysis_complete" not in st.session_state:
-    st.session_state.analysis_complete = False
-if "health_score" not in st.session_state:
-    st.session_state.health_score = None
-if "biological_age" not in st.session_state:
-    st.session_state.biological_age = None
-if "recommendations" not in st.session_state:
-    st.session_state.recommendations = None
-if "nutritional_needs" not in st.session_state:
-    st.session_state.nutritional_needs = None
-if "engine_results" not in st.session_state:
-    st.session_state.engine_results = None
+init_session_state()
 
 
 # ============================================================================
 # HEADER
 # ============================================================================
 
-st.markdown('<h1 class="main-title">🧬 ALGO-LIFE</h1>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="sub-title">Plateforme Multimodale d\'Analyse de Santé Fonctionnelle</p>',
-    unsafe_allow_html=True,
-)
-
-st.divider()
+_, col_title = st.columns([1, 4])
+with col_title:
+    st.markdown('<h1 class="main-title">🧬 ALGO-LIFE</h1>', unsafe_allow_html=True)
+    st.markdown(
+        "<p class=\"sub-title\">Plateforme Multimodale d'Analyse de Santé Fonctionnelle</p>",
+        unsafe_allow_html=True,
+    )
+st.markdown("---")
 
 
 # ============================================================================
-# SIDEBAR
+# SIDEBAR - INFORMATIONS PATIENT
 # ============================================================================
 
 with st.sidebar:
-    st.header("📋 Informations Patient")
+    st.header("👤 Informations Patient")
+
+    # Debug pdf generator path
+    st.caption("🧪 Debug PDF generator")
+    st.code(getattr(pdfgen, "__file__", "unknown"), language="text")
+    st.caption(f"PDFGEN LOADED: {datetime.now().strftime('%H:%M:%S')}")
 
     if not UNIVERSAL_EXTRACTOR_AVAILABLE:
         st.error("❌ UniversalPDFExtractor indisponible (import failed).")
@@ -867,10 +1199,9 @@ with tab1:
 <h4>🎯 Instructions d'Import</h4>
 <p>Téléchargez vos fichiers PDF de résultats médicaux. Le système extraira automatiquement:</p>
 <ul>
-<li>✅ <strong>Biologie</strong>: Hormones, métabolisme, inflammation, antioxydants</li>
+<li>✅ <strong>Biologie</strong>: Hormones, métabolisme, inflammation, microbiote, antioxydants</li>
 <li>✅ <strong>Épigénétique</strong>: Âge biologique, méthylation, télomères</li>
 <li>✅ <strong>Imagerie</strong>: DXA, composition corporelle, densité osseuse</li>
-<li>✅ <strong>Microbiote</strong>: Analyse du microbiome intestinal</li>
 </ul>
 <p><strong>Formats supportés:</strong> Tous les PDF médicaux standards (SYNLAB, LIMS, laboratoires européens)</p>
 </div>
@@ -880,8 +1211,7 @@ with tab1:
 
     st.divider()
 
-    # ✅ MODIFICATION: 4 colonnes au lieu de 3
-    col_upload1, col_upload2, col_upload3, col_upload4 = st.columns(4)
+    col_upload1, col_upload2, col_upload3 = st.columns(3)
 
     # --- Biologie
     with col_upload1:
@@ -890,7 +1220,7 @@ with tab1:
             "Analyses biologiques",
             type=["pdf"],
             key="bio_pdf_upload",
-            help="Hormones, métabolisme, inflammation...",
+            help="Hormones, métabolisme, inflammation, microbiote...",
         )
 
         if bio_pdf:
@@ -986,116 +1316,138 @@ with tab1:
                             st.warning("⚠️ Aucune donnée épigénétique trouvée.")
 
     # --- Imagerie (simple regex)
-    with col_upload3:
-        st.subheader("🏥 PDF Imagerie")
-        img_pdf = st.file_uploader(
-            "Analyses DXA",
-            type=["pdf"],
-            key="img_pdf_upload",
-            help="Composition corporelle, densité osseuse...",
-        )
 
-        if img_pdf:
-            if st.button("🔍 Extraire", key="extract_img_btn", use_container_width=True):
-                if not UNIVERSAL_EXTRACTOR_AVAILABLE:
-                    st.error("❌ UniversalPDFExtractor indisponible. (utilisé pour extraire le texte)")
-                else:
-                    with st.spinner("Extraction en cours..."):
-                        text = AdvancedPDFExtractor.extract_text(img_pdf)
-
-                        img_data: Dict[str, float] = {}
-                        patterns_img = {
-                            "body_fat_percentage": r"masse\s+grasse.*?(\d+\.?\d*)\s*%",
-                            "lean_mass": r"masse\s+maigre.*?(\d+\.?\d*)",
-                            "bone_density": r"densit[ée].*osseuse.*?(\d+\.?\d*)",
-                            "visceral_fat": r"graisse\s+visc[ée]rale.*?(\d+\.?\d*)",
-                        }
-
-                        text_lower = text.lower()
-                        for key, pattern in patterns_img.items():
-                            match = re.search(pattern, text_lower, re.IGNORECASE)
-                            if match:
-                                try:
-                                    img_data[key] = float(match.group(1))
-                                except Exception:
-                                    pass
-
-                        if img_data:
-                            st.session_state.extracted_data["imaging"] = img_data
-                            st.session_state.patient_data["imaging_data"].update(img_data)
-                            st.success(f"✅ **{len(img_data)} paramètres extraits!**")
-                            with st.expander("📋 Données extraites"):
-                                st.json(img_data)
-                        else:
-                            st.warning("⚠️ Aucune donnée d'imagerie trouvée.")
-
-    # ✅ NOUVEAU: Colonne Microbiote
+    # ✅ NOUVEAU: Colonne Microbiote AVEC EXTRACTION AVANCÉE
     with col_upload4:
         st.subheader("🦠 PDF Microbiote")
         microbiome_pdf = st.file_uploader(
             "Analyses du microbiote",
             type=["pdf"],
             key="microbiome_pdf_upload",
-            help="Analyse du microbiome intestinal, diversité, pathogènes...",
+            help="Analyse du microbiome intestinal IDK GutMAP, diversité, pathogènes...",
         )
 
         if microbiome_pdf:
             if st.button("🔍 Extraire", key="extract_microbiome_btn", use_container_width=True):
                 if not UNIVERSAL_EXTRACTOR_AVAILABLE:
-                    st.error("❌ UniversalPDFExtractor indisponible. (utilisé pour extraire le texte)")
+                    st.error("❌ UniversalPDFExtractor indisponible.")
                 else:
                     with st.spinner("Extraction en cours..."):
                         text = AdvancedPDFExtractor.extract_text(microbiome_pdf)
-
-                        microbiome_data: Dict[str, float] = {}
                         
-                        # Patterns pour extraire les données microbiote
-                        patterns_microbiome = {
-                            "shannon_index": r"shannon[:\s]+(\d+\.?\d*)",
-                            "simpson_index": r"simpson[:\s]+(\d+\.?\d*)",
-                            "firmicutes_bacteroidetes_ratio": r"f[\/]b.*?ratio[:\s]+(\d+\.?\d*)",
-                            "dysbiosis_index": r"dysbiose.*?index[:\s]+(\d+\.?\d*)",
-                            "lactobacillus": r"lactobacill.*?(\d+\.?\d*)",
-                            "bifidobacterium": r"bifidobact.*?(\d+\.?\d*)",
-                            "escherichia_coli": r"escherichia.*coli.*?(\d+\.?\d*)",
-                            "akkermansia": r"akkermansia.*?(\d+\.?\d*)",
-                            "faecalibacterium": r"faecalibacterium.*?(\d+\.?\d*)",
-                        }
-
-                        text_lower = text.lower()
-                        for key, pattern in patterns_microbiome.items():
-                            match = re.search(pattern, text_lower, re.IGNORECASE)
-                            if match:
-                                try:
-                                    microbiome_data[key] = float(match.group(1))
-                                except Exception:
-                                    pass
-
+                        # ✅ Utiliser la méthode avancée
+                        extractor = UniversalPDFExtractor(microbiome_pdf)
+                        microbiome_data = extractor.extract_microbiome_data(text, debug=True)
+                        
                         if microbiome_data:
                             st.session_state.extracted_data["microbiome"] = microbiome_data
                             st.session_state.patient_data["microbiome_data"].update(microbiome_data)
+                            
                             st.success(f"✅ **{len(microbiome_data)} paramètres microbiote extraits!**")
-                            with st.expander("📋 Données extraites"):
-                                st.json(microbiome_data)
+                            
+                            # Affichage des métriques clés
+                            m1, m2, m3, m4 = st.columns(4)
+                            
+                            if "dysbiosis_index" in microbiome_data:
+                                di_value = microbiome_data['dysbiosis_index']
+                                di_color = "🟢" if di_value <= 2 else "🟡" if di_value == 3 else "🔴"
+                                m1.metric(
+                                    "Dysbiosis Index", 
+                                    f"{di_color} {di_value:.0f}/5",
+                                    help="1-2: Normobiotic, 3: Mildly dysbiotic, 4-5: Severely dysbiotic"
+                                )
+                            
+                            if "shannon_index_numeric" in microbiome_data:
+                                shannon = microbiome_data['shannon_index_numeric']
+                                shannon_emoji = "🟢" if shannon == 3 else "🟡" if shannon == 2 else "🔴"
+                                m2.metric(
+                                    "Diversité", 
+                                    f"{shannon_emoji} {microbiome_data.get('diversity_shannon', 'N/A')}",
+                                    help="Diversité bactérienne (Shannon index)"
+                                )
+                            
+                            if "akkermansia_muciniphila" in microbiome_data:
+                                akk_value = microbiome_data['akkermansia_muciniphila']
+                                akk_emoji = "🟢" if akk_value >= 0 else "🟡" if akk_value >= -1 else "🔴"
+                                m3.metric(
+                                    "Akkermansia", 
+                                    f"{akk_emoji} {akk_value:+.1f}",
+                                    help="Bactérie anti-inflammatoire clé"
+                                )
+                            
+                            if "faecalibacterium_prausnitzii" in microbiome_data:
+                                faecal_value = microbiome_data['faecalibacterium_prausnitzii']
+                                faecal_emoji = "🟢" if faecal_value >= 0 else "🟡" if faecal_value >= -1 else "🔴"
+                                m4.metric(
+                                    "Faecalibacterium", 
+                                    f"{faecal_emoji} {faecal_value:+.1f}",
+                                    help="Producteur majeur de butyrate"
+                                )
+                            
+                            # Scores par catégorie
+                            if any(k.endswith("_score") for k in microbiome_data.keys()):
+                                st.markdown("#### 📊 Scores par Catégorie")
+                                score_cols = st.columns(3)
+                                
+                                if "anti_inflammatory_score" in microbiome_data:
+                                    score_cols[0].metric(
+                                        "Anti-inflammatoires",
+                                        f"{microbiome_data['anti_inflammatory_score']:.0f}%",
+                                        help="Bactéries bénéfiques productrices de SCFA"
+                                    )
+                                
+                                if "pro_inflammatory_score" in microbiome_data:
+                                    score_cols[1].metric(
+                                        "Pro-inflammatoires (inversé)",
+                                        f"{microbiome_data['pro_inflammatory_score']:.0f}%",
+                                        help="Score élevé = faible présence de pathogènes"
+                                    )
+                                
+                                if "broad_commensals_score" in microbiome_data:
+                                    score_cols[2].metric(
+                                        "Commensaux",
+                                        f"{microbiome_data['broad_commensals_score']:.0f}%",
+                                        help="Bactéries commensales essentielles"
+                                    )
+                            
+                            with st.expander("📋 Toutes les données extraites", expanded=False):
+                                # Organiser l'affichage par catégories
+                                st.markdown("##### 🔍 Indices Globaux")
+                                indices = {k: v for k, v in microbiome_data.items() 
+                                          if k in ["dysbiosis_index", "diversity_shannon", "shannon_index_numeric", "firmicutes_bacteroidetes_ratio"]}
+                                if indices:
+                                    st.json(indices)
+                                
+                                st.markdown("##### 🦠 Bactéries Détectées")
+                                bacteria = {k: v for k, v in microbiome_data.items() 
+                                           if k not in ["dysbiosis_index", "diversity_shannon", "shannon_index_numeric", 
+                                                       "firmicutes_bacteroidetes_ratio"] and not k.endswith("_score")}
+                                if bacteria:
+                                    df_bacteria = pd.DataFrame([
+                                        {"Bactérie": k.replace("_", " ").title(), "Abondance": f"{v:+.1f}"} 
+                                        for k, v in sorted(bacteria.items(), key=lambda x: abs(x[1]), reverse=True)
+                                    ])
+                                    st.dataframe(df_bacteria, use_container_width=True, hide_index=True)
+                                
+                                st.markdown("##### 📊 Scores Catégoriels")
+                                scores = {k: v for k, v in microbiome_data.items() if k.endswith("_score")}
+                                if scores:
+                                    st.json(scores)
                         else:
                             st.warning("⚠️ Aucune donnée de microbiote trouvée.")
-
     st.divider()
 
     st.subheader("📊 Récapitulatif des Données Extraites")
     total_bio = len(st.session_state.extracted_data["biological"])
     total_epi = len(st.session_state.extracted_data["epigenetic"])
     total_img = len(st.session_state.extracted_data["imaging"])
-    total_microbiome = len(st.session_state.extracted_data["microbiome"])  # ✅ AJOUT
-    total = total_bio + total_epi + total_img + total_microbiome  # ✅ AJOUT
+    total = total_bio + total_epi + total_img
 
-    # ✅ MODIFICATION: 5 colonnes au lieu de 4
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("🧪 Biomarqueurs Bio", total_bio)
     c2.metric("🧬 Paramètres Épi", total_epi)
     c3.metric("🏥 Données Imagerie", total_img)
-    c4.metric("🦠 Données Microbiote", total_microbiome)  # ✅ NOUVEAU
-    c5.metric("📈 Total", total)
+    c4.metric("📈 Total", total)
 
     if total > 0:
         st.markdown(
@@ -1172,32 +1524,36 @@ with tab1:
                                 },
                                 "permeabilite_intestinale": {"zonuline": biomarkers.get("zonuline"), "lbp": biomarkers.get("lbp")},
                                 "micronutriments": {
-                                    "vitamine_d": biomarkers.get("vitamine_d"),
-                                    "vitamine_b12": biomarkers.get("vitamine_b12"),
-                                    "magnesium": biomarkers.get("magnesium"),
+                                    "vit_d": biomarkers.get("vit_d"),
+                                    "selenium": biomarkers.get("selenium"),
+                                    "zinc": biomarkers.get("zinc"),
+                                    "ferritine": biomarkers.get("ferritine"),
                                 },
                             }
 
-                            engine_results = engine.analyze(
-                                biological_data=bio_data_engine,
-                                patient_age=int(patient_info["age"]),
-                                patient_sex=str(patient_info["sexe"]),
-                                dxa_data=dxa_data,
-                            )
-                            st.session_state.engine_results = engine_results
-                        except Exception:
+                            epi_data_engine = {
+                                "epigenetic_age": {
+                                    "biological_age": st.session_state.extracted_data.get("epigenetic", {}).get("biological_age"),
+                                    "chronological_age": patient_info["age"],
+                                }
+                            }
+
+                            st.session_state.engine_results = engine.analyze(dxa_data, bio_data_engine, epi_data_engine)
+                        except Exception as e:
+                            st.warning(f"⚠️ AlgoLifeEngine non disponible: {e}")
                             st.session_state.engine_results = None
 
                         st.session_state.analysis_complete = True
                         st.success("✅ Analyse complète terminée!")
                         st.balloons()
-                        st.rerun()
-
+                        st.info("👉 Consultez l'onglet 'Analyse & Scores' pour voir les résultats détaillés.")
                 except Exception as e:
                     st.error(f"❌ Erreur lors de l'analyse: {str(e)}")
                     import traceback
                     with st.expander("Détails de l'erreur"):
                         st.code(traceback.format_exc())
+    else:
+        st.info("📥 Importez au moins un fichier PDF pour commencer.")
 
 
 # ============================================================================
@@ -1208,76 +1564,70 @@ with tab2:
     st.header("📊 Analyse Complète & Scores de Santé")
 
     if not st.session_state.analysis_complete:
-        st.info("📥 Veuillez d'abord effectuer une analyse complète depuis l'onglet 'Import & Extraction'")
+        st.info("📥 Veuillez d'abord importer des données et lancer l'analyse depuis l'onglet 'Import & Extraction'")
     else:
-        st.markdown(
-            """
-        <div class="alert-success">
-        <h4>✅ Analyse Complète Disponible</h4>
-        <p>Résultats détaillés ci-dessous.</p>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-        st.divider()
-
         health_score = st.session_state.health_score
         biological_age = st.session_state.biological_age
 
-        col_main1, col_main2, col_main3 = st.columns(3)
+        st.subheader("🎯 Scores Principaux")
+        col_score1, col_score2 = st.columns(2)
 
-        with col_main1:
-            score = health_score["global_score"]
+        with col_score1:
+            st.markdown("### Score Santé")
+            score = float(health_score["global_score"])
             grade = health_score["grade"]
-            score_class = (
-                "score-excellent"
-                if score >= 90
-                else "score-good"
-                if score >= 75
-                else "score-moderate"
-                if score >= 60
-                else "score-poor"
-            )
+            grade_label = health_score["grade_label"]
+
+            if score >= 95:
+                score_class = "score-excellent"
+            elif score >= 80:
+                score_class = "score-good"
+            elif score >= 60:
+                score_class = "score-moderate"
+            else:
+                score_class = "score-poor"
+
             st.markdown(
                 f"""
-            <div class="metric-card">
-            <h3>🎯 Score de Santé Global</h3>
-            <div class="{score_class}">{score}/100</div>
-            <p style="font-size:1.2rem; margin-top:0.5rem;">Grade: <strong>{grade}</strong></p>
+            <div class="metric-card" style="text-align: center;">
+                <span class="{score_class}">{score}/100</span>
+                <h3 style="margin-top: 1rem;">Grade: {grade}</h3>
+                <p style="font-size: 1.1rem; color: #4A5568;">{grade_label}</p>
+                <p style="margin-top: 1rem;">{health_score['interpretation']}</p>
             </div>
             """,
                 unsafe_allow_html=True,
             )
 
-        with col_main2:
-            bio_age = biological_age["biological_age"]
-            chrono_age = biological_age["chronological_age"]
-            delta = biological_age["delta"]
-            delta_sign = "+" if delta > 0 else ""
-            delta_color = "#ef4444" if delta > 0 else "#10b981"
-            st.markdown(
-                f"""
-            <div class="metric-card">
-            <h3>🧬 Âge Biologique</h3>
-            <div style="font-size:2.5rem; font-weight:700; color:#667eea;">{bio_age} ans</div>
-            <p style="font-size:1.1rem; margin-top:0.5rem;">
-            Âge chronologique: {chrono_age} ans<br>
-            <span style="color:{delta_color}; font-weight:600;">Delta: {delta_sign}{delta} ans</span>
-            </p>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
+        with col_score2:
+            st.markdown("### Âge Biologique")
+            bio_age = float(biological_age["biological_age"])
+            chrono_age = int(biological_age["chronological_age"])
+            delta = float(biological_age["delta"])
 
-        with col_main3:
-            total_markers = health_score["total_markers"]
+            if delta < -1:
+                color = "#10b981"
+                icon = "⬇️"
+            elif delta <= 1:
+                color = "#3b82f6"
+                icon = "↔️"
+            else:
+                color = "#f59e0b"
+                icon = "⬆️"
+
             st.markdown(
                 f"""
-            <div class="metric-card">
-            <h3>📊 Biomarqueurs Analysés</h3>
-            <div style="font-size:2.5rem; font-weight:700; color:#667eea;">{total_markers}</div>
-            <p style="font-size:1.1rem; margin-top:0.5rem;">Marqueurs biologiques évalués</p>
+            <div class="metric-card" style="text-align: center;">
+                <h2 style="color: {color}; font-size: 3rem; margin: 0;">{bio_age} ans</h2>
+                <p style="font-size: 1.2rem; color: #4A5568; margin: 0.5rem 0;">
+                    Chronologique: {chrono_age} ans
+                </p>
+                <p style="font-size: 1.5rem; color: {color}; font-weight: 600;">
+                    {icon} Delta: {delta:+.1f} ans ({biological_age['delta_percent']:+.1f}%)
+                </p>
+                <p style="margin-top: 1rem; font-style: italic;">
+                    {biological_age['interpretation']}
+                </p>
             </div>
             """,
                 unsafe_allow_html=True,
@@ -1288,82 +1638,60 @@ with tab2:
         st.subheader("📈 Scores par Catégorie")
         category_scores = health_score["category_scores"]
 
-        if category_scores:
-            cat_cols = st.columns(len(category_scores))
-            for idx, (category, data) in enumerate(category_scores.items()):
-                cat_score = data["score"]
-                cat_count = data["count"]
-                with cat_cols[idx]:
-                    st.metric(
-                        label=category,
-                        value=f"{cat_score:.1f}/100",
-                        help=f"{cat_count} biomarqueurs dans cette catégorie",
-                    )
-        else:
-            st.info("Aucune donnée de catégorie disponible.")
+        df_categories = (
+            pd.DataFrame(
+                [
+                    {
+                        "Catégorie": cat.replace("_", " ").title(),
+                        "Score": round(float(sc), 1),
+                        "Status": "Excellent" if sc >= 90 else "Bon" if sc >= 75 else "Moyen" if sc >= 60 else "Faible",
+                    }
+                    for cat, sc in category_scores.items()
+                ]
+            )
+            .sort_values("Score", ascending=False)
+        )
+        st.dataframe(df_categories, use_container_width=True, hide_index=True)
 
         st.divider()
 
         st.subheader("🔬 Classification des Biomarqueurs")
-        biomarkers_all = st.session_state.patient_data["biological_markers"]
-        ref_ranges = BiomarkerDatabase.get_reference_ranges()
 
-        classified = {
-            "normaux": [],
-            "a_surveiller": [],
-            "anormaux": [],
-            "non_references": [],
-        }
+        biomarkers = st.session_state.patient_data["biological_markers"]
+        patient_info = st.session_state.patient_data["patient_info"]
 
-        for marker, value in biomarkers_all.items():
-            marker_display = marker.replace("_", " ").title()
+        classified = {"normaux": [], "a_surveiller": [], "anormaux": [], "non_references": []}
+        refs = BiomarkerDatabase.get_reference_ranges()
 
-            if marker not in ref_ranges:
-                classified["non_references"].append({
-                    "Biomarqueur": marker_display,
-                    "Valeur": value,
-                    "Statut": "Non référencé",
-                })
+        for biomarker_key, value in biomarkers.items():
+            if value is None:
                 continue
+            classification = BiomarkerDatabase.classify_biomarker(biomarker_key, float(value), patient_info.get("age"), patient_info.get("sexe"))
 
-            ref = ref_ranges[marker]
-            optimal = ref["optimal"]
-            normal = ref["normal"]
-            unit = ref.get("unit", "")
-            category = ref.get("category", "N/A")
+            bio_info = refs.get(biomarker_key, {})
+            item = {
+                "Biomarqueur": biomarker_key.replace("_", " ").title(),
+                "Valeur": float(value),
+                "Unité": bio_info.get("unit", ""),
+                "Status": classification.get("status", "unknown"),
+                "Interprétation": classification.get("interpretation", ""),
+                "Icon": classification.get("icon", ""),
+            }
 
-            if optimal[0] <= value <= optimal[1]:
-                status = "✅ Optimal"
-                classified["normaux"].append({
-                    "Biomarqueur": marker_display,
-                    "Valeur": f"{value} {unit}",
-                    "Optimal": f"{optimal[0]}-{optimal[1]} {unit}",
-                    "Catégorie": category,
-                    "Statut": status,
-                })
-            elif normal[0] <= value <= normal[1]:
-                status = "⚡ À surveiller"
-                classified["a_surveiller"].append({
-                    "Biomarqueur": marker_display,
-                    "Valeur": f"{value} {unit}",
-                    "Normal": f"{normal[0]}-{normal[1]} {unit}",
-                    "Optimal": f"{optimal[0]}-{optimal[1]} {unit}",
-                    "Catégorie": category,
-                    "Statut": status,
-                })
+            if classification.get("status") in ["optimal", "normal"]:
+                classified["normaux"].append(item)
+            elif classification.get("status") in ["insufficient", "low", "elevated"]:
+                classified["a_surveiller"].append(item)
+            elif classification.get("status") in ["deficient", "high", "abnormal"]:
+                classified["anormaux"].append(item)
             else:
-                if value < normal[0]:
-                    status = "⬇️ Trop bas"
-                else:
-                    status = "⬆️ Trop élevé"
-                classified["anormaux"].append({
-                    "Biomarqueur": marker_display,
-                    "Valeur": f"{value} {unit}",
-                    "Normal": f"{normal[0]}-{normal[1]} {unit}",
-                    "Optimal": f"{optimal[0]}-{optimal[1]} {unit}",
-                    "Catégorie": category,
-                    "Statut": status,
-                })
+                classified["non_references"].append(item)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("✅ Normaux", len(classified["normaux"]))
+        c2.metric("⚡ À surveiller", len(classified["a_surveiller"]))
+        c3.metric("⚠️ Anormaux", len(classified["anormaux"]))
+        c4.metric("❓ Non référencés", len(classified["non_references"]))
 
         with st.expander("✅ Biomarqueurs Normaux", expanded=False):
             if classified["normaux"]:
@@ -1531,10 +1859,9 @@ with tab4:
 ### 🎯 Vue d'Ensemble
 
 **ALGO-LIFE** est une plateforme multimodale d'analyse de santé fonctionnelle qui intègre:
-- **Biologie fonctionnelle**: Hormones, métabolisme, inflammation, neurotransmetteurs
+- **Biologie fonctionnelle**: Hormones, métabolisme, inflammation, neurotransmetteurs, microbiote
 - **Épigénétique**: Âge biologique, méthylation, télomères
 - **Imagerie DXA**: Composition corporelle, densité osseuse
-- **Microbiote**: Analyse du microbiome intestinal
 
 ### 📋 Workflow Complet
 
@@ -1563,7 +1890,7 @@ with tab4:
 **Email**: contact@bilan-hormonal.com  
 **Site**: https://bilan-hormonal.com  
 
-**Version**: 4.1 - Janvier 2026 (Extraction Universelle + Microbiote)  
+**Version**: 4.1 - Janvier 2026 (Extraction Universelle)  
 **Dernière mise à jour**: {datetime.now().strftime('%d/%m/%Y')}
 
 ### ⚖️ Disclaimer
