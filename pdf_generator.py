@@ -1,7 +1,7 @@
 """
-ALGO-LIFE / UNILABS - Générateur PDF Simplifié v11.0
-✅ Structure claire et cohérente avec l'UI
-✅ Recommandations segmentées comme dans l'interface
+ALGO-LIFE / UNILABS - Générateur PDF avec Templates Visuels v12.0
+✅ Biomarqueurs avec jauges visuelles colorées
+✅ Design moderne et professionnel
 ✅ Support multimodal (Bio + Microbiote + Cross-analysis)
 """
 
@@ -17,8 +17,10 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
 )
+from reportlab.graphics.shapes import Drawing, Rect, Circle, Line, String
+from reportlab.graphics import renderPDF
 
 
 # =====================================================================
@@ -49,6 +51,187 @@ def _safe_float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _parse_reference(ref_str: str) -> tuple[float, float]:
+    """Parse une référence au format 'min-max' ou 'min — max'"""
+    try:
+        if not ref_str or ref_str == "Non spécifiées":
+            return (0.0, 100.0)
+        
+        # Remplacer différents séparateurs
+        ref_str = ref_str.replace(" — ", "-").replace("—", "-").replace(" - ", "-")
+        parts = ref_str.split("-")
+        
+        if len(parts) == 2:
+            min_val = float(parts[0].strip())
+            max_val = float(parts[1].strip())
+            return (min_val, max_val)
+        
+        return (0.0, 100.0)
+    except Exception:
+        return (0.0, 100.0)
+
+
+def create_biomarker_gauge(biomarker: Dict[str, Any], width: float = 14*cm, height: float = 3*cm) -> Drawing:
+    """
+    Crée une jauge visuelle élégante pour un biomarqueur
+    
+    Args:
+        biomarker: Dict avec keys: name, value, unit, reference, status
+        width: Largeur du dessin
+        height: Hauteur du dessin
+    
+    Returns:
+        Drawing ReportLab
+    """
+    d = Drawing(width, height)
+    
+    # Récupération des données
+    name = _safe_str(biomarker.get("name", ""))
+    value = _safe_float(biomarker.get("value"))
+    unit = _safe_str(biomarker.get("unit", ""))
+    reference = _safe_str(biomarker.get("reference", ""))
+    status = _safe_str(biomarker.get("status", "Inconnu"))
+    
+    # Parse la référence
+    min_ref, max_ref = _parse_reference(reference)
+    
+    # Configuration
+    gauge_width = width * 0.75
+    gauge_height = 15
+    gauge_x = width * 0.125
+    gauge_y = height * 0.35
+    
+    # Couleur du statut
+    if status == "Normal":
+        status_color = NORMAL
+        status_dot_color = NORMAL
+    elif status == "Bas":
+        status_color = WARNING
+        status_dot_color = WARNING
+    elif status == "Élevé":
+        status_color = CRITICAL
+        status_dot_color = CRITICAL
+    else:
+        status_color = GREY
+        status_dot_color = GREY
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 1. Indicateur de statut (point coloré)
+    # ─────────────────────────────────────────────────────────────────
+    dot_x = width * 0.02
+    dot_y = height * 0.75
+    
+    c = Circle(dot_x, dot_y, 5)
+    c.fillColor = status_dot_color
+    c.strokeColor = status_dot_color
+    d.add(c)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 2. Nom du biomarqueur
+    # ─────────────────────────────────────────────────────────────────
+    name_str = String(dot_x + 15, dot_y - 4, name)
+    name_str.fontName = 'Helvetica-Bold'
+    name_str.fontSize = 14
+    name_str.fillColor = colors.HexColor("#333333")
+    d.add(name_str)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 3. Barre de référence (jauge colorée)
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Fond gris de la barre
+    bg_rect = Rect(gauge_x, gauge_y, gauge_width, gauge_height)
+    bg_rect.fillColor = colors.HexColor("#E0E0E0")
+    bg_rect.strokeColor = None
+    d.add(bg_rect)
+    
+    # Calcul des zones (en pourcentage de la largeur)
+    # Zone BASSE (rouge): 0% - 20%
+    # Zone BASSE-NORMAL (orange): 20% - 40%
+    # Zone NORMALE (vert): 40% - 60%
+    # Zone NORMAL-HAUTE (orange): 60% - 80%
+    # Zone HAUTE (rouge): 80% - 100%
+    
+    segments = [
+        (0.0, 0.20, CRITICAL),      # Rouge (très bas)
+        (0.20, 0.40, WARNING),      # Orange (bas)
+        (0.40, 0.60, NORMAL),       # Vert (normal)
+        (0.60, 0.80, WARNING),      # Orange (haut)
+        (0.80, 1.0, CRITICAL)       # Rouge (très haut)
+    ]
+    
+    for start_pct, end_pct, color in segments:
+        seg_x = gauge_x + (gauge_width * start_pct)
+        seg_width = gauge_width * (end_pct - start_pct)
+        
+        seg_rect = Rect(seg_x, gauge_y, seg_width, gauge_height)
+        seg_rect.fillColor = color
+        seg_rect.strokeColor = None
+        seg_rect.fillOpacity = 0.4  # Semi-transparence
+        d.add(seg_rect)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 4. Indicateur de position de la valeur du patient
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Calculer la position relative de la valeur
+    if max_ref > min_ref and min_ref != 0:
+        value_position_pct = (value - min_ref) / (max_ref - min_ref)
+    else:
+        value_position_pct = 0.5  # Centré par défaut
+    
+    # Limiter entre 0 et 1
+    value_position_pct = max(0.0, min(1.0, value_position_pct))
+    
+    # Position X de l'indicateur
+    indicator_x = gauge_x + (gauge_width * value_position_pct)
+    
+    # Ligne verticale pointillée
+    dash_line = Line(indicator_x, gauge_y + gauge_height, indicator_x, gauge_y + gauge_height + 25)
+    dash_line.strokeColor = colors.HexColor("#333333")
+    dash_line.strokeWidth = 2
+    dash_line.strokeDashArray = [3, 2]
+    d.add(dash_line)
+    
+    # Curseur (cercle)
+    cursor = Circle(indicator_x, gauge_y + gauge_height / 2, 8)
+    cursor.fillColor = status_color
+    cursor.strokeColor = colors.white
+    cursor.strokeWidth = 2
+    d.add(cursor)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 5. Labels des bornes de référence
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Borne min
+    min_label = String(gauge_x, gauge_y - 15, f"{min_ref:.2f}")
+    min_label.fontName = 'Helvetica'
+    min_label.fontSize = 9
+    min_label.fillColor = GREY
+    d.add(min_label)
+    
+    # Borne max
+    max_label = String(gauge_x + gauge_width - 30, gauge_y - 15, f"{max_ref:.2f}")
+    max_label.fontName = 'Helvetica'
+    max_label.fontSize = 9
+    max_label.fillColor = GREY
+    d.add(max_label)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 6. Valeur du patient (grand texte centré au-dessus de l'indicateur)
+    # ─────────────────────────────────────────────────────────────────
+    
+    value_text = f"{value:.2f} {unit}"
+    value_label = String(indicator_x - 30, gauge_y + gauge_height + 30, value_text)
+    value_label.fontName = 'Helvetica-Bold'
+    value_label.fontSize = 18
+    value_label.fillColor = colors.HexColor("#1A237E")
+    d.add(value_label)
+    
+    return d
+
+
 # =====================================================================
 # PDF GENERATOR
 # =====================================================================
@@ -63,7 +246,7 @@ def generate_multimodal_report(
     output_path: str = "rapport_algo_life.pdf"
 ) -> str:
     """
-    Génère un rapport PDF multimodal
+    Génère un rapport PDF multimodal avec templates visuels
     
     Args:
         patient_data: Informations patient
@@ -179,7 +362,7 @@ def generate_multimodal_report(
     story.append(PageBreak())
     
     # ═════════════════════════════════════════════════════════════════
-    # BIOLOGIE
+    # BIOLOGIE AVEC TEMPLATES VISUELS
     # ═════════════════════════════════════════════════════════════════
     if biology_data:
         story.append(Paragraph("■ ANALYSE BIOLOGIQUE", style_section))
@@ -210,60 +393,47 @@ def generate_multimodal_report(
             ('FONTSIZE', (0, 0), (-1, -1), 10),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.5, GREY),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.white),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ]))
         
         story.append(stats_table)
+        story.append(Spacer(1, 1*cm))
+        
+        # ─────────────────────────────────────────────────────────────────
+        # JAUGES VISUELLES DES BIOMARQUEURS
+        # ─────────────────────────────────────────────────────────────────
+        
+        story.append(Paragraph("Détail des Biomarqueurs", style_subsection))
         story.append(Spacer(1, 0.5*cm))
         
-        # Tableau des anomalies prioritaires
-        anomalies = [b for b in biology_data if b.get("status") in ["Bas", "Élevé"]]
+        # Limiter aux 15 premiers biomarqueurs pour ne pas surcharger
+        for i, biomarker in enumerate(biology_data[:15]):
+            # Créer la jauge visuelle
+            gauge = create_biomarker_gauge(biomarker)
+            story.append(gauge)
+            story.append(Spacer(1, 0.8*cm))
+            
+            # Saut de page tous les 5 biomarqueurs
+            if (i + 1) % 5 == 0 and i < len(biology_data) - 1:
+                story.append(PageBreak())
+                story.append(Paragraph("Détail des Biomarqueurs (suite)", style_subsection))
+                story.append(Spacer(1, 0.5*cm))
         
-        if anomalies:
-            story.append(Paragraph("Biomarqueurs Anormaux", style_subsection))
-            
-            bio_table_data = [
-                [Paragraph("<b>Biomarqueur</b>", style_body),
-                 Paragraph("<b>Valeur</b>", style_body),
-                 Paragraph("<b>Unité</b>", style_body),
-                 Paragraph("<b>Référence</b>", style_body),
-                 Paragraph("<b>Statut</b>", style_body)]
-            ]
-            
-            for bio in anomalies[:15]:  # Limiter à 15 pour la place
-                status_color = CRITICAL if bio.get("status") == "Élevé" else WARNING
-                bio_table_data.append([
-                    Paragraph(_safe_str(bio.get("biomarker")), style_body),
-                    Paragraph(_safe_str(bio.get("value")), style_body),
-                    Paragraph(_safe_str(bio.get("unit")), style_body),
-                    Paragraph(_safe_str(bio.get("reference")), style_body),
-                    Paragraph(f'<font color="{status_color.hexval()}">{bio.get("status")}</font>', style_body)
-                ])
-            
-            bio_table = Table(bio_table_data, colWidths=[5*cm, 2*cm, 2*cm, 3.5*cm, 2.5*cm])
-            bio_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), PRIMARY),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('GRID', (0, 0), (-1, -1), 0.5, GREY),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, LIGHT_GREY]),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]))
-            
-            story.append(bio_table)
+        if len(biology_data) > 15:
+            story.append(Paragraph(
+                f"<i>Note: {len(biology_data) - 15} autres biomarqueurs ont été analysés. "
+                f"Détails disponibles dans le tableau complet.</i>",
+                style_body
+            ))
         
         story.append(PageBreak())
     
     # ═════════════════════════════════════════════════════════════════
     # MICROBIOME
     # ═════════════════════════════════════════════════════════════════
-    if microbiome_data:
+    if microbiome_data and (microbiome_data.get("dysbiosis_index") or microbiome_data.get("bacteria")):
         story.append(Paragraph("■ ANALYSE DU MICROBIOTE INTESTINAL", style_section))
         story.append(Spacer(1, 0.5*cm))
         
@@ -318,7 +488,7 @@ def generate_multimodal_report(
                 
                 bact_data.append([
                     Paragraph(_safe_str(b.get("category")), style_body),
-                    Paragraph(_safe_str(b.get("group"))[:80], style_body),  # Tronquer si trop long
+                    Paragraph(_safe_str(b.get("group"))[:80], style_body),
                     Paragraph(f'<font color="{result_color.hexval()}">{result_icon} {result}</font>', style_body)
                 ])
             
