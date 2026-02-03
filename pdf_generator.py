@@ -578,7 +578,6 @@ class PDFGenerator:
                 self.story.append(Spacer(1, 0.5 * cm))
 
     def add_recommendations_section(self, recommendations: Dict[str, Any]):
-    def add_recommendations_section(self, recommendations: Dict[str, Any]):
         self.add_section("💡 RECOMMANDATIONS PERSONNALISÉES", level=1)
 
         # --- NUTRITION ---
