@@ -525,10 +525,47 @@ with tabs[0]:
 
     with colB:
         st.markdown("### Microbiote")
-        if st.session_state.microbiome_data:
-            st.json(st.session_state.microbiome_data)
-        else:
+        micro = st.session_state.microbiome_data or {}
+
+        if not micro:
             st.info("Aucune donnée microbiote importée.")
+        else:
+            # Résumé DI / diversité
+            di = micro.get("dysbiosis_index", "—")
+            div = micro.get("diversity", "—")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Dysbiosis index", di if di is not None else "—")
+            with c2:
+                st.metric("Diversity", div if div is not None else "—")
+
+            # Tableau bactéries
+            bacteria = micro.get("bacteria", [])
+            if isinstance(bacteria, list) and len(bacteria) > 0:
+                dfm = pd.DataFrame(bacteria)
+
+                # Nettoyage description
+                if "group" in dfm.columns:
+                    dfm["group"] = dfm["group"].astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+
+                # Affichage agréable : description tronquée
+                if "group" in dfm.columns:
+                    dfm["Description"] = dfm["group"].apply(lambda s: (s[:120] + "…") if len(s) > 120 else s)
+
+                show_cols = []
+                if "category" in dfm.columns:
+                    show_cols.append("category")
+                if "Description" in dfm.columns:
+                    show_cols.append("Description")
+                elif "group" in dfm.columns:
+                    show_cols.append("group")
+                if "result" in dfm.columns:
+                    show_cols.append("result")
+
+                st.dataframe(dfm[show_cols] if show_cols else dfm, use_container_width=True)
+            else:
+                st.info("Aucun groupe bactérien trouvé (liste vide).")
 
 with tabs[1]:
     st.subheader("🧠 Interprétation (rules engine)")
