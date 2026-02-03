@@ -52,7 +52,7 @@ def _safe_float(x: Any) -> Optional[float]:
 
 def _col_find(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     """Find first matching column name in df among candidates, tolerant to case/spaces."""
-    if df is None or df.empty:
+    if not _df_ok(df):
         return None
 
     def norm(s: str) -> str:
@@ -173,7 +173,7 @@ class RulesEngine:
                 print(f"⚠️ Feuille absente: {name}")
                 return None
             df = pd.read_excel(self.rules_excel_path, sheet_name=name, engine="openpyxl")
-            if df is None or df.empty:
+            if not _df_ok(df):
                 print(f"⚠️ Feuille vide: {name}")
                 return None
             print(f"✅ {name} chargé: {len(df)} lignes")
@@ -233,7 +233,7 @@ class RulesEngine:
     # Debug: biomarker match stats
     # -----------------------------------------------------------------
     def debug_match_summary(self, biology_df: pd.DataFrame) -> Dict[str, Any]:
-        if biology_df is None or biology_df.empty:
+        if not _df_ok(biology_df):
             return {"matched": 0, "not_found": [], "total": 0}
 
         col_b = _col_find(biology_df, ["Biomarqueur"])
@@ -414,12 +414,12 @@ class RulesEngine:
     # -----------------------------------------------------------------
     def generate_cross_analysis(self, biology_data: pd.DataFrame, microbiome_data: Dict) -> List[Dict]:
         cross: List[Dict] = []
-        if biology_data is None or biology_data.empty:
+        if not _df_ok(biology_data):
             return cross
 
         def find_first(marker: str) -> Optional[pd.Series]:
             m = biology_data[biology_data["Biomarqueur"].astype(str).str.contains(marker, case=False, na=False)]
-            if m.empty:
+            if not _df_ok(m):
                 return None
             return m.iloc[0]
 
@@ -467,7 +467,7 @@ class RulesEngine:
         }
 
         # Biology
-        if biology_data is not None and not biology_data.empty:
+        if _df_ok(biology_data):
             for _, row in biology_data.iterrows():
                 recos["biology_interpretations"].append(self.generate_biology_interpretation(row, patient_info or {}))
             recos["debug"]["bio_match"] = self.debug_match_summary(biology_data)
