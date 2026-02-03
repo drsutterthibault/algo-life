@@ -149,80 +149,6 @@ def _safe_float(x) -> Optional[float]:
         return None
 
 
-def _normalize_reco_sections(reco_raw: Dict[str, Any]) -> Dict[str, List[str]]:
-    """Convertit la sortie du RulesEngine (biology_interpretations / microbiome_interpretations)
-    vers des sections UI stables: Nutrition / Micronutrition / Lifestyle / Microbiome.
-
-    ⚠️ On ne modifie PAS la sortie brute du moteur (utile pour PDF/export).
-    """
-    if not isinstance(reco_raw, dict):
-        return {"Nutrition": [], "Micronutrition": [], "Lifestyle": [], "Microbiome": []}
-
-    nutrition: List[str] = []
-    micronut: List[str] = []
-    lifestyle: List[str] = []
-    microbiome: List[str] = []
-
-    # --- Biologie
-    for item in (reco_raw.get("biology_interpretations") or []):
-        if not isinstance(item, dict):
-            continue
-        biom = str(item.get("biomarker", "")).strip()
-        prefix = f"[{biom}] " if biom else ""
-
-        n = item.get("nutrition_reco")
-        if n:
-            nutrition.append(prefix + str(n).strip())
-
-        m = item.get("micronutrition_reco")
-        if m:
-            micronut.append(prefix + str(m).strip())
-
-        l = item.get("lifestyle_reco")
-        if l:
-            lifestyle.append(prefix + str(l).strip())
-
-    # --- Microbiote
-    for item in (reco_raw.get("microbiome_interpretations") or []):
-        if not isinstance(item, dict):
-            continue
-        grp = str(item.get("group", "")).strip()
-        prefix = f"[{grp}] " if grp else ""
-
-        n = item.get("nutrition_reco")
-        if n:
-            nutrition.append(prefix + str(n).strip())
-            microbiome.append(prefix + str(n).strip())
-
-        s = item.get("supplementation_reco")
-        if s:
-            micronut.append(prefix + str(s).strip())
-            microbiome.append(prefix + str(s).strip())
-
-        l = item.get("lifestyle_reco")
-        if l:
-            lifestyle.append(prefix + str(l).strip())
-            microbiome.append(prefix + str(l).strip())
-
-    def _dedupe(seq: List[str]) -> List[str]:
-        seen = set()
-        out: List[str] = []
-        for x in seq:
-            k = str(x).strip()
-            if not k or k in seen:
-                continue
-            seen.add(k)
-            out.append(k)
-        return out
-
-    return {
-        "Nutrition": _dedupe(nutrition),
-        "Micronutrition": _dedupe(micronut),
-        "Lifestyle": _dedupe(lifestyle),
-        "Microbiome": _dedupe(microbiome),
-    }
-
-
 def _calc_age_from_birthdate(birthdate: date) -> int:
     """Calcule l'âge à partir de la date de naissance"""
     today = date.today()
@@ -379,87 +305,302 @@ def _get_rules_engine() -> Optional[RulesEngine]:
     return st.session_state["rules_engine"]
 
 
-def _generate_cross_analysis(biology_df: pd.DataFrame, microbiome_data: Dict[str, Any]) -> Dict[str, List]:
-    """Génère l'analyse croisée biologie+microbiote"""
-    observations = []
-    actions = []
-    
-    if biology_df is None or biology_df.empty:
-        return {"observations": observations, "actions": actions}
-    
-    abnormal_markers = biology_df[biology_df["Statut"].str.contains("Élevé|Bas|Critique", case=False, na=False)]
-    
-    dysbiosis_index = microbiome_data.get("dysbiosis_index", 0) if microbiome_data else 0
-    
-    for _, row in abnormal_markers.head(3).iterrows():
-        marker = row["Biomarqueur"]
-        status = row["Statut"]
-        
-        if "Glucose" in marker and "Élevé" in status:
-            observations.append(f"Glucose {status.lower()} - Impact sur équilibre microbiote")
-            if dysbiosis_index > 2:
-                observations.append("Corrélation hyperglycémie et dysbiose intestinale")
-                actions.append({
-                    "text": "Optimiser équilibre glycémique et soutenir microbiote",
-                    "priority": "high"
-                })
-        
-        elif "Cholestérol" in marker or "LDL" in marker:
-            observations.append(f"{marker} {status.lower()} - Inflammation systémique possible")
-            actions.append({
-                "text": "Optimiser profil lipidique via nutrition et oméga-3",
-                "priority": "medium"
-            })
-        
-        elif "Vitamine D" in marker and "Bas" in status:
-            observations.append("Déficit vitamine D - Impact sur immunité et barrière intestinale")
-            actions.append({
-                "text": "Corriger déficit vitamine D (4000 UI/jour, 3 mois)",
-                    "priority": "high"
-                })
-        
-        elif "Ferritine" in marker and "Bas" in status:
-            observations.append("Ferritine basse - Peut affecter énergie et absorption intestinale")
-            actions.append({
-                "text": "Évaluer causes du déficit en fer et supplémenter",
-                "priority": "medium"
-            })
-    
-    if dysbiosis_index >= 4:
-        observations.append(f"Dysbiose sévère (index {dysbiosis_index}/5)")
-        actions.append({
-            "text": "Protocole intensif rééquilibrage microbiote (probiotiques + prébiotiques)",
-            "priority": "high"
-        })
-    elif dysbiosis_index >= 3:
-        observations.append(f"Dysbiose modérée (index {dysbiosis_index}/5)")
-        actions.append({
-            "text": "Soutenir microbiote par alimentation riche en fibres et probiotiques",
-            "priority": "medium"
-        })
-    
-    bacteria = microbiome_data.get("bacteria", []) if microbiome_data else []
-    deviating = [b for b in bacteria if "deviating" in b.get("result", "").lower()]
-    
-    if len(deviating) > 3:
-        observations.append(f"{len(deviating)} groupes bactériens déviants - Déséquilibre microbien")
-    
-    butyrate_producers = [b for b in bacteria if "butyrate" in b.get("group", "").lower()]
-    if any("deviating" in b.get("result", "").lower() for b in butyrate_producers):
-        observations.append("Producteurs de butyrate déviants - Impact sur santé intestinale")
-        actions.append({
-            "text": "Augmenter fibres prébiotiques (inuline 5g/jour)",
-            "priority": "high"
-        })
-    
-    if not observations:
-        observations.append("Profil global équilibré - Maintenir bonnes pratiques")
-        actions.append({
-            "text": "Poursuivre alimentation variée et équilibrée",
-            "priority": "low"
-        })
-    
-    return {"observations": observations, "actions": actions}
+
+def _parse_reference_range(ref: Any) -> Dict[str, Optional[float]]:
+    """Parse une référence type: '3.5 - 5.0', '3,5 à 5,0', '< 5', '>10'.
+    Retour: {"low": float|None, "high": float|None}
+    """
+    s = str(ref or "").strip()
+    if not s:
+        return {"low": None, "high": None}
+    s = s.replace("–", "-").replace("—", "-").replace(",", ".")
+    s = re.sub(r"\s+", " ", s)
+
+    # < x
+    m = re.search(r"<\s*([0-9]+(?:\.[0-9]+)?)", s)
+    if m:
+        return {"low": None, "high": float(m.group(1))}
+    # > x
+    m = re.search(r">\s*([0-9]+(?:\.[0-9]+)?)", s)
+    if m:
+        return {"low": float(m.group(1)), "high": None}
+    # x - y or x à y
+    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:-|a|à|to)\s*([0-9]+(?:\.[0-9]+)?)", s, flags=re.IGNORECASE)
+    if m:
+        low = float(m.group(1))
+        high = float(m.group(2))
+        if high < low:
+            low, high = high, low
+        return {"low": low, "high": high}
+
+    return {"low": None, "high": None}
+
+
+def _compute_status_from_value(value: Any, ref: Any) -> Optional[str]:
+    """Calcule Bas/Élevé/Normal si possible (quand 'Statut' est vide ou non fiable)."""
+    v = _safe_float(value)
+    rr = _parse_reference_range(ref)
+    low, high = rr["low"], rr["high"]
+    if v is None or (low is None and high is None):
+        return None
+    if low is not None and v < low:
+        return "Bas"
+    if high is not None and v > high:
+        return "Élevé"
+    return "Normal"
+
+
+def _axis_category(marker: Any) -> str:
+    m = re.sub(r"\s+", " ", str(marker or "")).strip().lower()
+    mapping = [
+        ("inflammation", ["crp", "hs-crp", "ferritin", "ferritine", "il-6", "tnf", "fibrinog", "vhs", "esr"]),
+        ("glycemie", ["glucose", "glycem", "hba1c", "insulin", "homa"]),
+        ("lipides", ["chol", "ldl", "hdl", "trig", "apo", "lpa", "lp(a)"]),
+        ("foie", ["alt", "ast", "gpt", "got", "ggt", "bilir", "alp", "phosphatase"]),
+        ("rein", ["creat", "créat", "uree", "urée", "egfr", "dfg", "cystatin"]),
+        ("thyroide", ["tsh", "ft4", "ft3", "t3", "t4", "thyro", "anti-tpo", "anti tg"]),
+        ("micronutriments", ["vitamin", "vitamine", "25(oh)d", "zinc", "cuivre", "mag", "selen", "b12", "folat", "fer", "ferritin"]),
+        ("stress_ox", ["glutath", "8-ohdg", "mda", "oxyd", "isoprost", "sod", "catalas", "gpX"]),
+    ]
+    for cat, keys in mapping:
+        if any(k in m for k in keys):
+            return cat
+    return "autres"
+
+
+def _gut_metabolic_score(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Score 0-10 (heuristique) basé sur:
+    - dysbiose (0-3)
+    - axe glycémie (0-3)
+    - inflammation (0-2)
+    - lipides (0-2)
+    """
+    dx = meta.get("micro", {}).get("dysbiosis_index", None)
+    cats = meta.get("abnormal_by_category", {}) or {}
+
+    # Dysbiose
+    dys_pts = 0
+    try:
+        if dx is not None:
+            dxf = float(dx)
+            if dxf >= 4:
+                dys_pts = 3
+            elif dxf >= 3:
+                dys_pts = 2
+            elif dxf >= 2:
+                dys_pts = 1
+    except Exception:
+        dys_pts = 0
+
+    gly_pts = 3 if cats.get("glycemie", 0) >= 2 else (2 if cats.get("glycemie", 0) == 1 else 0)
+    infl_pts = 2 if cats.get("inflammation", 0) >= 2 else (1 if cats.get("inflammation", 0) == 1 else 0)
+    lip_pts = 2 if cats.get("lipides", 0) >= 2 else (1 if cats.get("lipides", 0) == 1 else 0)
+
+    total = dys_pts + gly_pts + infl_pts + lip_pts
+    total = max(0, min(10, total))
+
+    if total <= 2:
+        level = "Faible"
+    elif total <= 5:
+        level = "Modéré"
+    else:
+        level = "Élevé"
+
+    return {
+        "score": total,
+        "level": level,
+        "breakdown": {"dysbiosis": dys_pts, "glycemia": gly_pts, "inflammation": infl_pts, "lipids": lip_pts},
+    }
+
+
+def _generate_cross_analysis(
+    biology_df: pd.DataFrame,
+    microbiome_data: Dict[str, Any],
+    reco_sections: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, Any]:
+    """Analyse croisée biologie+microbiote (+ injection recos rules engine si dispo).
+    Next-step inclus:
+      - statut calculé depuis Valeur/Référence si Statut vide
+      - score gut-metabolic 0-10
+      - templates "résumé / hypothèses / plan 4 semaines"
+    """
+    observations: List[str] = []
+    actions: List[Dict[str, Any]] = []
+    meta: Dict[str, Any] = {
+        "abnormal_count": 0,
+        "abnormal_by_category": {},
+        "synergies": [],
+        "micro": {},
+        "templates": {},
+        "gut_metabolic": {},
+    }
+
+    if biology_df is None or not isinstance(biology_df, pd.DataFrame) or biology_df.empty:
+        return {"observations": observations, "actions": actions, "meta": meta}
+
+    # Microbiote meta
+    dx = None
+    div = None
+    if isinstance(microbiome_data, dict) and microbiome_data:
+        dx = microbiome_data.get("dysbiosis_index")
+        div = microbiome_data.get("diversity")
+    meta["micro"] = {"dysbiosis_index": dx, "diversity": div}
+
+    # Colonnes robustes
+    cols = {re.sub(r"\s+", " ", str(c).strip().lower()): c for c in biology_df.columns}
+    marker_col = cols.get("biomarqueur") or cols.get("biomarker") or cols.get("marqueur") or biology_df.columns[0]
+    value_col = cols.get("valeur") or cols.get("value") or cols.get("résultat") or cols.get("result") or None
+    ref_col = cols.get("référence") or cols.get("reference") or cols.get("norme") or None
+    status_col = cols.get("statut") or cols.get("status") or cols.get("flag") or None
+
+    # Construire une série de statut "effective" (statut existant sinon calculé)
+    eff_status = []
+    for _, row in biology_df.iterrows():
+        s = str(row.get(status_col, "")).strip() if status_col else ""
+        if not s and (value_col and ref_col):
+            computed = _compute_status_from_value(row.get(value_col), row.get(ref_col))
+            s = computed or ""
+        eff_status.append(s)
+
+    # Liste des anormaux
+    def _is_abn(s: str) -> bool:
+        s2 = re.sub(r"\s+", " ", str(s or "")).lower()
+        return any(k in s2 for k in ["élev", "haut", "high", "bas", "low", "crit", "abnormal", "anormal"])
+
+    abnormal_rows = []
+    for i, (_, row) in enumerate(biology_df.iterrows()):
+        if _is_abn(eff_status[i]):
+            abnormal_rows.append((row, eff_status[i]))
+
+    meta["abnormal_count"] = len(abnormal_rows)
+
+    # Répartition axes
+    counts: Dict[str, int] = {}
+    for row, _stt in abnormal_rows:
+        cat = _axis_category(row.get(marker_col, ""))
+        counts[cat] = counts.get(cat, 0) + 1
+    meta["abnormal_by_category"] = dict(sorted(counts.items(), key=lambda x: (-x[1], x[0])))
+
+    # Observations synthétiques
+    if abnormal_rows:
+        top = abnormal_rows[: min(7, len(abnormal_rows))]
+        obs_parts = []
+        for r, stt in top:
+            mk = str(r.get(marker_col, "")).strip()
+            if mk:
+                obs_parts.append(f"{mk}: {stt}")
+        observations.append("Signaux biologiques prioritaires: " + "; ".join(obs_parts) + ".")
+    else:
+        observations.append("Aucun biomarqueur anormal détecté (Statut + calcul Valeur/Référence si dispo).")
+
+    # Synergies microbio ↔ axes
+    synergies = []
+    dys = None
+    try:
+        dys = float(dx) if dx is not None else None
+    except Exception:
+        dys = None
+
+    cats = set(meta["abnormal_by_category"].keys())
+    if dys is not None and dys >= 3:
+        if "inflammation" in cats:
+            synergies.append("Dysbiose + inflammation: axe barrière intestinale / endotoxémie (LBP/zonuline à envisager).")
+        if "glycemie" in cats:
+            synergies.append("Dysbiose + glycémie: insulinorésistance ↔ microbiote (SCFA/acides biliaires).")
+        if "lipides" in cats:
+            synergies.append("Dysbiose + lipides: modulation des acides biliaires / absorption lipidique possible.")
+        if "micronutriments" in cats:
+            synergies.append("Dysbiose + déficits: malabsorption/consommation microbienne (D/B/Mg/Zn).")
+
+    if synergies:
+        meta["synergies"] = synergies
+        observations.extend(synergies)
+
+    # Actions priorisées (avec rationale)
+    def _add_action(text: str, priority: str, rationale: str):
+        actions.append({"text": text, "priority": priority, "rationale": rationale})
+
+    if dys is not None and dys >= 4:
+        _add_action(
+            "Protocole intensif microbiote 4 semaines: fibres progressives + probiotiques ciblés + réduction ultra-transformés.",
+            "high",
+            "Dysbiose sévère (index ≥4).",
+        )
+    elif dys is not None and dys >= 3:
+        _add_action(
+            "Soutien microbiote 4 semaines: fibres 25–35 g/j + prébiotiques progressifs + aliments fermentés.",
+            "medium",
+            "Dysbiose modérée (index 3–3.9).",
+        )
+
+    if "inflammation" in cats:
+        _add_action(
+            "Réduire charge inflammatoire: oméga-3 + polyphénols + optimisation sommeil; envisager LBP/zonuline si symptômes.",
+            "high",
+            "Signaux inflammatoires.",
+        )
+    if "glycemie" in cats:
+        _add_action(
+            "Optimiser équilibre glycémique: protéines au petit-déj, marche post-prandiale, réduction sucres rapides; recontrôle HbA1c/insuline.",
+            "high",
+            "Signaux glycémiques.",
+        )
+    if "lipides" in cats:
+        _add_action(
+            "Optimiser lipides: fibres solubles (psyllium) + réduction gras trans + recontrôle lipidique.",
+            "medium",
+            "Signaux lipidiques.",
+        )
+    if "micronutriments" in cats:
+        _add_action(
+            "Corriger déficits micronutritionnels prioritaires (D/Mg/Zn/B) avec recontrôle à 8–12 semaines.",
+            "medium",
+            "Déficits probables.",
+        )
+
+    if not actions:
+        _add_action(
+            "Maintenir hygiène de vie + recontrôle ciblé selon contexte clinique.",
+            "low",
+            "Aucun axe prioritaire détecté automatiquement.",
+        )
+
+    # Score gut-metabolic
+    meta["gut_metabolic"] = _gut_metabolic_score(meta)
+
+    # Templates + injection recos
+    picks = {"Nutrition": [], "Micronutrition": [], "Lifestyle": []}
+    if isinstance(reco_sections, dict):
+        for k in picks.keys():
+            picks[k] = (reco_sections.get(k, []) or [])[:5]
+
+    resume = []
+    if dys is not None:
+        resume.append(f"Microbiote: dysbiosis_index={dx}, diversity={div}.")
+    if meta["abnormal_by_category"]:
+        top_cat = next(iter(meta["abnormal_by_category"].items()))
+        resume.append(f"Biologie: {meta['abnormal_count']} anormal(aux), axe dominant: {top_cat[0]} ({top_cat[1]}).")
+    resume.append(f"Score gut-metabolic: {meta['gut_metabolic']['score']}/10 ({meta['gut_metabolic']['level']}).")
+
+    hypotheses = synergies[:] if synergies else ["Aucune synergie forte détectée automatiquement; contextualiser avec clinique."]
+    plan = [
+        "Semaine 1–2: stabiliser alimentation (fibres progressives, protéines suffisantes), hydratation, sommeil.",
+        "Semaine 3–4: renforcer prébiotiques/probiotiques selon tolérance + activité régulière (zone 2 + marche post-prandiale).",
+        "Recontrôle 8–12 semaines: biomarqueurs prioritaires + symptômes + (option) index dysbiose si nécessaire.",
+    ]
+    if any(picks.values()):
+        plan.append("Recos (règles) à valider/adapter:")
+        for k in ["Nutrition", "Micronutrition", "Lifestyle"]:
+            if picks[k]:
+                plan.append(f"- {k}: " + " | ".join(picks[k]))
+
+    meta["templates"] = {
+        "resume": "\n".join([x for x in resume if x]),
+        "hypotheses": "\n".join([x for x in hypotheses if x]),
+        "plan_4_semaines": "\n".join([x for x in plan if x]),
+    }
+
+    return {"observations": observations, "actions": actions, "meta": meta}
 
 
 def _display_pdf_viewer(pdf_path: str, height: int = 600):
@@ -550,9 +691,6 @@ if "microbiome_data" not in st.session_state:
 if "recommendations" not in st.session_state:
     st.session_state.recommendations = {}
 
-if "reco_sections" not in st.session_state:
-    st.session_state.reco_sections = {"Nutrition": [], "Micronutrition": [], "Lifestyle": [], "Microbiome": []}
-
 if "edited_recommendations" not in st.session_state:
     st.session_state.edited_recommendations = {}
 
@@ -567,6 +705,13 @@ if "cross_analysis_observations" not in st.session_state:
 
 if "cross_analysis_actions" not in st.session_state:
     st.session_state.cross_analysis_actions = []
+
+if "cross_analysis_meta" not in st.session_state:
+    st.session_state.cross_analysis_meta = {}
+
+if "analysis_history" not in st.session_state:
+    st.session_state.analysis_history = []
+
 
 if "bio_pdf_path" not in st.session_state:
     st.session_state.bio_pdf_path = None
@@ -894,15 +1039,9 @@ with tabs[1]:
                         bio_df = st.session_state.biology_df
                         micro_data = st.session_state.microbiome_data
 
-                        reco_raw = engine.generate_recommendations(
-                            biology_data=bio_df,
-                            microbiome_data=micro_data,
-                            patient_info=patient_fmt,
-                        )
-
-                        st.session_state.recommendations = reco_raw
-                        st.session_state.reco_sections = _normalize_reco_sections(reco_raw)
-
+                        reco = engine.generate_recommendations(patient_fmt, bio_df, micro_data)
+                        
+                        st.session_state.recommendations = reco
                         st.success("✅ Interprétation générée")
                         st.rerun()
                     except Exception as e:
@@ -910,9 +1049,9 @@ with tabs[1]:
                         import traceback
                         st.code(traceback.format_exc())
 
-        # AFFICHAGE DES RECOMMANDATIONS (UI)
-        if st.session_state.reco_sections:
-            reco = st.session_state.reco_sections
+        # AFFICHAGE DES RECOMMANDATIONS
+        if st.session_state.recommendations:
+            reco = st.session_state.recommendations
 
             # Nutrition
             nutrition_items = reco.get("Nutrition", [])
@@ -946,7 +1085,7 @@ with tabs[1]:
                     st.markdown(f"**{i+1}.** {item}")
                 st.markdown("---")
 
-            # Supplementation (si tu l’utilises plus tard)
+            # Supplementation
             suppl_items = reco.get("Supplementation", [])
             if suppl_items:
                 st.markdown("### 📋 Protocole de Supplémentation")
@@ -956,6 +1095,7 @@ with tabs[1]:
 # ═════════════════════════════════════════════════════════════════════
 # TAB 2: ANALYSE CROISÉE
 # ═════════════════════════════════════════════════════════════════════
+
 with tabs[2]:
     st.subheader("🔄 Analyse Croisée Multimodale")
 
@@ -966,77 +1106,122 @@ with tabs[2]:
             with st.spinner("Analyse en cours..."):
                 bio_df = st.session_state.biology_df
                 micro_data = st.session_state.microbiome_data
-                
-                cross_analysis = _generate_cross_analysis(bio_df, micro_data)
-                
-                st.session_state.cross_analysis_observations = cross_analysis["observations"]
-                st.session_state.cross_analysis_actions = cross_analysis["actions"]
-                
+                reco_sections = st.session_state.reco_sections if "reco_sections" in st.session_state else None
+
+                cross = _generate_cross_analysis(bio_df, micro_data, reco_sections=reco_sections)
+
+                st.session_state.cross_analysis_observations = cross.get("observations", [])
+                st.session_state.cross_analysis_actions = cross.get("actions", [])
+                st.session_state.cross_analysis_meta = cross.get("meta", {})
+
+                # Historique (next-step)
+                if "analysis_history" not in st.session_state:
+                    st.session_state.analysis_history = []
+                meta = st.session_state.cross_analysis_meta or {}
+                st.session_state.analysis_history.append({
+                    "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "abnormal_count": meta.get("abnormal_count", 0),
+                    "dysbiosis_index": (meta.get("micro", {}) or {}).get("dysbiosis_index", None),
+                    "gut_metabolic_score": (meta.get("gut_metabolic", {}) or {}).get("score", None),
+                })
+
                 st.success("✅ Analyse croisée générée")
                 st.rerun()
-        
-        # Observations
+
+        meta = st.session_state.get("cross_analysis_meta", {}) or {}
+        gm = (meta.get("gut_metabolic") or {})
+        micro = (meta.get("micro") or {})
+
+        # KPIs
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Biomarqueurs anormaux", meta.get("abnormal_count", 0))
+        with c2:
+            st.metric("Dysbiose", str(micro.get("dysbiosis_index", "—")))
+        with c3:
+            st.metric("Diversité", str(micro.get("diversity", "—")))
+        with c4:
+            if gm:
+                st.metric("Gut-metabolic", f"{gm.get('score','—')}/10", gm.get("level", ""))
+            else:
+                st.metric("Gut-metabolic", "—")
+
+        # Graph axes
+        if meta.get("abnormal_by_category"):
+            st.markdown("### 📊 Répartition des anomalies biologiques par axe")
+            ax_df = pd.DataFrame(
+                [{"Axe": k, "Anomalies": v} for k, v in meta["abnormal_by_category"].items()]
+            ).sort_values("Anomalies", ascending=False)
+            st.bar_chart(ax_df.set_index("Axe")["Anomalies"])
+
+        # Synergies
+        if meta.get("synergies"):
+            st.markdown("### 🔗 Synergies détectées")
+            for s in meta["synergies"]:
+                st.info(s)
+
+        # Observations (éditables)
         st.markdown("### 🔍 Observations Croisées")
-        observations_text = "\n".join(st.session_state.cross_analysis_observations)
-        edited_observations = st.text_area(
+        obs_text = "\n".join(st.session_state.get("cross_analysis_observations", []))
+        edited_obs = st.text_area(
             "Observations (une par ligne)",
-            value=observations_text,
-            height=200,
-            help="Modifiez, ajoutez ou supprimez des observations"
+            value=obs_text,
+            height=220,
+            help="Modifie/ajoute/supprime. Ce texte peut être injecté dans le PDF."
         )
-        
-        if edited_observations != observations_text:
-            st.session_state.cross_analysis_observations = [
-                line.strip() for line in edited_observations.split("\n") if line.strip()
-            ]
-        
-        # Actions prioritaires
+        st.session_state.cross_analysis_observations = [x.strip() for x in edited_obs.split("\n") if x.strip()]
+
+        # Actions (éditables + priorités)
         st.markdown("### ⚡ Actions Prioritaires")
-        for i, action in enumerate(st.session_state.cross_analysis_actions):
-            col1, col2, col3 = st.columns([3, 1, 1])
-            
+        actions = st.session_state.get("cross_analysis_actions", []) or []
+        for i, a in enumerate(actions):
+            if isinstance(a, dict):
+                txt = a.get("text", "")
+                pr = a.get("priority", "medium")
+                rat = a.get("rationale", "")
+            else:
+                txt = str(a)
+                pr = "medium"
+                rat = ""
+
+            col1, col2, col3 = st.columns([4, 1, 1])
             with col1:
-                if isinstance(action, dict):
-                    action_text = action.get("text", "")
-                    priority = action.get("priority", "medium")
-                else:
-                    action_text = str(action)
-                    priority = "medium"
-                
-                new_text = st.text_input(
-                    f"Action {i+1}",
-                    value=action_text,
-                    key=f"action_{i}_text"
-                )
-            
+                new_txt = st.text_input(f"Action {i+1}", value=txt, key=f"cross_action_txt_{i}")
+                new_rat = st.text_input(f"Rationale {i+1}", value=rat, key=f"cross_action_rat_{i}")
             with col2:
-                new_priority = st.selectbox(
-                    "Priorité",
-                    ["high", "medium", "low"],
-                    index=["high", "medium", "low"].index(priority),
-                    key=f"action_{i}_priority"
-                )
-            
+                new_pr = st.selectbox("Priorité", ["high", "medium", "low"], index=["high","medium","low"].index(pr), key=f"cross_action_pr_{i}")
             with col3:
-                if st.button("🗑️", key=f"delete_action_{i}"):
-                    st.session_state.cross_analysis_actions.pop(i)
+                if st.button("🗑️", key=f"cross_action_del_{i}"):
+                    actions.pop(i)
+                    st.session_state.cross_analysis_actions = actions
                     st.rerun()
-            
-            st.session_state.cross_analysis_actions[i] = {
-                "text": new_text,
-                "priority": new_priority
-            }
-        
+
+            actions[i] = {"text": new_txt, "priority": new_pr, "rationale": new_rat}
+
+        st.session_state.cross_analysis_actions = actions
+
         if st.button("➕ Ajouter une action"):
-            st.session_state.cross_analysis_actions.append({
-                "text": "Nouvelle action",
-                "priority": "medium"
-            })
+            actions.append({"text": "Nouvelle action", "priority": "medium", "rationale": ""})
+            st.session_state.cross_analysis_actions = actions
             st.rerun()
 
-# ═════════════════════════════════════════════════════════════════════
-# TAB 3: SUIVI
-# ═════════════════════════════════════════════════════════════════════
+        # Templates prêts à copier
+        templates = (meta.get("templates") or {})
+        with st.expander("🧩 Templates (résumé / hypothèses / plan 4 semaines)", expanded=True):
+            st.text_area("Résumé (copier/coller)", value=templates.get("resume", ""), height=120, key="tpl_resume")
+            st.text_area("Hypothèses mécanistiques", value=templates.get("hypotheses", ""), height=140, key="tpl_hyp")
+            st.text_area("Plan 4 semaines", value=templates.get("plan_4_semaines", ""), height=180, key="tpl_plan")
+
+        # Historique (simple)
+        hist = st.session_state.get("analysis_history", [])
+        if hist:
+            with st.expander("📈 Historique des analyses (prototype)", expanded=False):
+                hdf = pd.DataFrame(hist)
+                st.dataframe(hdf, use_container_width=True, hide_index=True)
+                if "gut_metabolic_score" in hdf.columns and hdf["gut_metabolic_score"].notna().any():
+                    st.line_chart(hdf.set_index("ts")[["gut_metabolic_score"]])
+
+
 with tabs[3]:
     st.subheader("📅 Plan de Suivi")
 
