@@ -1,8 +1,10 @@
 """
-UNILABS / ALGO-LIFE - Plateforme Multimodale v12.0
-✅ Tableau microbiote éditable dans Import & Données
-✅ Édition des biomarqueurs (valeurs, unités, références)
-✅ Édition des recommandations (Nutrition, Micronutrition, Lifestyle)
+UNILABS / ALGO-LIFE - Plateforme Multimodale v11.0
+✅ Affichage complet des recommandations dans l'UI
+✅ Segmentation claire : Prioritaires, À surveiller, Nutrition, Micronutrition, etc.
+✅ Analyses croisées multimodales fonctionnelles
+✅ Microbiote robuste
+✅ Export PDF cohérent avec l'UI
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from rules_engine import RulesEngine
 
 # Tentative import PDF generator
 try:
-    from pdf_generator_visual import generate_multimodal_report
+    from pdf_generator import generate_multimodal_report
     PDF_EXPORT_AVAILABLE = True
 except Exception:
     PDF_EXPORT_AVAILABLE = False
@@ -100,63 +102,105 @@ class BFrailScore:
         
         if data.vitamin_d < 20:
             linear_score += coeffs['vit_d_lt_20']
+        elif 20 <= data.vitamin_d < 30:
+            linear_score += 0.12
         
-        frailty_prob = (np.exp(linear_score) / (1 + np.exp(linear_score))) * 100
+        probability = 1 / (1 + np.exp(-linear_score))
+        bio_age = data.age + (probability - 0.3) * 20
         
-        bio_age = data.age + (linear_score * 2)
-        
-        if frailty_prob < 15:
-            risk_category = "Faible"
+        if probability < 0.3:
+            risk_category = "Faible risque"
             color = "green"
-        elif frailty_prob < 30:
-            risk_category = "Modéré"
+        elif probability < 0.5:
+            risk_category = "Risque modéré"
             color = "orange"
         else:
-            risk_category = "Élevé"
+            risk_category = "Risque élevé"
             color = "red"
         
         return {
-            "bio_age": round(bio_age, 1),
-            "frailty_probability": round(frailty_prob, 1),
-            "linear_score": round(linear_score, 2),
-            "risk_category": risk_category,
-            "color": color
+            'bfrail_score': round(linear_score, 2),
+            'frailty_probability': round(probability * 100, 1),
+            'bio_age': round(bio_age, 1),
+            'risk_category': risk_category,
+            'color': color,
+            'has_albumin': has_albumin
         }
 
 
 # =====================================================================
-# HELPER FUNCTIONS
+# HELPERS
 # =====================================================================
-def _file_to_temp_path(uploaded_file, ext: str) -> Optional[str]:
+def _file_to_temp_path(uploaded_file, suffix: str) -> str:
     """Sauvegarde un fichier uploadé dans un fichier temporaire"""
-    if uploaded_file is None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(uploaded_file.read())
+        return tmp.name
+
+
+def _safe_float(x) -> Optional[float]:
+    """Conversion sécurisée en float"""
+    try:
+        if x is None:
+            return None
+        s = str(x).strip().replace(",", ".")
+        s = re.sub(r"[^0-9\.\-\+eE]", "", s)
+        return float(s) if s else None
+    except Exception:
         return None
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        return tmp_file.name
 
 
-def _dict_bio_to_dataframe(bio_dict: Dict) -> pd.DataFrame:
-    """Convertit dict biomarqueurs en DataFrame"""
-    if not bio_dict:
-        return pd.DataFrame()
-    
+def _calc_age_from_birthdate(birthdate: date) -> int:
+    """Calcule l'âge à partir de la date de naissance"""
+    today = date.today()
+    age = today.year - birthdate.year - ((today.month, today.day) < (birthdate.month, birthdate.day))
+    return age
+
+
+def _calc_bmi(weight_kg: Any, height_cm: Any) -> Optional[float]:
+    """Calcule l'IMC"""
+    w = _safe_float(weight_kg)
+    h = _safe_float(height_cm)
+    if w is None or h is None or h <= 0:
+        return None
+    hm = h / 100.0
+    if hm <= 0:
+        return None
+    return w / (hm * hm)
+
+
+def _dict_bio_to_dataframe(bio_dict: Dict[str, Any]) -> pd.DataFrame:
+    """Convertit dictionnaire biologie en DataFrame"""
     rows = []
-    for name, data in bio_dict.items():
+    for name, data in (bio_dict or {}).items():
+        biomarker = str(name).strip()
+        if not biomarker or biomarker.lower() == "nan":
+            continue
+        
+        if isinstance(data, dict):
+            val = data.get("value", data.get("Valeur", ""))
+            unit = data.get("unit", data.get("Unité", ""))
+            ref = data.get("reference", data.get("Référence", ""))
+            status = data.get("status", data.get("Statut", "Normal"))
+        else:
+            val, unit, ref, status = data, "", "", "Normal"
+        
         rows.append({
-            "Biomarqueur": name,
-            "Valeur": data.get("value", ""),
-            "Unité": data.get("unit", ""),
-            "Référence": data.get("reference", ""),
-            "Statut": data.get("status", "Inconnu")
+            "Biomarqueur": biomarker,
+            "Valeur": val,
+            "Unité": unit,
+            "Référence": ref,
+            "Statut": status
         })
     
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["Valeur"] = df["Valeur"].apply(_safe_float)
+    return df
 
 
 def _microbiome_to_dataframe(bacteria: List[Dict]) -> pd.DataFrame:
-    """Convertit les données bactériennes en DataFrame"""
+    """✅ NOUVEAU : Convertit les données bactériennes en DataFrame éditable"""
     if not bacteria:
         return pd.DataFrame()
     
@@ -172,135 +216,142 @@ def _microbiome_to_dataframe(bacteria: List[Dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _extract_biomarkers_for_bfrail(bio_df: pd.DataFrame) -> Dict[str, float]:
+    """Extrait les biomarqueurs nécessaires au bFRAil Score"""
+    markers = {}
+    
+    if bio_df.empty:
+        return markers
+    
+    for _, row in bio_df.iterrows():
+        name = str(row.get("Biomarqueur", "")).lower()
+        val = _safe_float(row.get("Valeur"))
+        
+        if val is None:
+            continue
+        
+        if "crp" in name and "ultrasensible" in name:
+            markers['crp'] = val
+        elif "hémoglobine" in name or "hemoglobin" in name:
+            markers['hemoglobin'] = val
+        elif "vitamine d" in name or "vitamin d" in name:
+            markers['vitamin_d'] = val
+        elif "albumine" in name or "albumin" in name:
+            markers['albumin'] = val
+    
+    return markers
+
+
 @st.cache_resource
 def _get_rules_engine():
     """Charge le moteur de règles (cached)"""
     if not os.path.exists(RULES_EXCEL_PATH):
+        st.error(f"❌ Fichier de règles introuvable: {RULES_EXCEL_PATH}")
         return None
     try:
         return RulesEngine(RULES_EXCEL_PATH)
-    except Exception:
+    except Exception as e:
+        st.error(f"❌ Erreur chargement règles: {e}")
         return None
-
-
-def _extract_biomarkers_for_bfrail(df: pd.DataFrame) -> Dict:
-    """Extrait les biomarqueurs nécessaires pour bFRAil"""
-    markers = {}
-    
-    for _, row in df.iterrows():
-        name = row["Biomarqueur"].lower()
-        try:
-            value = float(row["Valeur"])
-        except:
-            continue
-        
-        if "crp" in name and "ultrasensible" in name:
-            markers['crp'] = value
-        elif "hémoglobine" in name or "hemoglobin" in name:
-            markers['hemoglobin'] = value
-        elif "vitamine d" in name or "vitamin d" in name:
-            markers['vitamin_d'] = value
-        elif "albumine" in name or "albumin" in name:
-            markers['albumin'] = value
-    
-    return markers
 
 
 # =====================================================================
 # SESSION STATE INITIALIZATION
 # =====================================================================
-if "biology_df" not in st.session_state:
-    st.session_state.biology_df = pd.DataFrame()
-
-if "microbiome_data" not in st.session_state:
-    st.session_state.microbiome_data = {}
-
-if "microbiome_df" not in st.session_state:
-    st.session_state.microbiome_df = pd.DataFrame()
-
-if "consolidated_recommendations" not in st.session_state:
-    st.session_state.consolidated_recommendations = {}
-
-if "cross_analysis" not in st.session_state:
-    st.session_state.cross_analysis = []
-
-if "data_extracted" not in st.session_state:
-    st.session_state.data_extracted = False
-
-if "patient_info" not in st.session_state:
-    st.session_state.patient_info = {
-        "name": "",
-        "age": 50,
-        "sex": "F",
-        "context": ""
+def init_session_state():
+    """Initialise toutes les variables de session"""
+    defaults = {
+        "data_extracted": False,
+        "biology_df": pd.DataFrame(),
+        "microbiome_data": {},
+        "microbiome_df": pd.DataFrame(),  # ✅ NOUVEAU : DataFrame pour tableau microbiote
+        "patient_info": {},
+        "consolidated_recommendations": {},
+        "cross_analysis": [],
+        "follow_up": {},
+        "bio_age_result": None
     }
-
-if "follow_up" not in st.session_state:
-    st.session_state.follow_up = {
-        "next_date": "",
-        "next_tests": [],
-        "objectives": ""
-    }
-
-if "bio_age_result" not in st.session_state:
-    st.session_state.bio_age_result = None
+    
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
 # =====================================================================
-# PAGE CONFIG
+# STREAMLIT APP
 # =====================================================================
 st.set_page_config(
-    page_title="ALGO-LIFE | UNILABS",
+    page_title="ALGO-LIFE - Analyse Multimodale",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# =====================================================================
+init_session_state()
+
+# ─────────────────────────────────────────────────────────────────────
 # SIDEBAR - INFORMATIONS PATIENT
-# =====================================================================
+# ─────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🧬 ALGO-LIFE")
-    st.caption("Powered by UNILABS")
-    st.markdown("---")
+    st.image("https://via.placeholder.com/200x80/0A4D8C/FFFFFF?text=UNILABS", use_container_width=True)
+    st.title("👤 Informations Patient")
     
-    st.subheader("👤 Informations Patient")
-    
-    st.session_state.patient_info["name"] = st.text_input(
-        "Nom complet",
-        value=st.session_state.patient_info.get("name", "")
-    )
+    patient_name = st.text_input("Nom du patient", value=st.session_state.patient_info.get("name", ""))
     
     col1, col2 = st.columns(2)
     with col1:
-        st.session_state.patient_info["age"] = st.number_input(
-            "Âge",
-            min_value=1,
-            max_value=120,
-            value=st.session_state.patient_info.get("age", 50)
+        patient_sex = st.selectbox(
+            "Sexe",
+            options=["F", "H"],
+            index=0 if st.session_state.patient_info.get("sex", "F") == "F" else 1
         )
     with col2:
-        st.session_state.patient_info["sex"] = st.selectbox(
-            "Sexe",
-            options=["F", "M"],
-            index=0 if st.session_state.patient_info.get("sex") == "F" else 1
+        birthdate = st.date_input(
+            "Date de naissance",
+            value=st.session_state.patient_info.get("birthdate") or date(1980, 1, 1),
+            min_value=date(1920, 1, 1),
+            max_value=date.today()
         )
     
-    st.session_state.patient_info["context"] = st.text_area(
-        "Contexte clinique",
-        value=st.session_state.patient_info.get("context", ""),
+    patient_age = _calc_age_from_birthdate(birthdate)
+    st.info(f"📅 Âge: {patient_age} ans")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        patient_weight = st.number_input("Poids (kg)", min_value=30.0, max_value=200.0, value=70.0, step=0.1)
+    with col2:
+        patient_height = st.number_input("Taille (cm)", min_value=100.0, max_value=230.0, value=170.0, step=0.1)
+    
+    patient_bmi = _calc_bmi(patient_weight, patient_height)
+    if patient_bmi:
+        st.info(f"📊 IMC: {patient_bmi:.1f} kg/m²")
+    
+    patient_antecedents = st.text_area(
+        "Antécédents / Contexte clinique",
+        value=st.session_state.patient_info.get("antecedents", ""),
         height=100,
-        placeholder="Symptômes, antécédents, traitements..."
+        placeholder="Ex: Fatigue chronique, troubles digestifs..."
     )
     
-    st.markdown("---")
-    st.caption("Dr Thibault SUTTER, PhD")
-    st.caption("Biologiste - UNILABS Group")
+    if st.button("💾 Enregistrer les informations", use_container_width=True):
+        st.session_state.patient_info = {
+            "name": patient_name,
+            "sex": patient_sex,
+            "age": patient_age,
+            "birthdate": birthdate,
+            "weight": patient_weight,
+            "height": patient_height,
+            "bmi": patient_bmi,
+            "antecedents": patient_antecedents
+        }
+        st.success("✅ Informations sauvegardées")
 
 
-# =====================================================================
-# MAIN TABS
-# =====================================================================
+# ─────────────────────────────────────────────────────────────────────
+# MAIN CONTENT - TABS
+# ─────────────────────────────────────────────────────────────────────
+st.title("🧬 ALGO-LIFE - Analyse Multimodale de Biologie Fonctionnelle")
+
 tabs = st.tabs([
     "📥 Import & Données",
     "🔬 Interprétation",
@@ -364,7 +415,7 @@ with tabs[0]:
                         microbiome_dict = extract_idk_microbiome(micro_path, micro_excel_path)
                         st.session_state.microbiome_data = microbiome_dict
                         
-                        # Créer DataFrame microbiote
+                        # ✅ NOUVEAU : Créer le DataFrame microbiote pour tableau éditable
                         bacteria = microbiome_dict.get("bacteria", [])
                         st.session_state.microbiome_df = _microbiome_to_dataframe(bacteria)
                     
@@ -408,9 +459,7 @@ with tabs[0]:
         st.markdown("---")
         st.subheader("📊 Données Extraites")
         
-        # ─────────────────────────────────────────────────────────────
-        # BIOLOGIE - TABLEAU ÉDITABLE
-        # ─────────────────────────────────────────────────────────────
+        # Biologie
         if not st.session_state.biology_df.empty:
             st.markdown("### 🧪 Biomarqueurs")
             
@@ -427,9 +476,9 @@ with tabs[0]:
             col3.metric("⬆️ Élevés", high_count)
             col4.metric("❓ Inconnus", unknown_count)
             
-            st.info("💡 **Tableau éditable** : Cliquez sur une cellule pour modifier les valeurs, unités ou références")
+            # ✅ NOUVEAU : Tableau ÉDITABLE
+            st.info("💡 **Tableau éditable** : Double-cliquez sur une cellule pour modifier les valeurs, unités ou références")
             
-            # Tableau ÉDITABLE
             edited_bio_df = st.data_editor(
                 df,
                 use_container_width=True,
@@ -463,16 +512,14 @@ with tabs[0]:
                 key="bio_editor"
             )
             
-            # Sauvegarder les modifications
+            # Bouton de sauvegarde si modifications détectées
             if not edited_bio_df.equals(st.session_state.biology_df):
-                if st.button("💾 Sauvegarder les modifications des biomarqueurs", key="save_bio"):
+                if st.button("💾 Sauvegarder les modifications des biomarqueurs", type="primary", use_container_width=True):
                     st.session_state.biology_df = edited_bio_df
-                    st.success("✅ Modifications sauvegardées !")
+                    st.success("✅ Modifications des biomarqueurs sauvegardées !")
                     st.rerun()
         
-        # ─────────────────────────────────────────────────────────────
-        # MICROBIOTE - TABLEAU ÉDITABLE
-        # ─────────────────────────────────────────────────────────────
+        # Microbiote
         if st.session_state.microbiome_data:
             st.markdown("### 🦠 Microbiote")
             micro = st.session_state.microbiome_data
@@ -487,60 +534,61 @@ with tabs[0]:
                 if div:
                     st.info(f"Diversité: {div}")
             
-            # NOUVEAU : Tableau des souches bactériennes
-            if not st.session_state.microbiome_df.empty:
-                st.markdown("#### 🧬 Groupes Bactériens")
-                
-                df_micro = st.session_state.microbiome_df
+            bacteria = micro.get("bacteria", [])
+            if bacteria:
+                st.markdown(f"**{len(bacteria)} groupes bactériens analysés**")
                 
                 # Comptage résultats
-                expected = len(df_micro[df_micro["Résultat"] == "Expected"])
-                slight = len(df_micro[df_micro["Résultat"].str.contains("Slightly", na=False)])
-                deviating = len(df_micro[df_micro["Résultat"] == "Deviating"])
+                expected = len([b for b in bacteria if b.get("result") == "Expected"])
+                slight = len([b for b in bacteria if b.get("result") == "Slightly deviating"])
+                deviating = len([b for b in bacteria if b.get("result") == "Deviating"])
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("✅ Attendus", expected)
                 col2.metric("⚠️ Légèrement déviants", slight)
                 col3.metric("🔴 Déviants", deviating)
                 
-                st.info("💡 **Tableau éditable** : Modifiez les résultats et abondances si nécessaire")
-                
-                # Tableau ÉDITABLE du microbiote
-                edited_micro_df = st.data_editor(
-                    df_micro,
-                    use_container_width=True,
-                    height=400,
-                    column_config={
-                        "Catégorie": st.column_config.TextColumn(
-                            "Catégorie",
-                            width="small",
-                            disabled=True
-                        ),
-                        "Groupe": st.column_config.TextColumn(
-                            "Groupe",
-                            width="large",
-                            disabled=True
-                        ),
-                        "Résultat": st.column_config.SelectboxColumn(
-                            "Résultat",
-                            options=["Expected", "Slightly deviating", "Deviating"],
-                            width="medium"
-                        ),
-                        "Abondance": st.column_config.TextColumn(
-                            "Abondance",
-                            width="small"
-                        )
-                    },
-                    num_rows="fixed",
-                    key="micro_editor"
-                )
-                
-                # Sauvegarder les modifications
-                if not edited_micro_df.equals(st.session_state.microbiome_df):
-                    if st.button("💾 Sauvegarder les modifications du microbiote", key="save_micro"):
-                        st.session_state.microbiome_df = edited_micro_df
-                        st.success("✅ Modifications sauvegardées !")
-                        st.rerun()
+                # ✅ NOUVEAU : Tableau ÉDITABLE des groupes bactériens
+                if not st.session_state.microbiome_df.empty:
+                    st.markdown("---")
+                    st.markdown("#### 🧬 Tableau des Groupes Bactériens")
+                    st.info("💡 **Tableau éditable** : Modifiez les résultats et abondances si nécessaire")
+                    
+                    edited_micro_df = st.data_editor(
+                        st.session_state.microbiome_df,
+                        use_container_width=True,
+                        height=400,
+                        column_config={
+                            "Catégorie": st.column_config.TextColumn(
+                                "Catégorie",
+                                width="small",
+                                disabled=True
+                            ),
+                            "Groupe": st.column_config.TextColumn(
+                                "Groupe",
+                                width="large",
+                                disabled=True
+                            ),
+                            "Résultat": st.column_config.SelectboxColumn(
+                                "Résultat",
+                                options=["Expected", "Slightly deviating", "Deviating"],
+                                width="medium"
+                            ),
+                            "Abondance": st.column_config.TextColumn(
+                                "Abondance",
+                                width="small"
+                            )
+                        },
+                        num_rows="fixed",
+                        key="micro_editor"
+                    )
+                    
+                    # Bouton de sauvegarde si modifications détectées
+                    if not edited_micro_df.equals(st.session_state.microbiome_df):
+                        if st.button("💾 Sauvegarder les modifications du microbiote", type="primary", use_container_width=True):
+                            st.session_state.microbiome_df = edited_micro_df
+                            st.success("✅ Modifications du microbiote sauvegardées !")
+                            st.rerun()
         
         # Âge biologique
         if st.session_state.bio_age_result:
@@ -563,7 +611,7 @@ with tabs[0]:
                 st.metric("Catégorie de risque", f"{color_map.get(result['color'], '⚪')} {result['risk_category']}")
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 1: INTERPRÉTATION (conservé tel quel pour l'instant)
+# TAB 1: INTERPRÉTATION
 # ═════════════════════════════════════════════════════════════════════
 with tabs[1]:
     st.subheader("🔬 Interprétation des Résultats")
@@ -571,126 +619,484 @@ with tabs[1]:
     if not st.session_state.data_extracted:
         st.warning("⚠️ Veuillez d'abord extraire les données dans l'onglet 'Import & Données'")
     else:
-        st.info("Cette section sera développée dans la prochaine version")
+        consolidated = st.session_state.consolidated_recommendations
+        
+        if not consolidated:
+            st.info("ℹ️ Aucune interprétation générée")
+        else:
+            # Résumé global
+            summary = consolidated.get("summary", {})
+            
+            st.markdown("### 📊 Résumé Global")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            col1.metric("Anomalies détectées", summary.get("anomalies_count", 0))
+            col2.metric("Paramètres critiques", summary.get("critical_count", 0))
+            col3.metric("Dysbiose", summary.get("dysbiosis_level", "Aucune"))
+            col4.metric("Recommandations totales", summary.get("total_recommendations", 0))
+            
+            st.markdown("---")
+            
+            # Détails biologie
+            bio_details = consolidated.get("biology_details", [])
+            if bio_details:
+                st.markdown("### 🧪 Biologie - Détails")
+                
+                # Filtres
+                filter_col1, filter_col2 = st.columns(2)
+                with filter_col1:
+                    status_filter = st.multiselect(
+                        "Filtrer par statut",
+                        options=["Bas", "Normal", "Élevé", "Inconnu"],
+                        default=["Bas", "Élevé"]
+                    )
+                with filter_col2:
+                    priority_filter = st.multiselect(
+                        "Filtrer par priorité",
+                        options=["critical", "high", "medium", "normal"],
+                        default=["critical", "high", "medium"]
+                    )
+                
+                # Affichage cartes biomarqueurs
+                filtered_bio = [
+                    b for b in bio_details
+                    if b.get("status") in status_filter and b.get("priority") in priority_filter
+                ]
+                
+                for bio in filtered_bio:
+                    with st.expander(
+                        f"{'🔴' if bio.get('priority') == 'critical' else '🟠' if bio.get('priority') == 'high' else '🟡' if bio.get('priority') == 'medium' else '🟢'} "
+                        f"{bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
+                        expanded=(bio.get('priority') in ['critical', 'high'])
+                    ):
+                        st.markdown(f"**Référence:** {bio.get('reference')}")
+                        
+                        if bio.get('interpretation'):
+                            st.markdown("**Interprétation:**")
+                            st.info(bio.get('interpretation'))
+            
+            # Microbiote
+            micro_details = consolidated.get("microbiome_details", [])
+            if micro_details:
+                st.markdown("---")
+                st.markdown("### 🦠 Microbiote - Détails")
+                
+                # Groupes déviants seulement
+                deviating = [m for m in micro_details if m.get("severity", 0) > 0]
+                
+                if not deviating:
+                    st.success("✅ Tous les groupes bactériens sont dans les normes attendues")
+                else:
+                    for micro in deviating:
+                        severity = micro.get("severity", 0)
+                        icon = "🔴" if severity >= 2 else "🟠"
+                        
+                        with st.expander(
+                            f"{icon} {micro.get('category')} - {micro.get('group')} ({micro.get('result')})",
+                            expanded=(severity >= 2)
+                        ):
+                            if micro.get('interpretation'):
+                                st.markdown("**Interprétation:**")
+                                st.info(micro.get('interpretation'))
+            
+            # Analyses croisées
+            cross = st.session_state.cross_analysis
+            if cross:
+                st.markdown("---")
+                st.markdown("### 🔄 Analyses Croisées Multimodales")
+                
+                for ca in cross:
+                    severity_icon = {
+                        "critical": "🔴",
+                        "warning": "🟠",
+                        "info": "ℹ️"
+                    }.get(ca.get("severity"), "ℹ️")
+                    
+                    with st.expander(
+                        f"{severity_icon} {ca.get('title')}",
+                        expanded=(ca.get("severity") == "critical")
+                    ):
+                        st.markdown(ca.get("description"))
+                        
+                        if ca.get("recommendations"):
+                            st.markdown("**Recommandations associées:**")
+                            for reco in ca.get("recommendations"):
+                                st.markdown(f"- {reco}")
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 2: RECOMMANDATIONS - ÉDITABLES
+# TAB 2: RECOMMANDATIONS
 # ═════════════════════════════════════════════════════════════════════
 with tabs[2]:
-    st.subheader("🔄 Recommandations Personnalisées")
+    st.subheader("💊 Plan Thérapeutique Personnalisé")
+    st.markdown("*Recommandations générées par IA à partir du système de règles*")
     
     if not st.session_state.data_extracted:
-        st.warning("⚠️ Veuillez d'abord extraire les données dans l'onglet 'Import & Données'")
+        st.warning("⚠️ Veuillez d'abord extraire les données")
     else:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
         
-        if not recommendations:
-            st.info("Aucune recommandation générée")
+        if not any(recommendations.values()):
+            st.info("ℹ️ Aucune recommandation spécifique générée")
         else:
-            st.info("💡 **Recommandations éditables** : Modifiez le texte directement dans les zones ci-dessous")
+            # ─────────────────────────────────────────────────────────
+            # 🔥 PRIORITAIRES
+            # ─────────────────────────────────────────────────────────
+            prioritaires = recommendations.get("Prioritaires", [])
+            if prioritaires:
+                st.markdown("### 🔥 Actions Prioritaires")
+                with st.container():
+                    st.markdown(
+                        """
+                        <style>
+                        .priority-box {
+                            background-color: #ffebee;
+                            border-left: 4px solid #f44336;
+                            padding: 15px;
+                            border-radius: 5px;
+                            margin-bottom: 10px;
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    for i, item in enumerate(prioritaires, 1):
+                        st.markdown(
+                            f'<div class="priority-box">🔴 <strong>{i}.</strong> {item}</div>',
+                            unsafe_allow_html=True
+                        )
+                st.markdown("---")
             
             # ─────────────────────────────────────────────────────────
-            # NUTRITION - ÉDITABLE
+            # ⚠️ À SURVEILLER
             # ─────────────────────────────────────────────────────────
-            nutrition_items = recommendations.get("Nutrition", [])
-            if nutrition_items:
-                st.markdown("### 🥗 Nutrition")
-                nutrition_text = "\n".join([f"• {item}" for item in nutrition_items])
-                
-                edited_nutrition = st.text_area(
-                    "Recommandations nutritionnelles",
-                    value=nutrition_text,
-                    height=200,
-                    key="nutrition_editor"
-                )
-                
-                if st.button("💾 Sauvegarder Nutrition", key="save_nutrition"):
-                    # Convertir le texte en liste
-                    new_items = [line.strip("• ").strip() for line in edited_nutrition.split("\n") if line.strip()]
-                    st.session_state.consolidated_recommendations["recommendations"]["Nutrition"] = new_items
-                    st.success("✅ Recommandations nutritionnelles sauvegardées !")
-                    st.rerun()
+            a_surveiller = recommendations.get("À surveiller", [])
+            if a_surveiller:
+                with st.expander("⚠️ **À Surveiller**", expanded=True):
+                    for i, item in enumerate(a_surveiller, 1):
+                        st.markdown(f"**{i}.** {item}")
+                st.markdown("---")
             
             # ─────────────────────────────────────────────────────────
-            # MICRONUTRITION - ÉDITABLE
+            # 🥗 NUTRITION
             # ─────────────────────────────────────────────────────────
-            micronutrition_items = recommendations.get("Micronutrition", [])
-            if micronutrition_items:
-                st.markdown("### 💊 Micronutrition")
-                micronutrition_text = "\n".join([f"• {item}" for item in micronutrition_items])
-                
-                edited_micronutrition = st.text_area(
-                    "Recommandations en micronutrition",
-                    value=micronutrition_text,
-                    height=200,
-                    key="micronutrition_editor"
-                )
-                
-                if st.button("💾 Sauvegarder Micronutrition", key="save_micronutrition"):
-                    new_items = [line.strip("• ").strip() for line in edited_micronutrition.split("\n") if line.strip()]
-                    st.session_state.consolidated_recommendations["recommendations"]["Micronutrition"] = new_items
-                    st.success("✅ Recommandations en micronutrition sauvegardées !")
-                    st.rerun()
-            
-            # ─────────────────────────────────────────────────────────
-            # HYGIÈNE DE VIE - ÉDITABLE
-            # ─────────────────────────────────────────────────────────
-            lifestyle_items = recommendations.get("Hygiène de vie", [])
-            if lifestyle_items:
-                st.markdown("### 🏃 Hygiène de Vie")
-                lifestyle_text = "\n".join([f"• {item}" for item in lifestyle_items])
-                
-                edited_lifestyle = st.text_area(
-                    "Recommandations d'hygiène de vie",
-                    value=lifestyle_text,
-                    height=200,
-                    key="lifestyle_editor"
-                )
-                
-                if st.button("💾 Sauvegarder Hygiène de Vie", key="save_lifestyle"):
-                    new_items = [line.strip("• ").strip() for line in edited_lifestyle.split("\n") if line.strip()]
-                    st.session_state.consolidated_recommendations["recommendations"]["Hygiène de vie"] = new_items
-                    st.success("✅ Recommandations d'hygiène de vie sauvegardées !")
-                    st.rerun()
-            
-            # Afficher les autres sections (non éditables pour l'instant)
-            st.markdown("---")
-            other_sections = ["Prioritaires", "À surveiller", "Examens complémentaires", "Suivi"]
-            for section in other_sections:
-                items = recommendations.get(section, [])
-                if items:
-                    icon_map = {
-                        "Prioritaires": "🔥",
-                        "À surveiller": "⚠️",
-                        "Examens complémentaires": "🔬",
-                        "Suivi": "📅"
-                    }
-                    st.markdown(f"### {icon_map.get(section, '📋')} {section}")
-                    for item in items:
+            nutrition = recommendations.get("Nutrition", [])
+            if nutrition:
+                with st.expander("🥗 **Nutrition & Diététique**", expanded=True):
+                    st.markdown(
+                        """
+                        <div style="background-color: #f1f8e9; padding: 15px; border-radius: 5px; border-left: 4px solid #8bc34a;">
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    for i, item in enumerate(nutrition, 1):
                         st.markdown(f"• {item}")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("---")
+            
+            # ─────────────────────────────────────────────────────────
+            # 💊 MICRONUTRITION
+            # ─────────────────────────────────────────────────────────
+            micronutrition = recommendations.get("Micronutrition", [])
+            if micronutrition:
+                with st.expander("💊 **Micronutrition**", expanded=True):
+                    st.markdown(
+                        """
+                        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; border-left: 4px solid #2196f3;">
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    for i, item in enumerate(micronutrition, 1):
+                        st.markdown(f"• {item}")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("---")
+            
+            # ─────────────────────────────────────────────────────────
+            # 🏃 HYGIÈNE DE VIE
+            # ─────────────────────────────────────────────────────────
+            hygiene_vie = recommendations.get("Hygiène de vie", [])
+            if hygiene_vie:
+                with st.expander("🏃 **Hygiène de Vie**", expanded=True):
+                    st.markdown(
+                        """
+                        <div style="background-color: #fff3e0; padding: 15px; border-radius: 5px; border-left: 4px solid #ff9800;">
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    for i, item in enumerate(hygiene_vie, 1):
+                        st.markdown(f"• {item}")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("---")
+            
+            # ─────────────────────────────────────────────────────────
+            # 🔬 EXAMENS COMPLÉMENTAIRES
+            # ─────────────────────────────────────────────────────────
+            examens = recommendations.get("Examens complémentaires", [])
+            if examens:
+                with st.expander("🔬 **Examens Complémentaires**", expanded=False):
+                    for i, item in enumerate(examens, 1):
+                        st.markdown(f"**{i}.** {item}")
+                st.markdown("---")
+            
+            # ─────────────────────────────────────────────────────────
+            # 📅 SUIVI
+            # ─────────────────────────────────────────────────────────
+            suivi = recommendations.get("Suivi", [])
+            if suivi:
+                with st.expander("📅 **Plan de Suivi**", expanded=False):
+                    for i, item in enumerate(suivi, 1):
+                        st.markdown(f"**{i}.** {item}")
+            
+            # ─────────────────────────────────────────────────────────
+            # ÉDITION DES RECOMMANDATIONS
+            # ─────────────────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("### ✏️ Édition des Recommandations")
+            
+            edit_section = st.selectbox(
+                "Sélectionner une section à modifier",
+                options=list(recommendations.keys())
+            )
+            
+            if edit_section:
+                current_items = recommendations.get(edit_section, [])
+                edited_text = st.text_area(
+                    f"Modifier {edit_section} (une recommandation par ligne)",
+                    value="\n".join(current_items),
+                    height=200
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("💾 Sauvegarder les modifications", use_container_width=True):
+                        new_items = [line.strip() for line in edited_text.split("\n") if line.strip()]
+                        st.session_state.consolidated_recommendations["recommendations"][edit_section] = new_items
+                        st.success("✅ Modifications sauvegardées")
+                        st.rerun()
+                
+                with col2:
+                    if st.button("➕ Ajouter une nouvelle recommandation", use_container_width=True):
+                        new_reco = st.text_input("Nouvelle recommandation")
+                        if new_reco:
+                            recommendations[edit_section].append(new_reco)
+                            st.success("✅ Recommandation ajoutée")
+                            st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 3: SUIVI (conservé tel quel)
+# TAB 3: SUIVI
 # ═════════════════════════════════════════════════════════════════════
 with tabs[3]:
     st.subheader("📅 Plan de Suivi")
     
     if not st.session_state.data_extracted:
-        st.warning("⚠️ Veuillez d'abord extraire les données dans l'onglet 'Import & Données'")
+        st.warning("⚠️ Veuillez d'abord extraire les données")
     else:
-        st.info("Cette section sera développée dans la prochaine version")
+        # Date prochain contrôle
+        next_date = st.date_input(
+            "Date du prochain contrôle",
+            value=st.session_state.follow_up.get("next_date") or date.today(),
+            key="follow_date"
+        )
+        
+        # Biomarqueurs à recontrôler
+        engine = _get_rules_engine()
+        if engine:
+            all_biomarkers = engine.list_all_biomarkers()
+            
+            # Suggestion automatique des biomarqueurs anormaux
+            suggested = []
+            if not st.session_state.biology_df.empty:
+                for _, row in st.session_state.biology_df.iterrows():
+                    if row.get("Statut") in ["Bas", "Élevé"]:
+                        biomarker = row.get("Biomarqueur")
+                        if biomarker:
+                            suggested.append(biomarker)
+            
+            prev_tests = st.session_state.follow_up.get("next_tests", [])
+            if isinstance(prev_tests, str):
+                prev_tests = [x.strip() for x in prev_tests.split(",") if x.strip()]
+            
+            # Combiner suggestions et sélection précédente
+            default_tests = list(set(suggested + prev_tests))
+            
+            next_tests_list = st.multiselect(
+                "Biomarqueurs à recontrôler",
+                options=all_biomarkers,
+                default=[t for t in default_tests if t in all_biomarkers],
+                key="follow_tests"
+            )
+        else:
+            next_tests_list = []
+            st.warning("⚠️ Moteur de règles non disponible")
+        
+        # Ajout manuel
+        manual_add = st.text_input(
+            "Ajouter un biomarqueur (manuel)",
+            placeholder="Ex: Homocystéine, DAO, LBP...",
+            key="follow_manual_add"
+        )
+        if manual_add.strip() and manual_add.strip() not in next_tests_list:
+            next_tests_list.append(manual_add.strip())
+        
+        # Plan de suivi
+        plan = st.text_area(
+            "Plan de suivi détaillé",
+            value=st.session_state.follow_up.get("plan", ""),
+            height=150,
+            key="follow_plan",
+            placeholder="Décrivez le plan de suivi personnalisé..."
+        )
+        
+        # Objectifs mesurables
+        objectives = st.text_area(
+            "Objectifs mesurables",
+            value=st.session_state.follow_up.get("objectives", ""),
+            height=150,
+            key="follow_objectives",
+            placeholder="Ex: Réduire LDL <1.0 g/L, Augmenter Vitamine D >40 ng/mL..."
+        )
+        
+        # Notes internes
+        clinician_notes = st.text_area(
+            "Notes internes (confidentielles)",
+            value=st.session_state.follow_up.get("clinician_notes", ""),
+            height=100,
+            key="follow_notes",
+            placeholder="Notes pour le praticien..."
+        )
+        
+        if st.button("💾 Enregistrer le plan de suivi", type="primary", use_container_width=True):
+            st.session_state.follow_up = {
+                "next_date": next_date,
+                "next_tests": next_tests_list,
+                "plan": plan,
+                "objectives": objectives,
+                "clinician_notes": clinician_notes
+            }
+            st.success("✅ Plan de suivi enregistré")
+        
+        # Affichage récapitulatif
+        if st.session_state.follow_up:
+            st.markdown("---")
+            st.markdown("### 📋 Récapitulatif du Suivi")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Prochain contrôle", next_date.strftime("%d/%m/%Y"))
+            with col2:
+                st.metric("Biomarqueurs à recontrôler", len(next_tests_list))
+            
+            if next_tests_list:
+                with st.expander("🔬 Liste des biomarqueurs"):
+                    for test in next_tests_list:
+                        st.markdown(f"• {test}")
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 4: EXPORT PDF (conservé tel quel)
+# TAB 4: EXPORT PDF
 # ═════════════════════════════════════════════════════════════════════
 with tabs[4]:
-    st.subheader("📄 Export PDF")
+    st.subheader("📄 Export Rapport PDF")
     
-    if not st.session_state.data_extracted:
-        st.warning("⚠️ Veuillez d'abord extraire les données dans l'onglet 'Import & Données'")
+    if not PDF_EXPORT_AVAILABLE:
+        st.error("❌ Module d'export PDF non disponible")
+        st.info("Vérifiez que pdf_generator.py est présent et configuré correctement")
     else:
-        st.info("L'export PDF utilisera les données modifiées dans les tableaux éditables")
-        
-        if st.button("📥 Générer le Rapport PDF", type="primary", use_container_width=True):
-            st.info("Export PDF en cours de développement avec le nouveau générateur visuel")
+        if not st.session_state.data_extracted:
+            st.warning("⚠️ Générez d'abord une analyse dans l'onglet 'Import & Données'")
+        else:
+            # Nom fichier
+            patient_name_clean = st.session_state.patient_info.get("name", "patient").replace(" ", "_")
+            default_filename = f"UNILABS_rapport_{patient_name_clean}_{datetime.now().strftime('%Y%m%d')}.pdf"
+            
+            pdf_filename = st.text_input(
+                "Nom du fichier PDF",
+                value=default_filename
+            )
+            
+            # Options PDF
+            st.markdown("### ⚙️ Options du Rapport")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                include_biology = st.checkbox("Inclure biologie détaillée", value=True)
+                include_microbiome = st.checkbox("Inclure microbiome détaillé", value=True)
+            with col2:
+                include_cross = st.checkbox("Inclure analyses croisées", value=True)
+                include_recommendations = st.checkbox("Inclure recommandations", value=True)
+            
+            # Génération
+            if st.button("📄 Générer le Rapport PDF", type="primary", use_container_width=True):
+                with st.spinner("⏳ Génération du rapport en cours..."):
+                    try:
+                        # Préparer les données
+                        patient_data = st.session_state.patient_info
+                        biology_data = st.session_state.biology_df.to_dict('records') if not st.session_state.biology_df.empty else []
+                        microbiome_data = st.session_state.microbiome_data
+                        consolidated = st.session_state.consolidated_recommendations
+                        
+                        # Filtrer selon les options
+                        if not include_biology:
+                            biology_data = []
+                        if not include_microbiome:
+                            microbiome_data = {}
+                        if not include_cross:
+                            consolidated["cross_analysis"] = []
+                        if not include_recommendations:
+                            consolidated["recommendations"] = {}
+                        
+                        # Générer PDF
+                        out_path = os.path.join(tempfile.gettempdir(), pdf_filename)
+                        
+                        pdf_path = generate_multimodal_report(
+                            patient_data=patient_data,
+                            biology_data=biology_data,
+                            microbiome_data=microbiome_data,
+                            recommendations=consolidated.get("recommendations", {}),
+                            cross_analysis=consolidated.get("cross_analysis", []),
+                            follow_up=st.session_state.follow_up,
+                            bio_age_result=st.session_state.bio_age_result,
+                            output_path=out_path
+                        )
+                        
+                        # Téléchargement
+                        with open(pdf_path, "rb") as f:
+                            pdf_bytes = f.read()
+                            st.download_button(
+                                "⬇️ Télécharger le Rapport PDF",
+                                data=pdf_bytes,
+                                file_name=pdf_filename,
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                        
+                        st.success("✅ Rapport PDF généré avec succès !")
+                        
+                        # Prévisualisation (optionnel)
+                        with st.expander("👁️ Prévisualiser le PDF"):
+                            import base64
+                            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+                            pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
+                            st.markdown(pdf_display, unsafe_allow_html=True)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Erreur lors de la génération du PDF: {e}")
+                        import traceback
+                        with st.expander("🐛 Détails de l'erreur"):
+                            st.code(traceback.format_exc())
+
+
+# ═════════════════════════════════════════════════════════════════════
+# FOOTER
+# ═════════════════════════════════════════════════════════════════════
+st.markdown("---")
+st.markdown(
+    """
+    <div style="text-align: center; color: #666; padding: 20px;">
+        <strong>ALGO-LIFE © 2026</strong> | Powered by UNILABS Group<br>
+        Dr Thibault SUTTER, PhD - Biologiste spécialisé en biologie fonctionnelle<br>
+        <em>Ce rapport est généré automatiquement par analyse multimodale IA.</em><br>
+        <em>Il ne remplace pas un avis médical personnalisé.</em>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
