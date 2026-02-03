@@ -149,16 +149,11 @@ def _safe_float(x) -> Optional[float]:
         return None
 
 
-
 def _normalize_reco_sections(reco_raw: Dict[str, Any]) -> Dict[str, List[str]]:
-    """Normalise la sortie du RulesEngine vers des sections UI stables.
-
-    Le RulesEngine renvoie typiquement:
-      - biology_interpretations: [{biomarker, nutrition_reco, micronutrition_reco, lifestyle_reco, ...}]
-      - microbiome_interpretations: [{group, nutrition_reco, supplementation_reco, lifestyle_reco, ...}]
-
-    L'UI, elle, attend des listes:
-      - Nutrition, Micronutrition, Lifestyle, Microbiome
+    """Transforme la sortie du RulesEngine en sections UI (Nutrition/Micronutrition/Lifestyle/Microbiome).
+    Le RulesEngine renvoie généralement:
+      - biology_interpretations: list[dict]
+      - microbiome_interpretations: list[dict]
     """
     if not isinstance(reco_raw, dict):
         return {"Nutrition": [], "Micronutrition": [], "Lifestyle": [], "Microbiome": []}
@@ -168,48 +163,41 @@ def _normalize_reco_sections(reco_raw: Dict[str, Any]) -> Dict[str, List[str]]:
     lifestyle: List[str] = []
     microbiome: List[str] = []
 
-    # --- Biologie
+    # Biologie
     for item in (reco_raw.get("biology_interpretations") or []):
         if not isinstance(item, dict):
             continue
         biom = str(item.get("biomarker", "")).strip()
         prefix = f"[{biom}] " if biom else ""
-
         n = item.get("nutrition_reco")
+        m = item.get("micronutrition_reco")
+        l = item.get("lifestyle_reco")
         if n:
             nutrition.append(prefix + str(n).strip())
-
-        m = item.get("micronutrition_reco")
         if m:
             micronut.append(prefix + str(m).strip())
-
-        l = item.get("lifestyle_reco")
         if l:
             lifestyle.append(prefix + str(l).strip())
 
-    # --- Microbiote
+    # Microbiote
     for item in (reco_raw.get("microbiome_interpretations") or []):
         if not isinstance(item, dict):
             continue
         grp = str(item.get("group", "")).strip()
         prefix = f"[{grp}] " if grp else ""
-
         n = item.get("nutrition_reco")
+        s = item.get("supplementation_reco")
+        l = item.get("lifestyle_reco")
         if n:
             nutrition.append(prefix + str(n).strip())
             microbiome.append(prefix + str(n).strip())
-
-        s = item.get("supplementation_reco")
         if s:
             micronut.append(prefix + str(s).strip())
             microbiome.append(prefix + str(s).strip())
-
-        l = item.get("lifestyle_reco")
         if l:
             lifestyle.append(prefix + str(l).strip())
             microbiome.append(prefix + str(l).strip())
 
-    # dédoublonnage stable
     def _dedupe(seq: List[str]) -> List[str]:
         seen = set()
         out: List[str] = []
@@ -227,7 +215,6 @@ def _normalize_reco_sections(reco_raw: Dict[str, Any]) -> Dict[str, List[str]]:
         "Lifestyle": _dedupe(lifestyle),
         "Microbiome": _dedupe(microbiome),
     }
-
 
 def _calc_age_from_birthdate(birthdate: date) -> int:
     """Calcule l'âge à partir de la date de naissance"""
@@ -897,18 +884,16 @@ with tabs[1]:
                         bio_df = st.session_state.biology_df
                         micro_data = st.session_state.microbiome_data
 
-                        # ✅ RulesEngine attend une LISTE de dicts (orient="records"), pas un DataFrame
-biology_list = []
-if isinstance(bio_df, pd.DataFrame) and not bio_df.empty:
-    biology_list = bio_df.to_dict(orient="records")
+                        reco_raw = engine.generate_recommendations(
+                            biology_data=(bio_df.to_dict(orient="records") if isinstance(bio_df, pd.DataFrame) and not bio_df.empty else []),
+                            microbiome_data=micro_data,
+                            patient_info=patient_fmt,
+                        )
 
-reco = engine.generate_recommendations(
-    biology_data=biology_list,
-    microbiome_data=micro_data,
-    patient_info=patient_fmt,
-)
-                        
-                        st.session_state.recommendations = reco
+                        # garder la sortie brute pour debug/PDF si besoin
+                        st.session_state.recommendations_raw = reco_raw
+                        # sections UI attendues par l'affichage existant
+                        st.session_state.recommendations = _normalize_reco_sections(reco_raw)
                         st.success("✅ Interprétation générée")
                         st.rerun()
                     except Exception as e:
@@ -918,13 +903,7 @@ reco = engine.generate_recommendations(
 
         # AFFICHAGE DES RECOMMANDATIONS
         if st.session_state.recommendations:
-            reco_raw = st.session_state.recommendations
-            reco = _normalize_reco_sections(reco_raw)
-
-            with st.expander("🛠️ Debug recos (si vide)"):
-                                st.write("Clés reco_raw :", list(reco_raw.keys()) if isinstance(reco_raw, dict) else type(reco_raw))
-                st.json(reco_raw)
-
+            reco = st.session_state.recommendations
 
             # Nutrition
             nutrition_items = reco.get("Nutrition", [])
