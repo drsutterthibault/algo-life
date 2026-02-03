@@ -16,515 +16,353 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from extractors import extract_synlab_biology, extract_idk_microbiome
 from rules_engine import RulesEngine
-from pdf_generator import generate_multimodal_report
 
 # Configuration de la page
 st.set_page_config(
-    page_title="Unilabs - Plateforme Médecin",
+    page_title="ALGO-LIFE - Plateforme Médecin",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personnalisé
+# CSS personnalisé pour ressembler à l'interface ALGO-LIFE
 st.markdown("""
 <style>
-    .editable-zone {
-        background: #fff9e6;
-        border: 2px solid #ffd700;
-        border-radius: 8px;
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 1.5rem;
-        margin: 1rem 0;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 2rem;
     }
-    .stRadio > label {
-        display: none;
+    .patient-info {
+        background: #f8f9ff;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+        margin-bottom: 1rem;
+    }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 1rem;
+    }
+    .reco-section {
+        background: #f0f8ff;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #b3d9ff;
+        margin-bottom: 1rem;
+    }
+    .status-normal {
+        color: #28a745;
+        font-weight: bold;
+    }
+    .status-low {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    .status-high {
+        color: #dc3545;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# CHEMIN VERS LE FICHIER EXCEL DES RÈGLES
-RULES_EXCEL_PATH = "rules_combined.xlsx"  # Modifie ce chemin selon ton fichier
+# CHEMIN VERS LE FICHIER EXCEL DES RÈGLES (robuste Streamlit Cloud)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RULES_EXCEL_PATH = os.path.join(BASE_DIR, "data", "Bases_regles_Synlab.xlsx")
 
 # FONCTION HELPER POUR COMPILER LES RECOMMANDATIONS AUTO
 def compile_recommendations_text(reco, category):
     """Compile les recommandations automatiques en un seul texte"""
     text_parts = []
-    
-    if category == 'nutrition':
-        if reco.get('biology_interpretations'):
-            bio_parts = [f"• {i['biomarker']}: {i['nutrition_reco']}" 
-                        for i in reco['biology_interpretations'] 
-                        if i.get('nutrition_reco')]
-            if bio_parts:
-                text_parts.append("**Basé sur l'analyse biologique:**\n" + "\n".join(bio_parts))
-        
-        if reco.get('microbiome_interpretations'):
-            micro_parts = [f"• {i['group']}: {i['nutrition_reco']}" 
-                          for i in reco['microbiome_interpretations'] 
-                          if i.get('nutrition_reco')]
-            if micro_parts:
-                text_parts.append("**Basé sur l'analyse microbiote:**\n" + "\n".join(micro_parts))
-    
-    elif category == 'micronutrition':
-        if reco.get('biology_interpretations'):
-            bio_parts = [f"• {i['biomarker']}: {i['micronutrition_reco']}" 
-                        for i in reco['biology_interpretations'] 
-                        if i.get('micronutrition_reco')]
-            if bio_parts:
-                text_parts.append("**Basé sur l'analyse biologique:**\n" + "\n".join(bio_parts))
-        
-        if reco.get('microbiome_interpretations'):
-            micro_parts = [f"• {i['group']}: {i['supplementation_reco']}" 
-                          for i in reco['microbiome_interpretations'] 
-                          if i.get('supplementation_reco')]
-            if micro_parts:
-                text_parts.append("**Basé sur l'analyse microbiote:**\n" + "\n".join(micro_parts))
-    
-    elif category == 'lifestyle':
-        if reco.get('biology_interpretations'):
-            bio_parts = [f"• {i['biomarker']}: {i['lifestyle_reco']}" 
-                        for i in reco['biology_interpretations'] 
-                        if i.get('lifestyle_reco')]
-            if bio_parts:
-                text_parts.append("**Basé sur l'analyse biologique:**\n" + "\n".join(bio_parts))
-        
-        if reco.get('microbiome_interpretations'):
-            micro_parts = [f"• {i['group']}: {i['lifestyle_reco']}" 
-                          for i in reco['microbiome_interpretations'] 
-                          if i.get('lifestyle_reco')]
-            if micro_parts:
-                text_parts.append("**Basé sur l'analyse microbiote:**\n" + "\n".join(micro_parts))
-    
-    elif category == 'multimodal':
-        if reco.get('cross_analysis'):
-            cross_parts = [f"• **{a.get('title', 'Analyse')}**: {a.get('description', '')}" 
-                          for a in reco['cross_analysis']]
-            if cross_parts:
-                text_parts.append("**Analyses croisées:**\n" + "\n".join(cross_parts))
-    
-    return "\n\n".join(text_parts)
+    if isinstance(reco, dict) and category in reco:
+        category_recos = reco[category]
+        if isinstance(category_recos, list):
+            for item in category_recos:
+                if isinstance(item, dict):
+                    # Format: {title: "...", content: "..."}
+                    title = item.get("title", "")
+                    content = item.get("content", "")
+                    if title and content:
+                        text_parts.append(f"• {title}: {content}")
+                    elif content:
+                        text_parts.append(f"• {content}")
+                elif isinstance(item, str):
+                    text_parts.append(f"• {item}")
+        elif isinstance(category_recos, str):
+            text_parts.append(category_recos)
+    return "\n".join(text_parts) if text_parts else ""
 
-def prepare_pdf_data():
-    """Transforme les données de session en format pour le PDF generator"""
-    patient_data = st.session_state.patient_data.copy()
-    if 'date_naissance' in patient_data:
-        patient_data['date_naissance'] = patient_data['date_naissance'].strftime('%d/%m/%Y')
-        today = datetime.now()
-        birth_date = datetime.strptime(patient_data['date_naissance'], '%d/%m/%Y')
-        patient_data['age'] = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-    
-    patient_data['nom'] = patient_data.get('nom', 'Patient')
-    patient_data['prenom'] = patient_data.get('prenom', '')
-    
-    biology_data = {'categories': {}, 'resume': ''}
-    
-    if st.session_state.recommendations and st.session_state.recommendations.get('biology_interpretations'):
-        categories = {}
-        for interp in st.session_state.recommendations['biology_interpretations']:
-            category = interp.get('category', 'Général')
-            if category not in categories:
-                categories[category] = []
-            
-            marker = {
-                'nom': interp['biomarker'],
-                'valeur': interp['value'],
-                'unite': interp.get('unit', ''),
-                'reference': interp.get('reference', ''),
-                'statut': 'normal' if interp['status'] == 'Normal' else 'haut' if '↑' in interp['status'] else 'bas',
-                'interpretations': [interp.get('interpretation', '')] if interp.get('interpretation') else []
-            }
-            categories[category].append(marker)
-        
-        biology_data['categories'] = categories
-        anomalies = len([i for i in st.session_state.recommendations['biology_interpretations'] if i['status'] != 'Normal'])
-        biology_data['resume'] = f"Analyse de {len(st.session_state.recommendations['biology_interpretations'])} biomarqueurs avec {anomalies} anomalie(s) détectée(s)."
-    
-    microbiome_data = {}
-    
-    if st.session_state.recommendations and st.session_state.recommendations.get('microbiome_summary'):
-        microbiome_summary = st.session_state.recommendations['microbiome_summary']
-        
-        microbiome_data['diversite'] = {
-            'score': microbiome_summary.get('diversity_score', 0),
-            'interpretation': microbiome_summary.get('diversity_interpretation', '')
-        }
-        
-        if st.session_state.microbiome_data and 'phyla' in st.session_state.microbiome_data:
-            microbiome_data['phyla'] = st.session_state.microbiome_data['phyla']
-        
-        if st.session_state.recommendations.get('microbiome_interpretations'):
-            microbiome_data['especes_cles'] = []
-            for interp in st.session_state.recommendations['microbiome_interpretations']:
-                if interp.get('result') != 'Expected':
-                    interpretation = interp.get('interpretation', '')
-                    if interpretation is None:
-                        interpretation = ''
-                    
-                    impact = 'positif' if 'beneficial' in interpretation.lower() else 'negatif'
-                    
-                    microbiome_data['especes_cles'].append({
-                        'nom': interp['group'],
-                        'description': interpretation,
-                        'impact': impact
-                    })
-    
-    cross_analysis = {}
-    if st.session_state.recommendations and st.session_state.recommendations.get('cross_analysis'):
-        cross_analysis['correlations'] = st.session_state.recommendations['cross_analysis']
-    
-    recommendations = {
-        'nutrition': {'privilegier': [], 'limiter': []},
-        'supplementation': []
-    }
-    
-    if 'editable_reco' in st.session_state:
-        recommendations['nutrition']['manual_text'] = st.session_state.editable_reco.get('reco_nutrition', '')
-        recommendations['micronutrition_manual'] = st.session_state.editable_reco.get('reco_micronutrition', '')
-        recommendations['lifestyle_manual'] = st.session_state.editable_reco.get('reco_lifestyle', '')
-        recommendations['multimodal_manual'] = st.session_state.editable_reco.get('reco_multimodal', '')
-    
-    follow_up = {
-        'controles': [
-            {
-                'type': 'Bilan biologique de contrôle',
-                'delai': '6-8 semaines',
-                'biomarqueurs': ['Biomarqueurs anormaux identifiés']
-            },
-            {
-                'type': 'Analyse microbiote (si applicable)',
-                'delai': '3 mois',
-                'biomarqueurs': ['Diversité', 'Espèces clés']
-            }
-        ]
-    }
-    
-    return {
-        'patient': patient_data,
-        'biologie': biology_data,
-        'microbiote': microbiome_data,
-        'cross_analysis': cross_analysis,
-        'recommendations': recommendations,
-        'follow_up': follow_up
-    }
+# HEADER PRINCIPAL
+st.markdown("""
+<div class="main-header">
+    <h1>🧬 ALGO-LIFE</h1>
+    <h3>Plateforme Médecin - Analyse Multimodale de Santé Fonctionnelle</h3>
+    <p>Extraction automatique + Recommandations IA + Édition manuelle</p>
+</div>
+""", unsafe_allow_html=True)
 
-# INITIALISATION DES ÉTATS DE SESSION
-if 'patient_data' not in st.session_state:
-    st.session_state.patient_data = {}
+# INITIALISATION DES VARIABLES DE SESSION
+if 'patient_info' not in st.session_state:
+    st.session_state.patient_info = {}
 if 'biology_data' not in st.session_state:
-    st.session_state.biology_data = None
+    st.session_state.biology_data = {}
 if 'microbiome_data' not in st.session_state:
-    st.session_state.microbiome_data = None
-if 'rules_engine' not in st.session_state:
-    st.session_state.rules_engine = None
+    st.session_state.microbiome_data = {}
 if 'recommendations' not in st.session_state:
-    st.session_state.recommendations = None
-if 'editable_reco' not in st.session_state:
-    st.session_state.editable_reco = {}
-if 'reco_initialized' not in st.session_state:
-    st.session_state.reco_initialized = False
+    st.session_state.recommendations = {}
+if 'edited_recommendations' not in st.session_state:
+    st.session_state.edited_recommendations = {}
+if 'data_extracted' not in st.session_state:
+    st.session_state.data_extracted = False
 
-# SIDEBAR
+# SIDEBAR - INFORMATIONS PATIENT
 with st.sidebar:
-    st.markdown("### Dr Thibault SUTTER")
-    st.caption("Biologiste spécialisé en biologie fonctionnelle")
-    
-    st.markdown("---")
-    page = st.radio(
-        "Navigation",
-        ["Tableau de bord", "Import Données", "Interprétations", "Recommandations", "Export PDF"],
-        label_visibility="collapsed"
-    )
-    
-    st.markdown("---")
-    st.caption("Version Beta v1.0")
+    st.header("👤 Informations Patient")
 
-# CONTENU PRINCIPAL
-
-if page == "Tableau de bord":
-    st.markdown("## 🧬 Tableau de Bord")
-    
-    if not st.session_state.patient_data:
-        st.info("👋 Bienvenue ! Commencez par importer des données")
-    else:
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            patient_name = f"{st.session_state.patient_data.get('prenom', '')} {st.session_state.patient_data.get('nom', 'N/A')}"
-            st.metric("Patient", patient_name.strip())
-        
-        with col2:
-            bio_count = 0
-            if st.session_state.biology_data:
-                bio_count = len(st.session_state.biology_data.get('biomarkers', []))
-            st.metric("Biomarqueurs", bio_count)
-        
-        with col3:
-            micro_count = 0
-            if st.session_state.microbiome_data:
-                micro_count = len(st.session_state.microbiome_data.get('bacteria_groups', []))
-            st.metric("Groupes microbiote", micro_count)
-        
-        with col4:
-            anomalies = 0
-            if st.session_state.recommendations:
-                anomalies = len([b for b in st.session_state.recommendations.get('biology_interpretations', []) 
-                               if b.get('status') != 'Normal'])
-            st.metric("Anomalies", anomalies)
-
-elif page == "Import Données":
-    st.markdown("## 📥 Import & Données")
-    
-    with st.expander("👤 Informations Patient", expanded=True):
+    # Formulaire patient
+    with st.form("patient_form"):
         col1, col2 = st.columns(2)
-        
+
         with col1:
-            nom = st.text_input("Nom", value=st.session_state.patient_data.get('nom', ''))
-            sexe = st.selectbox("Sexe", ["M", "F"], 
-                              index=0 if st.session_state.patient_data.get('sexe', 'M') == 'M' else 1)
-        
+            patient_name = st.text_input("Nom complet", value=st.session_state.patient_info.get('name', ''))
+            patient_age = st.number_input("Âge", min_value=0, max_value=120,
+                                          value=st.session_state.patient_info.get('age', 30))
+            patient_sex = st.selectbox("Sexe", ["F", "M"],
+                                       index=0 if st.session_state.patient_info.get('sex', 'F') == 'F' else 1)
+
         with col2:
-            prenom = st.text_input("Prénom", value=st.session_state.patient_data.get('prenom', ''))
-            date_naissance = st.date_input("Date de naissance", 
-                                          value=st.session_state.patient_data.get('date_naissance', datetime.now()))
-        
-        if st.button("💾 Enregistrer"):
-            st.session_state.patient_data = {
-                'nom': nom,
-                'prenom': prenom,
-                'sexe': sexe,
-                'date_naissance': date_naissance
+            patient_date = st.date_input("Date analyse",
+                                         value=st.session_state.patient_info.get('date', datetime.now().date()))
+            patient_notes = st.text_area("Notes médicales", value=st.session_state.patient_info.get('notes', ''),
+                                         height=100)
+
+        submitted = st.form_submit_button("💾 Enregistrer Patient")
+
+        if submitted:
+            st.session_state.patient_info = {
+                'name': patient_name,
+                'age': patient_age,
+                'sex': patient_sex,
+                'date': patient_date,
+                'notes': patient_notes
             }
-            st.success("✅ Informations enregistrées")
-    
-    with st.expander("🧪 Données Biologiques", expanded=True):
-        biology_file = st.file_uploader("Fichier biologie", type=['pdf', 'csv'])
-        
-        if biology_file and st.button("🔍 Analyser biologie"):
-            with st.spinner("Extraction..."):
-                try:
-                    bio_data = extract_synlab_biology(biology_file)
-                    st.session_state.biology_data = bio_data
-                    st.success(f"✅ {len(bio_data.get('biomarkers', []))} biomarqueurs extraits")
-                except Exception as e:
-                    st.error(f"❌ Erreur: {str(e)}")
-    
-    with st.expander("🦠 Données Microbiote", expanded=True):
-        microbiome_file = st.file_uploader("Fichier microbiote", type=['pdf'])
-        
-        if microbiome_file and st.button("🔍 Analyser microbiote"):
-            with st.spinner("Extraction..."):
-                try:
-                    micro_data = extract_idk_microbiome(microbiome_file)
-                    st.session_state.microbiome_data = micro_data
-                    st.success(f"✅ DI: {micro_data.get('dysbiosis_index')}, Groupes: {len(micro_data.get('bacteria_groups', []))}")
-                except Exception as e:
-                    st.error(f"❌ Erreur: {str(e)}")
-    
-    st.markdown("---")
-    
-    if st.session_state.biology_data or st.session_state.microbiome_data:
-        if st.button("🚀 Lancer l'Analyse Complète", type="primary", use_container_width=True):
-            with st.spinner("Analyse..."):
-                try:
-                    # CORRECTION: Initialiser RulesEngine avec le chemin du fichier Excel
+            st.success("✅ Informations patient enregistrées")
+
+    st.divider()
+
+    # UPLOAD FILES
+    st.header("📁 Import Fichiers")
+
+    biology_file = st.file_uploader(
+        "Biologie (PDF ou Excel)",
+        type=['pdf', 'xlsx', 'xls'],
+        key="biology_upload"
+    )
+
+    microbiome_file = st.file_uploader(
+        "Microbiote (PDF ou Excel)",
+        type=['pdf', 'xlsx', 'xls'],
+        key="microbiome_upload"
+    )
+
+    if st.button("🔍 Extraire données", type="primary"):
+        if not st.session_state.patient_info.get('name'):
+            st.error("❌ Veuillez d'abord enregistrer les informations patient")
+        else:
+            try:
+                # EXTRACTION BIOLOGIE
+                if biology_file:
+                    st.info("🔄 Extraction biologie en cours...")
+
+                    if biology_file.type == "application/pdf":
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                            tmp_file.write(biology_file.read())
+                            tmp_path = tmp_file.name
+                        st.session_state.biology_data = extract_synlab_biology(tmp_path)
+                        os.unlink(tmp_path)
+                    else:
+                        # Excel
+                        df_bio = pd.read_excel(biology_file)
+                        # Convert to dict (simple heuristic)
+                        st.session_state.biology_data = {}
+                        for _, row in df_bio.iterrows():
+                            if len(row) >= 2:
+                                name = str(row.iloc[0]).strip()
+                                val = row.iloc[1]
+                                if name and name.lower() != "nan":
+                                    st.session_state.biology_data[name] = {
+                                        "value": val,
+                                        "unit": row.iloc[2] if len(row) > 2 else "",
+                                        "reference": row.iloc[3] if len(row) > 3 else ""
+                                    }
+
+                    st.success(f"✅ {len(st.session_state.biology_data)} biomarqueurs extraits")
+
+                # EXTRACTION MICROBIOME
+                if microbiome_file:
+                    st.info("🔄 Extraction microbiote en cours...")
+
+                    if microbiome_file.type == "application/pdf":
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                            tmp_file.write(microbiome_file.read())
+                            tmp_path = tmp_file.name
+                        st.session_state.microbiome_data = extract_idk_microbiome(tmp_path)
+                        os.unlink(tmp_path)
+                    else:
+                        # Excel
+                        df_micro = pd.read_excel(microbiome_file)
+                        st.session_state.microbiome_data = {}
+                        for _, row in df_micro.iterrows():
+                            if len(row) >= 2:
+                                name = str(row.iloc[0]).strip()
+                                val = row.iloc[1]
+                                if name and name.lower() != "nan":
+                                    st.session_state.microbiome_data[name] = {
+                                        "value": val,
+                                        "unit": row.iloc[2] if len(row) > 2 else "",
+                                        "reference": row.iloc[3] if len(row) > 3 else ""
+                                    }
+
+                    st.success(f"✅ {len(st.session_state.microbiome_data)} paramètres microbiote extraits")
+
+                # GÉNÉRATION RECOMMANDATIONS
+                if st.session_state.biology_data or st.session_state.microbiome_data:
+                    st.info("🤖 Génération recommandations en cours...")
+
+                    # Charger le moteur de règles
                     if not os.path.exists(RULES_EXCEL_PATH):
                         st.error(f"❌ Fichier des règles introuvable: {RULES_EXCEL_PATH}")
-                        st.info("💡 Créez le fichier 'rules_combined.xlsx' ou modifiez RULES_EXCEL_PATH dans le code")
+                        st.info("💡 Vérifie que ton fichier est bien dans data/Bases_regles_Synlab.xlsx")
                     else:
-                        engine = RulesEngine(RULES_EXCEL_PATH)  # ← CORRECTION ICI
-                        reco = engine.generate_recommendations(
-                            st.session_state.biology_data,
-                            st.session_state.microbiome_data
-                        )
-                        st.session_state.recommendations = reco
-                        st.session_state.reco_initialized = False
-                        st.success("✅ Analyse terminée!")
-                        st.balloons()
-                except Exception as e:
-                    st.error(f"❌ Erreur: {str(e)}")
-                    st.exception(e)
+                        rules_engine = RulesEngine(RULES_EXCEL_PATH)
 
-elif page == "Interprétations":
-    st.markdown("## 📊 Interprétations")
-    
-    if st.session_state.recommendations is None:
-        st.info("ℹ️ Aucune interprétation disponible")
-    else:
-        reco = st.session_state.recommendations
-        
-        if reco.get('biology_interpretations'):
-            st.markdown("### 🧪 Biologie")
-            for interp in reco['biology_interpretations']:
-                is_abnormal = interp['status'] != 'Normal'
-                with st.expander(f"{interp['biomarker']} - {interp['status']}", expanded=is_abnormal):
-                    st.markdown(f"**Valeur:** {interp['value']} {interp.get('unit', '')}")
-                    st.markdown(f"**Référence:** {interp.get('reference', 'N/A')}")
-                    if interp.get('interpretation'):
-                        st.info(interp['interpretation'])
-        
-        if reco.get('microbiome_interpretations'):
-            st.markdown("### 🦠 Microbiote")
-            for interp in reco['microbiome_interpretations']:
-                is_abnormal = interp['result'] != 'Expected'
-                with st.expander(f"{interp['group']} - {interp['result']}", expanded=is_abnormal):
-                    if interp.get('interpretation'):
-                        st.info(interp['interpretation'])
+                        # Combiner données
+                        combined_data = {}
+                        combined_data.update(st.session_state.biology_data)
+                        combined_data.update(st.session_state.microbiome_data)
 
-elif page == "Recommandations":
-    st.markdown("## 💊 Recommandations")
-    
-    if st.session_state.recommendations is None:
-        st.info("ℹ️ Aucune recommandation disponible")
-    else:
-        reco = st.session_state.recommendations
-        
-        if not st.session_state.reco_initialized:
-            generated = {
-                "nutrition": compile_recommendations_text(reco, 'nutrition'),
-                "micronutrition": compile_recommendations_text(reco, 'micronutrition'),
-                "lifestyle": compile_recommendations_text(reco, 'lifestyle'),
-                "multimodal": compile_recommendations_text(reco, 'multimodal'),
-            }
-            
-            for k, v in generated.items():
-                key = f"reco_{k}"
-                if key not in st.session_state.editable_reco:
-                    st.session_state.editable_reco[key] = v or ""
-            
-            st.session_state.reco_initialized = True
-        
-        tab1, tab2, tab3, tab4 = st.tabs(["🥗 Nutrition", "💊 Micronutrition", "🏃 Lifestyle", "🔄 Multimodal"])
-        
-        with tab1:
-            st.markdown("### Recommandations Nutritionnelles")
-            st.markdown('<div class="editable-zone">', unsafe_allow_html=True)
-            st.markdown("#### ✍️ Zone Éditable")
-            
-            edited_nutrition = st.text_area(
-                "Nutrition",
-                value=st.session_state.editable_reco.get("reco_nutrition", ""),
-                height=300,
-                key="ui_reco_nutrition"
-            )
-            st.session_state.editable_reco["reco_nutrition"] = edited_nutrition
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("🔄 Réinitialiser", key="reset_nutrition"):
-                    st.session_state.editable_reco["reco_nutrition"] = compile_recommendations_text(reco, 'nutrition')
-                    st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with tab2:
-            st.markdown("### Recommandations en Micronutrition")
-            st.markdown('<div class="editable-zone">', unsafe_allow_html=True)
-            st.markdown("#### ✍️ Zone Éditable")
-            
-            edited_micro = st.text_area(
-                "Micronutrition",
-                value=st.session_state.editable_reco.get("reco_micronutrition", ""),
-                height=300,
-                key="ui_reco_micronutrition"
-            )
-            st.session_state.editable_reco["reco_micronutrition"] = edited_micro
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("🔄 Réinitialiser", key="reset_micronutrition"):
-                    st.session_state.editable_reco["reco_micronutrition"] = compile_recommendations_text(reco, 'micronutrition')
-                    st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with tab3:
-            st.markdown("### Recommandations Lifestyle")
-            st.markdown('<div class="editable-zone">', unsafe_allow_html=True)
-            st.markdown("#### ✍️ Zone Éditable")
-            
-            edited_lifestyle = st.text_area(
-                "Lifestyle",
-                value=st.session_state.editable_reco.get("reco_lifestyle", ""),
-                height=300,
-                key="ui_reco_lifestyle"
-            )
-            st.session_state.editable_reco["reco_lifestyle"] = edited_lifestyle
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("🔄 Réinitialiser", key="reset_lifestyle"):
-                    st.session_state.editable_reco["reco_lifestyle"] = compile_recommendations_text(reco, 'lifestyle')
-                    st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with tab4:
-            st.markdown("### Analyse Multimodale")
-            st.markdown('<div class="editable-zone">', unsafe_allow_html=True)
-            st.markdown("#### ✍️ Zone Éditable")
-            
-            edited_multimodal = st.text_area(
-                "Multimodal",
-                value=st.session_state.editable_reco.get("reco_multimodal", ""),
-                height=300,
-                key="ui_reco_multimodal"
-            )
-            st.session_state.editable_reco["reco_multimodal"] = edited_multimodal
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("🔄 Réinitialiser", key="reset_multimodal"):
-                    st.session_state.editable_reco["reco_multimodal"] = compile_recommendations_text(reco, 'multimodal')
-                    st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+                        # Générer recommandations
+                        st.session_state.recommendations = rules_engine.generate_recommendations(combined_data)
 
-elif page == "Export PDF":
-    st.markdown("## 📄 Export PDF")
-    
-    if st.session_state.recommendations is None:
-        st.info("ℹ️ Aucune donnée à exporter")
-    else:
-        if st.button("🚀 Générer le PDF", type="primary", use_container_width=True):
-            try:
-                with st.spinner("Génération..."):
-                    pdf_data = prepare_pdf_data()
-                    
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                        pdf_path = tmp_file.name
-                    
-                    generate_multimodal_report(
-                        patient_data=pdf_data['patient'],
-                        biology_data=pdf_data['biologie'],
-                        microbiome_data=pdf_data['microbiote'],
-                        cross_analysis=pdf_data['cross_analysis'],
-                        recommendations=pdf_data['recommendations'],
-                        follow_up=pdf_data['follow_up'],
-                        output_path=pdf_path
-                    )
-                    
-                    with open(pdf_path, 'rb') as f:
-                        pdf_bytes = f.read()
-                    
-                    st.success("✅ PDF généré!")
-                    
-                    patient_name = st.session_state.patient_data.get('nom', 'Patient')
-                    date_str = datetime.now().strftime("%Y%m%d")
-                    filename = f"Rapport_{patient_name}_{date_str}.pdf"
-                    
-                    st.download_button(
-                        label="📥 Télécharger le PDF",
-                        data=pdf_bytes,
-                        file_name=filename,
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-                    
-                    os.unlink(pdf_path)
-                    
+                        # Initialiser recommandations éditables
+                        st.session_state.edited_recommendations = {}
+                        for category in st.session_state.recommendations.keys():
+                            st.session_state.edited_recommendations[category] = compile_recommendations_text(
+                                st.session_state.recommendations, category
+                            )
+
+                        st.success("✅ Recommandations générées")
+                        st.session_state.data_extracted = True
+
             except Exception as e:
-                st.error(f"❌ Erreur: {str(e)}")
-                st.exception(e)
+                st.error(f"❌ Erreur extraction: {str(e)}")
 
-st.markdown("---")
-st.caption("ALGO-LIFE © 2026 - Version Beta v1.0")
+# MAIN CONTENT
+if st.session_state.patient_info.get('name'):
+    # Affichage infos patient
+    st.markdown(f"""
+    <div class="patient-info">
+        <h3>👤 {st.session_state.patient_info['name']}</h3>
+        <p><strong>Âge:</strong> {st.session_state.patient_info['age']} ans | 
+           <strong>Sexe:</strong> {st.session_state.patient_info['sex']} | 
+           <strong>Date:</strong> {st.session_state.patient_info['date']}</p>
+        {f"<p><strong>Notes:</strong> {st.session_state.patient_info['notes']}</p>" if st.session_state.patient_info['notes'] else ""}
+    </div>
+    """, unsafe_allow_html=True)
+
+    if st.session_state.data_extracted:
+        # TABS
+        tab1, tab2, tab3 = st.tabs(["📊 Biomarqueurs", "🦠 Microbiote", "📝 Recommandations"])
+
+        with tab1:
+            st.header("📊 Résultats Biologie Fonctionnelle")
+
+            if st.session_state.biology_data:
+                # Convert dict to dataframe for display
+                bio_rows = []
+                for name, data in st.session_state.biology_data.items():
+                    if isinstance(data, dict):
+                        bio_rows.append({
+                            "Biomarqueur": name,
+                            "Valeur": data.get("value", ""),
+                            "Unité": data.get("unit", ""),
+                            "Référence": data.get("reference", ""),
+                            "Statut": data.get("status", "")
+                        })
+                    else:
+                        bio_rows.append({"Biomarqueur": name, "Valeur": data, "Unité": "", "Référence": "", "Statut": ""})
+
+                df_bio = pd.DataFrame(bio_rows)
+                st.dataframe(df_bio, use_container_width=True)
+            else:
+                st.info("Aucune donnée de biologie importée")
+
+        with tab2:
+            st.header("🦠 Résultats Microbiote")
+
+            if st.session_state.microbiome_data:
+                micro_rows = []
+                for name, data in st.session_state.microbiome_data.items():
+                    if isinstance(data, dict):
+                        micro_rows.append({
+                            "Paramètre": name,
+                            "Valeur": data.get("value", ""),
+                            "Unité": data.get("unit", ""),
+                            "Référence": data.get("reference", ""),
+                            "Statut": data.get("status", "")
+                        })
+                    else:
+                        micro_rows.append({"Paramètre": name, "Valeur": data, "Unité": "", "Référence": "", "Statut": ""})
+
+                df_micro = pd.DataFrame(micro_rows)
+                st.dataframe(df_micro, use_container_width=True)
+            else:
+                st.info("Aucune donnée de microbiote importée")
+
+        with tab3:
+            st.header("📝 Recommandations (éditables)")
+
+            if st.session_state.recommendations:
+                st.info("✍️ Tu peux modifier les recommandations avant export / PDF.")
+
+                for category in st.session_state.edited_recommendations.keys():
+                    st.subheader(f"📌 {category}")
+
+                    edited_text = st.text_area(
+                        f"Recommandations - {category}",
+                        value=st.session_state.edited_recommendations[category],
+                        height=200,
+                        key=f"edit_{category}"
+                    )
+
+                    st.session_state.edited_recommendations[category] = edited_text
+                    st.divider()
+
+                # Export JSON
+                if st.button("💾 Exporter recommandations (JSON)"):
+                    export_data = {
+                        "patient": st.session_state.patient_info,
+                        "biology": st.session_state.biology_data,
+                        "microbiome": st.session_state.microbiome_data,
+                        "recommendations_raw": st.session_state.recommendations,
+                        "recommendations_edited": st.session_state.edited_recommendations,
+                        "export_date": datetime.now().isoformat()
+                    }
+
+                    st.download_button(
+                        label="⬇️ Télécharger JSON",
+                        data=pd.Series(export_data).to_json(),
+                        file_name=f"algolife_export_{st.session_state.patient_info['name'].replace(' ', '_')}.json",
+                        mime="application/json"
+                    )
+            else:
+                st.warning("⚠️ Aucune recommandation générée. Vérifie les fichiers importés et les règles.")
+
+else:
+    st.info("👈 Commence par enregistrer les informations patient dans la sidebar.")
