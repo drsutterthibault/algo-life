@@ -3,8 +3,7 @@ Moteur de règles pour générer des recommandations personnalisées
 basées sur les résultats biologiques et microbiote
 
 UNILABS / ALGO-LIFE
-
-PATCH:
+PATCH v5:
 ✅ Anti "truth value of DataFrame is ambiguous" (pas de if df / pas de df1 or df2)
 ✅ Index biomarqueurs normalisés (matching robuste)
 ✅ Colonnes Excel tolérantes
@@ -59,188 +58,438 @@ def _col_find(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     def norm(s: str) -> str:
         s = str(s).strip().upper()
         s = re.sub(r"\s+", " ", s)
+        s = s.replace("’", "'")
         return s
 
-    cols = {norm(c): c for c in df.columns}
-    for cand in candidates:
-        key = norm(cand)
-        if key in cols:
-            return cols[key]
+    cols_norm = {norm(c): c for c in df.columns}
 
-    # loose match (contains)
+    # exact
     for cand in candidates:
-        key = norm(cand)
-        for k, orig in cols.items():
-            if key in k:
-                return orig
+        nc = norm(cand)
+        if nc in cols_norm:
+            return cols_norm[nc]
+
+    # fuzzy contains
+    for cand in candidates:
+        nc = norm(cand)
+        for key, original in cols_norm.items():
+            if nc in key or key in nc:
+                return original
+
     return None
 
 
+def _get_cell(row: Union[pd.Series, Dict], col: Optional[str]) -> str:
+    if not col:
+        return ""
+    try:
+        v = row.get(col, "")
+    except Exception:
+        v = ""
+    if v is None:
+        return ""
+    if isinstance(v, float) and np.isnan(v):
+        return ""
+    return str(v).strip()
+
+
 # ---------------------------------------------------------------------
-# Rules Engine
+# RulesEngine
 # ---------------------------------------------------------------------
 class RulesEngine:
-    def __init__(self, excel_path: str):
-        self.excel_path = excel_path
-        if not os.path.exists(excel_path):
-            raise FileNotFoundError(f"Rules Excel not found: {excel_path}")
+    """
+    Moteur de règles multimodal:
+    - Biologie (BASE_40 / EXTENDED_92 / FONCTIONNEL_134)
+    - Microbiote
+    - Analyses croisées
+    """
 
-        self.df_rules_bio = None
-        self.df_rules_micro = None
-        self.df_rules_followup = None
+    def __init__(self, rules_excel_path: str):
+        self.rules_excel_path = rules_excel_path
 
-        self._bio_index = {}   # normalized biomarker -> list[rules rows]
+        self.rules_bio_base: Optional[pd.DataFrame] = None
+        self.rules_bio_extended: Optional[pd.DataFrame] = None
+        self.rules_bio_functional: Optional[pd.DataFrame] = None
+        self.rules_microbiome: Optional[pd.DataFrame] = None
+        self.rules_metabolites: Optional[pd.DataFrame] = None
+
+        # Index biomarqueurs (normalisés)
+        self._bio_index: Dict[str, pd.Series] = {}
+        self._bio_contains_keys: List[str] = []
+
+        # Microbiote rows
+        self._micro_rows: List[pd.Series] = []
+
         self._load_rules()
+        self._build_indexes()
 
-    def _load_rules(self):
-        xls = pd.ExcelFile(self.excel_path)
-
-        # Try best-effort sheet names
-        sheet_names = [s.lower() for s in xls.sheet_names]
-        bio_sheet = None
-        micro_sheet = None
-        follow_sheet = None
-
-        for s in xls.sheet_names:
-            sl = s.lower()
-            if "bio" in sl or "biolog" in sl:
-                bio_sheet = s
-            if "micro" in sl or "gut" in sl or "flora" in sl:
-                micro_sheet = s
-            if "suivi" in sl or "follow" in sl:
-                follow_sheet = s
-
-        # Fallbacks
-        if bio_sheet is None and xls.sheet_names:
-            bio_sheet = xls.sheet_names[0]
-
-        self.df_rules_bio = pd.read_excel(self.excel_path, sheet_name=bio_sheet) if bio_sheet else pd.DataFrame()
-        self.df_rules_micro = pd.read_excel(self.excel_path, sheet_name=micro_sheet) if micro_sheet else pd.DataFrame()
-        self.df_rules_followup = pd.read_excel(self.excel_path, sheet_name=follow_sheet) if follow_sheet else pd.DataFrame()
-
-        # Build index for biology rules
-        if _df_ok(self.df_rules_bio):
-            col_biom = _col_find(self.df_rules_bio, ["Biomarqueur", "Biomarker", "Marqueur", "Analyte", "Nom"])
-            if col_biom is None:
-                col_biom = self.df_rules_bio.columns[0]
-
-            self._bio_index = {}
-            for _, row in self.df_rules_bio.iterrows():
-                biom = str(row.get(col_biom, "")).strip()
-                if not biom:
-                    continue
-                key = normalize_biomarker_name(biom)
-                self._bio_index.setdefault(key, []).append(row.to_dict())
-
+    # -----------------------------------------------------------------
+    # NEW: list all biomarkers from Excel
+    # -----------------------------------------------------------------
     def list_all_biomarkers(self) -> List[str]:
-        out = []
-        if _df_ok(self.df_rules_bio):
-            col_biom = _col_find(self.df_rules_bio, ["Biomarqueur", "Biomarker", "Marqueur", "Analyte", "Nom"])
-            if col_biom is None:
-                col_biom = self.df_rules_bio.columns[0]
-            out = [str(x).strip() for x in self.df_rules_bio[col_biom].dropna().tolist()]
-            out = [x for x in out if x]
-        return sorted(list(dict.fromkeys(out)))
+        """
+        Retourne la liste unique (triée) de tous les biomarqueurs présents dans l'Excel de règles.
+        Utilise les feuilles BASE_40 / EXTENDED_92 / FONCTIONNEL_134.
+        """
+        biom_list: List[str] = []
 
-    def _match_bio_rules(self, biomarker_name: str) -> List[Dict[str, Any]]:
-        key = normalize_biomarker_name(biomarker_name)
-        return self._bio_index.get(key, [])
+        for df in [self.rules_bio_base, self.rules_bio_extended, self.rules_bio_functional]:
+            if not _df_ok(df):
+                continue
 
-    def generate_recommendations(
-        self,
-        biology_data: Optional[Union[pd.DataFrame, List[Dict[str, Any]]]] = None,
-        microbiome_data: Optional[Dict[str, Any]] = None,
-        patient_info: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+            col = _col_find(df, ["Biomarqueur", "BIOMARQUEUR", "Marqueur", "Paramètre", "Parametre"])
+            if not col:
+                # fallback: heuristique
+                for c in df.columns:
+                    s = str(c).lower()
+                    if "biomar" in s or "marqueur" in s or "param" in s:
+                        col = c
+                        break
 
-        out = {
-            "biology_interpretations": [],
-            "microbiome_interpretations": [],
-            "debug": {
-                "bio_total": 0,
-                "bio_matched": 0,
-                "bio_unmatched": [],
-            },
+            if col:
+                vals = df[col].dropna().astype(str).str.strip().tolist()
+                biom_list.extend(vals)
+
+        # unique + clean + tri
+        uniq = sorted({b for b in biom_list if b and b.lower() != "nan"})
+        return uniq
+
+    # -----------------------------------------------------------------
+    # Load rules (NO DataFrame boolean operations)
+    # -----------------------------------------------------------------
+    def _load_rules(self) -> None:
+        if not os.path.exists(self.rules_excel_path):
+            raise FileNotFoundError(f"Le fichier {self.rules_excel_path} n'existe pas")
+
+        print(f"📂 Chargement règles: {self.rules_excel_path}")
+        print(f"📏 Taille fichier: {os.path.getsize(self.rules_excel_path)} bytes")
+
+        xl = pd.ExcelFile(self.rules_excel_path, engine="openpyxl")
+        sheets = xl.sheet_names
+        print("📋 Feuilles détectées:", sheets)
+
+        def load_sheet(name: str) -> Optional[pd.DataFrame]:
+            if name not in sheets:
+                print(f"⚠️ Feuille absente: {name}")
+                return None
+            df = pd.read_excel(self.rules_excel_path, sheet_name=name, engine="openpyxl")
+            if not _df_ok(df):
+                print(f"⚠️ Feuille vide: {name}")
+                return None
+            print(f"✅ {name} chargé: {len(df)} lignes")
+            return df
+
+        # Biologie
+        self.rules_bio_base = load_sheet("BASE_40")
+        self.rules_bio_extended = load_sheet("EXTENDED_92")
+        self.rules_bio_functional = load_sheet("FONCTIONNEL_134")
+
+        # Microbiote
+        self.rules_microbiome = load_sheet("Microbiote")
+
+        # Métabolites : plusieurs noms possibles (NO "or" between DFs)
+        self.rules_metabolites = _first_non_empty(
+            load_sheet("Métabolites salivaire"),
+            load_sheet("Metabolites salivaire"),
+            load_sheet("Métabolites salivaires"),
+            load_sheet("Metabolites salivaires"),
+        )
+
+        print("✅ Chargement terminé")
+
+    # -----------------------------------------------------------------
+    # Build indexes for matching
+    # -----------------------------------------------------------------
+    def _build_indexes(self) -> None:
+        self._bio_index = {}
+        self._bio_contains_keys = []
+
+        for df in [self.rules_bio_base, self.rules_bio_extended, self.rules_bio_functional]:
+            if not _df_ok(df):
+                continue
+
+            biom_col = _col_find(df, ["Biomarqueur", "Marqueur", "Paramètre", "Parametre"])
+            if not biom_col:
+                print("⚠️ Colonne biomarqueur introuvable dans une feuille.")
+                continue
+
+            df["_BIO_NORM_"] = df[biom_col].astype(str).apply(normalize_biomarker_name)
+
+            # exact index
+            for _, row in df.iterrows():
+                key = row.get("_BIO_NORM_", "")
+                if isinstance(key, str) and key and key not in self._bio_index:
+                    self._bio_index[key] = row
+
+            # contains keys
+            self._bio_contains_keys.extend([k for k in df["_BIO_NORM_"].dropna().tolist() if isinstance(k, str) and k])
+
+        # Microbiote rows
+        self._micro_rows = []
+        if _df_ok(self.rules_microbiome):
+            self._micro_rows = [r for _, r in self.rules_microbiome.iterrows()]
+
+    # -----------------------------------------------------------------
+    # Debug: biomarker match stats
+    # -----------------------------------------------------------------
+    def debug_match_summary(self, biology_df: pd.DataFrame) -> Dict[str, Any]:
+        if not _df_ok(biology_df):
+            return {"matched": 0, "not_found": [], "total": 0}
+
+        col_b = _col_find(biology_df, ["Biomarqueur"])
+        if not col_b:
+            return {"matched": 0, "not_found": [], "total": len(biology_df)}
+
+        matched = 0
+        not_found: List[str] = []
+
+        for biom in biology_df[col_b].astype(str).tolist():
+            if self._find_biomarker_rules(biom) is not None:
+                matched += 1
+            else:
+                not_found.append(biom)
+
+        return {"matched": matched, "not_found": not_found[:25], "total": len(biology_df)}
+
+    # -----------------------------------------------------------------
+    # Find biomarker rules (robust)
+    # -----------------------------------------------------------------
+    def _find_biomarker_rules(self, biomarker_name: str) -> Optional[pd.Series]:
+        if not biomarker_name:
+            return None
+
+        norm = normalize_biomarker_name(biomarker_name)
+
+        # exact
+        row = self._bio_index.get(norm)
+        if row is not None:
+            return row
+
+        # contains fallback
+        for key in self._bio_contains_keys:
+            if not isinstance(key, str) or not key:
+                continue
+            if norm in key or key in norm:
+                return self._bio_index.get(key)
+
+        return None
+
+    # -----------------------------------------------------------------
+    # Microbiome rules matching
+    # -----------------------------------------------------------------
+    def _get_microbiome_rules(self, group: str, severity: int) -> Optional[pd.Series]:
+        if not _df_ok(self.rules_microbiome):
+            return None
+
+        norm_group = str(group).upper().strip()
+
+        col_group = _col_find(self.rules_microbiome, ["Groupe", "Group", "Catégorie", "Categorie", "Category"])
+        col_sev = _col_find(self.rules_microbiome, ["Niveau_gravite", "NIVEAU_GRAVITE", "Sévérité", "Severite", "Severity"])
+
+        if not col_group:
+            return None
+
+        for row in self._micro_rows:
+            rule_group = str(row.get(col_group, "")).upper().strip()
+            if not rule_group:
+                continue
+
+            if norm_group in rule_group or rule_group in norm_group:
+                if severity <= 0:
+                    return row
+
+                if not col_sev:
+                    return row
+
+                sev_val = str(row.get(col_sev, "")).strip().lower()
+
+                if severity == 1 and any(x in sev_val for x in ["+1", "1", "leger", "léger", "slight"]):
+                    return row
+                if severity == 2 and any(x in sev_val for x in ["+2", "2", "modere", "modéré", "moderate"]):
+                    return row
+                if severity >= 3 and any(x in sev_val for x in ["+3", "3", "severe", "sévère"]):
+                    return row
+
+        return None
+
+    # -----------------------------------------------------------------
+    # Biology interpretation using Excel columns (tolerant)
+    # -----------------------------------------------------------------
+    def generate_biology_interpretation(self, biomarker_data: pd.Series, patient_info: Dict) -> Dict:
+        biomarker_name = biomarker_data.get("Biomarqueur", "")
+        value = biomarker_data.get("Valeur", None)
+        unit = biomarker_data.get("Unité", biomarker_data.get("Unite", "")) or ""
+        reference = biomarker_data.get("Référence", biomarker_data.get("Reference", "")) or ""
+
+        status = determine_biomarker_status(value, reference, biomarker_name)
+        rules = self._find_biomarker_rules(biomarker_name)
+
+        result = {
+            "biomarker": biomarker_name,
+            "value": value,
+            "unit": unit,
+            "reference": reference,
+            "status": status,
+            "interpretation": None,
+            "nutrition_reco": None,
+            "micronutrition_reco": None,
+            "lifestyle_reco": None,
         }
 
-        # ---------------- BIOLOGY ----------------
-        bio_records: List[Dict[str, Any]] = []
-        if isinstance(biology_data, pd.DataFrame):
-            if _df_ok(biology_data):
-                bio_records = biology_data.to_dict(orient="records")
-        elif isinstance(biology_data, list):
-            bio_records = biology_data
+        if rules is None:
+            return result
 
-        out["debug"]["bio_total"] = len(bio_records)
+        one = rules.to_frame().T
 
-        if bio_records:
-            # Columns tolerant
-            # Your extractor/editor uses: Biomarqueur / Valeur / Unité / Référence / Statut
-            for entry in bio_records:
-                biomarker = entry.get("Biomarqueur") or entry.get("Biomarker") or entry.get("Marqueur") or entry.get("Analyte")
-                value = entry.get("Valeur") if "Valeur" in entry else entry.get("Value")
-                unit = entry.get("Unité") if "Unité" in entry else entry.get("Unit")
-                ref = entry.get("Référence") if "Référence" in entry else entry.get("Reference")
-                status = entry.get("Statut") if "Statut" in entry else entry.get("Status")
+        low_i = _col_find(one, ["BASSE - Interprétation", "BASSE-Interprétation", "BASSE Interprétation", "BASSE - Interpretation"])
+        low_n = _col_find(one, ["BASSE - Nutrition", "BASSE-Nutrition", "BASSE Nutrition"])
+        low_m = _col_find(one, ["BASSE - Micronutrition", "BASSE-Micronutrition", "BASSE Micronutrition"])
+        low_l = _col_find(one, ["BASSE - Lifestyle", "BASSE-Lifestyle", "BASSE Lifestyle"])
 
-                biomarker = str(biomarker or "").strip()
-                if not biomarker:
-                    continue
+        high_i = _col_find(one, ["HAUTE - Interprétation", "HAUTE-Interprétation", "HAUTE Interprétation", "HAUTE - Interpretation"])
+        high_n = _col_find(one, ["HAUTE - Nutrition", "HAUTE-Nutrition", "HAUTE Nutrition"])
+        high_m = _col_find(one, ["HAUTE - Micronutrition", "HAUTE-Micronutrition", "HAUTE Micronutrition"])
+        high_l = _col_find(one, ["HAUTE - Lifestyle", "HAUTE-Lifestyle", "HAUTE Lifestyle"])
 
-                v = _safe_float(value)
+        if status == "Bas":
+            result["interpretation"] = _get_cell(rules, low_i) or None
+            result["nutrition_reco"] = _get_cell(rules, low_n) or None
+            result["micronutrition_reco"] = _get_cell(rules, low_m) or None
+            result["lifestyle_reco"] = _get_cell(rules, low_l) or None
 
-                # Determine status if empty
-                st = str(status or "").strip()
-                if not st:
-                    st = determine_biomarker_status(v, ref)
+        elif status == "Élevé":
+            result["interpretation"] = _get_cell(rules, high_i) or None
+            result["nutrition_reco"] = _get_cell(rules, high_n) or None
+            result["micronutrition_reco"] = _get_cell(rules, high_m) or None
+            result["lifestyle_reco"] = _get_cell(rules, high_l) or None
 
-                rules = self._match_bio_rules(biomarker)
-                if not rules:
-                    out["debug"]["bio_unmatched"].append(biomarker)
-                    continue
+        return result
 
-                out["debug"]["bio_matched"] += 1
+    # -----------------------------------------------------------------
+    # Microbiome interpretation
+    # -----------------------------------------------------------------
+    def generate_microbiome_interpretation(self, bacteria_data: Dict) -> Dict:
+        group = bacteria_data.get("group", "")
+        result_status = bacteria_data.get("result", "")
 
-                # Apply first matching rule row (simple). If you have multiple, you can loop and merge.
-                rule = rules[0]
+        if result_status == "Expected":
+            severity = 0
+        elif result_status == "Slightly deviating":
+            severity = 1
+        else:
+            severity = 2
 
-                # Column names tolerant
-                def _get_rule(*names):
-                    for n in names:
-                        if n in rule and str(rule[n]).strip() != "nan":
-                            return rule[n]
-                    return None
+        out = {
+            "category": bacteria_data.get("category", ""),
+            "group": group,
+            "result": result_status,
+            "interpretation": None,
+            "nutrition_reco": None,
+            "supplementation_reco": None,
+            "lifestyle_reco": None,
+        }
 
-                interp = {
-                    "biomarker": biomarker,
-                    "value": v,
-                    "unit": unit,
-                    "reference": ref,
-                    "status": st,
-                    "interpretation": _get_rule("Interprétation", "Interpretation"),
-                    "nutrition_reco": _get_rule("Nutrition", "Nutrition_reco", "Recommandation Nutrition"),
-                    "micronutrition_reco": _get_rule("Micronutrition", "Micronutrition_reco", "Recommandation Micronutrition"),
-                    "lifestyle_reco": _get_rule("Lifestyle", "Lifestyle_reco", "Recommandation Lifestyle"),
-                }
+        if severity == 0:
+            out["interpretation"] = "Niveau optimal - Continuer les bonnes pratiques actuelles"
+            return out
 
-                out["biology_interpretations"].append(interp)
+        rules = self._get_microbiome_rules(group, severity)
+        if rules is None:
+            return out
 
-        # ---------------- MICROBIOME (optional, passthrough) ----------------
-        # Keep your existing micro logic if you already had it;
-        # here is a very tolerant minimal implementation.
-        if isinstance(microbiome_data, dict) and microbiome_data:
-            bacteria = microbiome_data.get("bacteria", []) or []
-            for b in bacteria:
-                grp = b.get("group") or b.get("name") or b.get("taxon")
-                res = b.get("result") or b.get("status")
-                if not grp:
-                    continue
-                out["microbiome_interpretations"].append({
-                    "group": grp,
-                    "result": res,
-                    "nutrition_reco": None,
-                    "supplementation_reco": None,
-                    "lifestyle_reco": None,
-                })
+        one = rules.to_frame().T
+        col_i = _col_find(one, ["Interpretation_clinique", "Interprétation clinique", "Interpretation", "Interprétation"])
+        col_n = _col_find(one, ["Recommandations_nutritionnelles", "Recommandations nutritionnelles", "Nutrition"])
+        col_s = _col_find(one, ["Recommandations_supplementation", "Recommandations supplémentation", "Supplements", "Supplémentation"])
+        col_l = _col_find(one, ["Recommandations_lifestyle", "Lifestyle"])
 
+        out["interpretation"] = _get_cell(rules, col_i) or None
+        out["nutrition_reco"] = _get_cell(rules, col_n) or None
+        out["supplementation_reco"] = _get_cell(rules, col_s) or None
+        out["lifestyle_reco"] = _get_cell(rules, col_l) or None
         return out
+
+    # -----------------------------------------------------------------
+    # Cross analysis (safe numeric comparisons) - minimal
+    # -----------------------------------------------------------------
+    def generate_cross_analysis(self, biology_data: pd.DataFrame, microbiome_data: Dict) -> List[Dict]:
+        cross: List[Dict] = []
+        if not _df_ok(biology_data):
+            return cross
+
+        def find_first(marker: str) -> Optional[pd.Series]:
+            m = biology_data[biology_data["Biomarqueur"].astype(str).str.contains(marker, case=False, na=False)]
+            if not _df_ok(m):
+                return None
+            return m.iloc[0]
+
+        crp = find_first("CRP")
+        if crp is not None:
+            crp_val = _safe_float(crp.get("Valeur"))
+            if crp_val is not None:
+                pro_inf = [
+                    b for b in (microbiome_data or {}).get("bacteria", [])
+                    if str(b.get("category", "")).upper().startswith("E") and b.get("result") != "Expected"
+                ]
+                if crp_val > 3 and len(pro_inf) > 0:
+                    cross.append({
+                        "title": "🔥 Inflammation Systémique Détectée",
+                        "description": f"CRP: {crp_val} mg/L (>3) + microbiote pro-inflammatoire perturbé ({len(pro_inf)} groupe(s))."
+                    })
+
+        return cross
+
+    # -----------------------------------------------------------------
+    # Main generation
+    # -----------------------------------------------------------------
+    def generate_recommendations(
+        self,
+        biology_data: Optional[pd.DataFrame] = None,
+        microbiome_data: Optional[Dict] = None,
+        patient_info: Optional[Dict] = None,
+    ) -> Dict:
+
+        recos = {
+            "biology_interpretations": [],
+            "microbiome_interpretations": [],
+            "microbiome_summary": {},
+            "cross_analysis": [],
+            "priority_actions": [],
+            "debug": {},
+        }
+
+        # Debug rules loaded
+        recos["debug"]["rules_loaded"] = {
+            "BASE_40": 0 if not _df_ok(self.rules_bio_base) else len(self.rules_bio_base),
+            "EXTENDED_92": 0 if not _df_ok(self.rules_bio_extended) else len(self.rules_bio_extended),
+            "FONCTIONNEL_134": 0 if not _df_ok(self.rules_bio_functional) else len(self.rules_bio_functional),
+            "Microbiote": 0 if not _df_ok(self.rules_microbiome) else len(self.rules_microbiome),
+        }
+
+        # Biology
+        if _df_ok(biology_data):
+            for _, row in biology_data.iterrows():
+                recos["biology_interpretations"].append(self.generate_biology_interpretation(row, patient_info or {}))
+            recos["debug"]["bio_match"] = self.debug_match_summary(biology_data)
+
+        # Microbiome
+        if microbiome_data is not None:
+            recos["microbiome_summary"] = {
+                "dysbiosis_index": microbiome_data.get("dysbiosis_index"),
+                "diversity": microbiome_data.get("diversity"),
+            }
+            for b in microbiome_data.get("bacteria", []):
+                recos["microbiome_interpretations"].append(self.generate_microbiome_interpretation(b))
+
+        # Cross
+        if biology_data is not None and microbiome_data is not None:
+            recos["cross_analysis"] = self.generate_cross_analysis(biology_data, microbiome_data)
+
+        # Priority actions
+        anomalies = [b for b in recos["biology_interpretations"] if b.get("status") in ["Bas", "Élevé"]]
+        if len(anomalies) > 0:
+            recos["priority_actions"].append(f"⚠️ {len(anomalies)} anomalies biologiques détectées → protocole ciblé recommandé.")
+        else:
+            recos["priority_actions"].append("✅ Aucun signal critique détecté dans les biomarqueurs importés.")
+
+        return recos
