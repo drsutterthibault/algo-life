@@ -1,9 +1,6 @@
 """
 UNILABS - Plateforme Multimodale
-Analyse bio-fonctionnelle + microbiote · Extraction (PDF/Excel) · Interprétation · Recommandations (Rules Engine)
-+ Suivi + Export PDF
-
-Auteur: Dr Thibault SUTTER
+Analyse bio-fonctionnelle + microbiote · Extraction (PDF/Excel) · Interprétation · Recommandations · Suivi · Export PDF
 """
 
 from __future__ import annotations
@@ -27,14 +24,12 @@ sys.path.insert(0, BASE_DIR)
 from extractors import extract_synlab_biology, extract_idk_microbiome  # noqa
 from rules_engine import RulesEngine  # noqa
 
-# PDF export (ton module)
 try:
     from pdf_generator import generate_multimodal_report  # noqa
     PDF_EXPORT_AVAILABLE = True
 except Exception:
     PDF_EXPORT_AVAILABLE = False
 
-# ✅ Chemin robuste (Streamlit Cloud safe)
 RULES_EXCEL_PATH = os.path.join(BASE_DIR, "data", "Bases_regles_Synlab.xlsx")
 
 
@@ -70,11 +65,6 @@ def _calc_bmi(weight_kg: Any, height_cm: Any) -> Optional[float]:
 
 
 def _dict_bio_to_dataframe(bio_dict: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Convert biology dict into DataFrame expected by RulesEngine:
-    columns: Biomarqueur, Valeur, Unité, Référence
-    + convert Valeur to float (avoid str > int errors)
-    """
     rows = []
     for name, data in (bio_dict or {}).items():
         biomarker = str(name).strip()
@@ -97,10 +87,6 @@ def _dict_bio_to_dataframe(bio_dict: Dict[str, Any]) -> pd.DataFrame:
 
 
 def _patient_to_rules_engine_format(patient_info: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    rules_engine.py attend patient_info['genre'] = Homme/Femme.
-    Dans l'UI on utilise F/H.
-    """
     sex = (patient_info or {}).get("sex", "F")
     genre = "Homme" if sex == "H" else "Femme"
     antecedents = (patient_info or {}).get("antecedents", "")
@@ -108,13 +94,11 @@ def _patient_to_rules_engine_format(patient_info: Dict[str, Any]) -> Dict[str, A
         "nom": (patient_info or {}).get("name", ""),
         "age": (patient_info or {}).get("age", None),
         "genre": genre,
-        "date": str((patient_info or {}).get("date", "")),
         "notes": antecedents,
     }
 
 
 def _build_follow_up_dict(session_follow: Dict[str, Any]) -> Dict[str, Any]:
-    """Structure simple pour le PDF / suivi."""
     if not session_follow:
         return {}
     return {
@@ -126,17 +110,12 @@ def _build_follow_up_dict(session_follow: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_pdf_payload() -> Dict[str, Any]:
-    """
-    Construit un payload compatible avec pdf_generator.generate_multimodal_report
-    """
     patient = st.session_state.patient_info or {}
 
-    # patient data enrichi
     patient_data = {
         "name": patient.get("name", ""),
         "age": patient.get("age", ""),
         "sex": patient.get("sex", ""),
-        "date": str(patient.get("date", "")),
         "weight_kg": patient.get("weight_kg", None),
         "height_cm": patient.get("height_cm", None),
         "bmi": patient.get("bmi", None),
@@ -146,14 +125,12 @@ def _build_pdf_payload() -> Dict[str, Any]:
     biology_data = st.session_state.biology_data or {}
     microbiome_data = st.session_state.microbiome_data or {}
 
-    # cross analysis + recommendations : on réutilise la structure du RulesEngine
     recos = st.session_state.recommendations or {}
     cross_analysis = {
         "cross_analysis": recos.get("cross_analysis", []),
         "priority_actions": recos.get("priority_actions", []),
     }
 
-    # recommandations: on donne aussi la version éditée
     recommendations = {
         "raw": recos,
         "edited": st.session_state.edited_recommendations or {},
@@ -181,9 +158,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------
-# CSS (Fix selectbox clipping + date input size + general style)
-# ---------------------------------------------------------------------
 st.markdown(
     """
 <style>
@@ -215,24 +189,19 @@ st.markdown(
 .small-muted { color: #5b6572; font-size: 0.9rem; }
 hr { border: none; border-top: 1px solid #eceff4; margin: 0.9rem 0; }
 
-/* -------- Fix Selectbox / DateInput heights (BaseWeb) -------- */
+/* Fix selectbox clipping */
 div[data-baseweb="select"] > div { min-height: 46px !important; }
 div[data-baseweb="select"] span { line-height: 46px !important; }
 div[data-baseweb="select"] input { padding-top: 10px !important; padding-bottom: 10px !important; }
 
+/* Fix text input height */
 div[data-baseweb="input"] > div { min-height: 46px !important; }
 div[data-baseweb="input"] input { padding-top: 10px !important; padding-bottom: 10px !important; }
-
-/* Make date column a bit wider on sidebar */
-.sidebar-date .stDateInput { width: 100% !important; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ---------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------
 st.markdown(
     """
 <div class="main-header">
@@ -267,32 +236,36 @@ if "follow_up" not in st.session_state:
 with st.sidebar:
     st.header("👤 Patient")
 
-    with st.form("patient_form"):
-        patient_name = st.text_input("Nom complet", value=st.session_state.patient_info.get("name", ""))
+    # ✅ Keys pour que Streamlit conserve bien les valeurs
+    # On initialise une fois si absent
+    if "ui_patient_sex" not in st.session_state:
+        st.session_state.ui_patient_sex = st.session_state.patient_info.get("sex", "F")
 
-        cols = st.columns([1, 1, 1.4])  # date plus large
+    with st.form("patient_form"):
+        patient_name = st.text_input(
+            "Nom complet",
+            value=st.session_state.patient_info.get("name", ""),
+            key="ui_patient_name",
+        )
+
+        cols = st.columns(2)
         with cols[0]:
             patient_age = st.number_input(
                 "Âge",
                 min_value=0,
                 max_value=120,
                 value=int(st.session_state.patient_info.get("age", 30)),
+                key="ui_patient_age",
             )
-
         with cols[1]:
+            # ✅ FIX: key + index basé sur session_state
+            current_sex = st.session_state.ui_patient_sex
             patient_sex = st.selectbox(
                 "Sexe",
                 ["F", "H"],
-                index=0 if st.session_state.patient_info.get("sex", "F") == "F" else 1,
+                index=0 if current_sex == "F" else 1,
+                key="ui_patient_sex_select",
             )
-
-        with cols[2]:
-            st.markdown('<div class="sidebar-date">', unsafe_allow_html=True)
-            patient_date = st.date_input(
-                "Date analyse",
-                value=st.session_state.patient_info.get("date", datetime.now().date()),
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
 
         cols2 = st.columns(2)
         with cols2[0]:
@@ -302,6 +275,7 @@ with st.sidebar:
                 max_value=300.0,
                 value=float(st.session_state.patient_info.get("weight_kg", 70.0)),
                 step=0.1,
+                key="ui_patient_weight",
             )
         with cols2[1]:
             patient_height = st.number_input(
@@ -310,12 +284,12 @@ with st.sidebar:
                 max_value=250.0,
                 value=float(st.session_state.patient_info.get("height_cm", 170.0)),
                 step=0.1,
+                key="ui_patient_height",
             )
 
         bmi = _calc_bmi(patient_weight, patient_height)
         st.caption("IMC: —" if bmi is None else f"IMC: **{bmi:.1f}**")
 
-        # Antécédents (petit cadre)
         st.markdown('<div class="mini-box">', unsafe_allow_html=True)
         st.markdown('<div class="mini-title">Antécédents médicaux</div>', unsafe_allow_html=True)
         patient_antecedents = st.text_area(
@@ -324,19 +298,22 @@ with st.sidebar:
             height=80,
             placeholder="Ex: HTA, diabète, thyroïde, traitements, ATCD familiaux…",
             label_visibility="collapsed",
+            key="ui_patient_antecedents",
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
         if st.form_submit_button("💾 Enregistrer"):
+            # ✅ sauvegarde fiable du sexe (valeur du selectbox)
+            st.session_state.ui_patient_sex = st.session_state.ui_patient_sex_select
+
             st.session_state.patient_info = {
-                "name": patient_name,
-                "age": patient_age,
-                "sex": patient_sex,
-                "date": patient_date,
-                "weight_kg": float(patient_weight),
-                "height_cm": float(patient_height),
+                "name": st.session_state.ui_patient_name,
+                "age": st.session_state.ui_patient_age,
+                "sex": st.session_state.ui_patient_sex,  # F/H
+                "weight_kg": float(st.session_state.ui_patient_weight),
+                "height_cm": float(st.session_state.ui_patient_height),
                 "bmi": bmi,
-                "antecedents": patient_antecedents,
+                "antecedents": st.session_state.ui_patient_antecedents,
             }
             st.success("✅ Patient enregistré")
 
@@ -414,7 +391,6 @@ with st.sidebar:
                 st.info("🤖 Génération recommandations (Rules Engine)…")
                 biology_df = _dict_bio_to_dataframe(st.session_state.biology_data)
 
-                # cast dysbiosis_index if present
                 if isinstance(st.session_state.microbiome_data, dict) and "dysbiosis_index" in st.session_state.microbiome_data:
                     try:
                         st.session_state.microbiome_data["dysbiosis_index"] = int(st.session_state.microbiome_data["dysbiosis_index"])
@@ -430,13 +406,10 @@ with st.sidebar:
                     patient_info=patient_fmt,
                 )
 
-                # Texte éditable = on réutilise les sections de recos (simple)
-                # Tu peux éditer dans l’onglet Recommandations.
                 recos = st.session_state.recommendations or {}
                 edited = {}
                 edited["Actions prioritaires"] = "\n".join([f"• {x}" for x in (recos.get("priority_actions", []) or [])])
 
-                # Biologie
                 bio = recos.get("biology_interpretations", []) or []
                 bio_txt = []
                 for x in bio:
@@ -452,7 +425,6 @@ with st.sidebar:
                     bio_txt.append("")
                 edited["Recommandations biologie"] = "\n".join(bio_txt).strip()
 
-                # Microbiote
                 micro = recos.get("microbiome_interpretations", []) or []
                 micro_txt = []
                 if recos.get("microbiome_summary"):
@@ -468,7 +440,6 @@ with st.sidebar:
                     micro_txt.append("")
                 edited["Recommandations microbiote"] = "\n".join(micro_txt).strip()
 
-                # Analyse croisée
                 cross = recos.get("cross_analysis", []) or []
                 cross_txt = []
                 for c in cross:
@@ -493,7 +464,6 @@ with st.sidebar:
 # ---------------------------------------------------------------------
 patient = st.session_state.patient_info or {}
 
-# ✅ Bandeau patient
 if patient.get("name"):
     bmi = patient.get("bmi", None)
     bmi_txt = "—" if bmi is None else f"{float(bmi):.1f}"
@@ -504,7 +474,7 @@ if patient.get("name"):
 <div class="patient-strip">
   <div><b>👤 {patient.get('name','')}</b></div>
   <div class="small-muted">
-    Âge: {patient.get('age','')} ans · Sexe: {patient.get('sex','')} · Date: {patient.get('date','')}
+    Âge: {patient.get('age','')} ans · Sexe: {patient.get('sex','')}
     · Poids: {patient.get('weight_kg','—')} kg · Taille: {patient.get('height_cm','—')} cm · IMC: <b>{bmi_txt}</b>
   </div>
   <div class="small-muted" style="margin-top:0.35rem;">
@@ -517,16 +487,12 @@ if patient.get("name"):
 else:
     st.info("👈 Commence par enregistrer un patient dans la sidebar.")
 
-# ✅ Onglets SOUS la bannière (et après le bandeau patient)
 tabs = st.tabs(["📊 Analyse", "🧠 Interprétation", "📝 Recommandations", "📅 Suivi", "📄 Export PDF"])
 
-# ---------------------------------------------------------------------
-# TAB 1 - Analyse
-# ---------------------------------------------------------------------
 with tabs[0]:
     st.subheader("📊 Analyse (données extraites)")
-
     colA, colB = st.columns(2)
+
     with colA:
         st.markdown("### Biologie")
         df_bio = _dict_bio_to_dataframe(st.session_state.biology_data)
@@ -542,17 +508,12 @@ with tabs[0]:
         else:
             st.info("Aucune donnée microbiote importée.")
 
-# ---------------------------------------------------------------------
-# TAB 2 - Interprétation (plus en mode code)
-# ---------------------------------------------------------------------
 with tabs[1]:
     st.subheader("🧠 Interprétation (rules engine)")
-
     recos = st.session_state.recommendations or {}
     if not recos:
         st.warning("Aucune interprétation disponible (génère d'abord via le bouton de la sidebar).")
     else:
-        # Actions prioritaires
         st.markdown("### Actions prioritaires")
         pa = recos.get("priority_actions", []) or []
         if pa:
@@ -561,12 +522,9 @@ with tabs[1]:
         else:
             st.write("—")
 
-        # Biologie (table lisible)
         st.markdown("### Biologie")
         bio = recos.get("biology_interpretations", []) or []
-        if not bio:
-            st.write("—")
-        else:
+        if bio:
             df = pd.DataFrame([{
                 "Biomarqueur": x.get("biomarker", ""),
                 "Valeur": f"{x.get('value','')} {x.get('unit','')}".strip(),
@@ -575,28 +533,15 @@ with tabs[1]:
                 "Interprétation": x.get("interpretation", ""),
             } for x in bio])
             st.dataframe(df, use_container_width=True)
+        else:
+            st.write("—")
 
-            with st.expander("Voir détails recommandations biologie (nutrition / micronutrition / lifestyle)"):
-                for x in bio:
-                    st.markdown(f"**{x.get('biomarker','')}** — Statut: `{x.get('status','')}`")
-                    if x.get("nutrition_reco"):
-                        st.write(f"Nutrition: {x['nutrition_reco']}")
-                    if x.get("micronutrition_reco"):
-                        st.write(f"Micronutrition: {x['micronutrition_reco']}")
-                    if x.get("lifestyle_reco"):
-                        st.write(f"Lifestyle: {x['lifestyle_reco']}")
-                    st.divider()
-
-        # Microbiote
         st.markdown("### Microbiote")
         msum = recos.get("microbiome_summary", {}) or {}
         if msum:
             st.info(f"Résumé: {msum}")
-
         micro = recos.get("microbiome_interpretations", []) or []
-        if not micro:
-            st.write("—")
-        else:
+        if micro:
             dfm = pd.DataFrame([{
                 "Élément": (x.get("title") or x.get("group") or ""),
                 "Statut": x.get("status", ""),
@@ -604,13 +549,12 @@ with tabs[1]:
                 "Reco": x.get("recommendations", ""),
             } for x in micro])
             st.dataframe(dfm, use_container_width=True)
+        else:
+            st.write("—")
 
-        # Analyse croisée
         st.markdown("### Analyse croisée")
         cross = recos.get("cross_analysis", []) or []
-        if not cross:
-            st.write("—")
-        else:
+        if cross:
             for c in cross:
                 st.markdown(f"**{c.get('title','')}**")
                 if c.get("description"):
@@ -618,16 +562,14 @@ with tabs[1]:
                 if c.get("recommendations"):
                     st.write(f"Reco: {c['recommendations']}")
                 st.divider()
+        else:
+            st.write("—")
 
         with st.expander("Debug (JSON brut)"):
             st.json(recos)
 
-# ---------------------------------------------------------------------
-# TAB 3 - Recommandations éditables
-# ---------------------------------------------------------------------
 with tabs[2]:
     st.subheader("📝 Recommandations (éditables)")
-
     if not st.session_state.data_extracted or not st.session_state.edited_recommendations:
         st.warning("Aucune recommandation éditable (génère d'abord via le bouton de la sidebar).")
     else:
@@ -657,14 +599,8 @@ with tabs[2]:
             mime="application/json",
         )
 
-# ---------------------------------------------------------------------
-# TAB 4 - Suivi
-# ---------------------------------------------------------------------
 with tabs[3]:
     st.subheader("📅 Suivi")
-
-    # Inputs de suivi
-    default_next = st.session_state.follow_up.get("next_date", (date.today().replace(day=date.today().day) ))
     col1, col2 = st.columns([1, 2])
     with col1:
         next_date = st.date_input(
@@ -681,7 +617,7 @@ with tabs[3]:
         )
 
     plan = st.text_area(
-        "Plan de suivi (3–6 semaines / 3 mois / etc.)",
+        "Plan de suivi",
         value=st.session_state.follow_up.get("plan", ""),
         key="follow_plan",
         height=120,
@@ -693,7 +629,7 @@ with tabs[3]:
         value=st.session_state.follow_up.get("clinician_notes", ""),
         key="follow_notes",
         height=90,
-        placeholder="Ex: hypothèses, points d’alerte, éléments à vérifier en consultation…",
+        placeholder="Ex: hypothèses, points d’alerte, éléments à vérifier…",
     )
 
     if st.button("💾 Enregistrer le suivi"):
@@ -705,20 +641,14 @@ with tabs[3]:
         }
         st.success("✅ Suivi enregistré")
 
-# ---------------------------------------------------------------------
-# TAB 5 - Export PDF
-# ---------------------------------------------------------------------
 with tabs[4]:
     st.subheader("📄 Export PDF")
-
     if not PDF_EXPORT_AVAILABLE:
-        st.error("❌ Export PDF indisponible: vérifie que pdf_generator.py est présent et que reportlab est installé.")
+        st.error("❌ Export PDF indisponible: vérifie pdf_generator.py + reportlab dans requirements.txt.")
     else:
         if not st.session_state.data_extracted:
             st.warning("Génère d’abord une analyse + recommandations avant d’exporter.")
         else:
-            st.info("Le PDF inclura: patient + biologie + microbiote + analyse croisée + recommandations + suivi.")
-
             pdf_filename = st.text_input(
                 "Nom du fichier PDF",
                 value=f"UNILABS_rapport_{(patient.get('name','patient')).replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
@@ -728,7 +658,6 @@ with tabs[4]:
                 payload = _build_pdf_payload()
                 out_path = os.path.join(tempfile.gettempdir(), pdf_filename)
 
-                # On passe les blocs attendus par ton générateur
                 pdf_path = generate_multimodal_report(
                     patient_data=payload["patient_data"],
                     biology_data=payload["biology_data"],
