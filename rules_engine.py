@@ -2,12 +2,13 @@
 Moteur de règles pour générer des recommandations personnalisées
 basées sur les résultats biologiques et microbiote
 
-PATCH v4 (anti DataFrame truth ambiguity):
-✅ Interdit: "if df:" et "df1 or df2"
-✅ Helpers _df_ok / _first_non_empty
-✅ Chargement Excel tolérant
-✅ Matching biomarqueurs robuste + debug
-✅ Cross-analysis safe numeric
+UNILABS / ALGO-LIFE
+PATCH v5:
+✅ Anti "truth value of DataFrame is ambiguous" (pas de if df / pas de df1 or df2)
+✅ Index biomarqueurs normalisés (matching robuste)
+✅ Colonnes Excel tolérantes
+✅ Debug matching
+✅ + list_all_biomarkers(): liste complète des biomarqueurs de l'Excel
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from extractors import normalize_biomarker_name, determine_biomarker_status
 
 
 # ---------------------------------------------------------------------
-# Helpers (critical: avoid "truth value of DataFrame is ambiguous")
+# Helpers (critical: avoid DataFrame boolean ambiguity)
 # ---------------------------------------------------------------------
 def _df_ok(df) -> bool:
     return (df is not None) and hasattr(df, "empty") and (not df.empty)
@@ -121,6 +122,37 @@ class RulesEngine:
 
         self._load_rules()
         self._build_indexes()
+
+    # -----------------------------------------------------------------
+    # NEW: list all biomarkers from Excel
+    # -----------------------------------------------------------------
+    def list_all_biomarkers(self) -> List[str]:
+        """
+        Retourne la liste unique (triée) de tous les biomarqueurs présents dans l'Excel de règles.
+        Utilise les feuilles BASE_40 / EXTENDED_92 / FONCTIONNEL_134.
+        """
+        biom_list: List[str] = []
+
+        for df in [self.rules_bio_base, self.rules_bio_extended, self.rules_bio_functional]:
+            if not _df_ok(df):
+                continue
+
+            col = _col_find(df, ["Biomarqueur", "BIOMARQUEUR", "Marqueur", "Paramètre", "Parametre"])
+            if not col:
+                # fallback: heuristique
+                for c in df.columns:
+                    s = str(c).lower()
+                    if "biomar" in s or "marqueur" in s or "param" in s:
+                        col = c
+                        break
+
+            if col:
+                vals = df[col].dropna().astype(str).str.strip().tolist()
+                biom_list.extend(vals)
+
+        # unique + clean + tri
+        uniq = sorted({b for b in biom_list if b and b.lower() != "nan"})
+        return uniq
 
     # -----------------------------------------------------------------
     # Load rules (NO DataFrame boolean operations)
@@ -275,7 +307,7 @@ class RulesEngine:
                     return row
                 if severity == 2 and any(x in sev_val for x in ["+2", "2", "modere", "modéré", "moderate"]):
                     return row
-                if severity >= 3 and any(x in sev_val for x in ["+3", "3", "severe", "sévère", "severe"]):
+                if severity >= 3 and any(x in sev_val for x in ["+3", "3", "severe", "sévère"]):
                     return row
 
         return None
@@ -307,10 +339,8 @@ class RulesEngine:
         if rules is None:
             return result
 
-        # Build a 1-row DF from Series to reuse _col_find
         one = rules.to_frame().T
 
-        # Candidates (French + variations)
         low_i = _col_find(one, ["BASSE - Interprétation", "BASSE-Interprétation", "BASSE Interprétation", "BASSE - Interpretation"])
         low_n = _col_find(one, ["BASSE - Nutrition", "BASSE-Nutrition", "BASSE Nutrition"])
         low_m = _col_find(one, ["BASSE - Micronutrition", "BASSE-Micronutrition", "BASSE Micronutrition"])
@@ -380,7 +410,7 @@ class RulesEngine:
         return out
 
     # -----------------------------------------------------------------
-    # Cross analysis (safe numeric comparisons)
+    # Cross analysis (safe numeric comparisons) - minimal
     # -----------------------------------------------------------------
     def generate_cross_analysis(self, biology_data: pd.DataFrame, microbiome_data: Dict) -> List[Dict]:
         cross: List[Dict] = []
@@ -393,7 +423,6 @@ class RulesEngine:
                 return None
             return m.iloc[0]
 
-        # CRP
         crp = find_first("CRP")
         if crp is not None:
             crp_val = _safe_float(crp.get("Valeur"))
