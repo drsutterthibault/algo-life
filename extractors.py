@@ -1,23 +1,54 @@
 """
-UNILABS / ALGO-LIFE - Extractors (PATCH v7)
-✅ Biologie: determine_biomarker_status renvoie Bas/Normal/Élevé (compat rules_engine.py)
-✅ Microbiote GutMAP: result EXACT: Expected / Slightly deviating / Deviating + category fournie
+UNILABS / ALGO-LIFE - Extractors (PATCH MATCHING v8)
+✅ Extraction PDF inchangée
+✅ FIX: normalize_biomarker_name robuste pour matcher les règles Excel
+✅ Status: Bas/Normal/Élevé/Inconnu (compatible rules_engine.py)
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Dict, Any, List, Optional
 
 
 # ---------------------------------------------------------------------
-# Utils
+# ✅ FIX MATCHING (seul changement important)
 # ---------------------------------------------------------------------
 def normalize_biomarker_name(name: str) -> str:
+    """
+    Normalisation robuste pour matcher Excel, sans toucher à l'extraction :
+    - trim
+    - suppression accents
+    - uppercase
+    - nettoyage ponctuation
+    - espaces normalisés
+    """
     if name is None:
         return ""
     s = str(name).strip()
-    s = re.sub(r"\s+", " ", s)
+
+    # Supprimer accents
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+
+    # Uppercase
+    s = s.upper()
+
+    # Harmoniser ponctuation (C.P.K -> C P K -> CPK via squeeze)
+    s = s.replace(".", " ")
+    s = s.replace(",", " ")
+    s = s.replace("’", "'")
+
+    # Garder A-Z 0-9 + séparateurs simples
+    s = re.sub(r"[^A-Z0-9\s\-\+/]", " ", s)
+
+    # Espaces propres
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # Compacte certains acronymes fréquents (option safe)
+    s = s.replace("C P K", "CPK")
+
     return s
 
 
@@ -41,9 +72,6 @@ def _clean_ref(ref: str) -> str:
     return r
 
 
-# ---------------------------------------------------------------------
-# ✅ IMPORTANT: Status compatible rules_engine.py
-# ---------------------------------------------------------------------
 def determine_biomarker_status(value, reference, biomarker_name=None, *args, **kwargs) -> str:
     """
     Returns EXACT strings expected by rules_engine.py:
@@ -88,7 +116,7 @@ def determine_biomarker_status(value, reference, biomarker_name=None, *args, **k
 
 
 # ---------------------------------------------------------------------
-# PDF text loader
+# PDF text loader (INCHANGÉ)
 # ---------------------------------------------------------------------
 def _read_pdf_text(pdf_path: str) -> str:
     try:
@@ -104,7 +132,7 @@ def _read_pdf_text(pdf_path: str) -> str:
 
 
 # ---------------------------------------------------------------------
-# SYNLAB Biology extractor (France + Belgium table)
+# SYNLAB Biology extractor (INCHANGÉ)
 # ---------------------------------------------------------------------
 _IGNORE_PATTERNS = [
     r"^Édition\s*:",
@@ -169,7 +197,8 @@ def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
 
         m = pat_be.match(ln)
         if m:
-            name = normalize_biomarker_name(m.group("name"))
+            name_raw = m.group("name")
+            name = name_raw.strip()
             value = m.group("value")
             unit = (m.group("unit") or "").strip()
             ref = _clean_ref(m.group("ref"))
@@ -179,7 +208,8 @@ def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
 
         m = pat_fr.match(ln)
         if m:
-            name = normalize_biomarker_name(m.group("name"))
+            name_raw = m.group("name")
+            name = name_raw.strip()
             if re.search(r"\bSIEMENS\b", name, flags=re.IGNORECASE):
                 continue
             value = m.group("value")
@@ -193,7 +223,7 @@ def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------
-# IDK GutMAP extractor (group-level results compatible rules_engine.py)
+# IDK GutMAP extractor (INCHANGÉ côté parsing, mais normalisation prête)
 # ---------------------------------------------------------------------
 def extract_idk_microbiome(pdf_path: str) -> Dict[str, Any]:
     """
@@ -215,7 +245,6 @@ def extract_idk_microbiome(pdf_path: str) -> Dict[str, Any]:
     if m2:
         di = int(m2.group(1))
     else:
-        # fallback label
         m = re.search(r"Result:\s*The microbiota is\s+([A-Za-z\- ]+)", text, flags=re.IGNORECASE)
         if m:
             label = m.group(1).strip().lower()
@@ -231,7 +260,6 @@ def extract_idk_microbiome(pdf_path: str) -> Dict[str, Any]:
     if md:
         diversity = md.group(1).strip()
 
-    # Group sections
     group_header = re.compile(r"(?m)^([A-Z]\d)\.\s+(.+?)\s*$")
     result_line = re.compile(r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", flags=re.IGNORECASE)
 
@@ -239,11 +267,11 @@ def extract_idk_microbiome(pdf_path: str) -> Dict[str, Any]:
     current_code = None
     current_group = None
 
-    for ln in (text.splitlines()):
+    for ln in text.splitlines():
         ln = ln.strip()
         h = group_header.match(ln)
         if h:
-            current_code = h.group(1).strip()   # ex: A1
+            current_code = h.group(1).strip()
             current_group = f"{current_code}. {h.group(2).strip()}"
             continue
 
@@ -257,11 +285,7 @@ def extract_idk_microbiome(pdf_path: str) -> Dict[str, Any]:
             else:
                 res = "Deviating"
 
-            bacteria.append({
-                "category": current_code,
-                "group": current_group,
-                "result": res
-            })
+            bacteria.append({"category": current_code, "group": current_group, "result": res})
 
     # Deduplicate
     seen = set()
