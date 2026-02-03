@@ -99,11 +99,22 @@ def _patient_to_rules_engine_format(patient_info: Dict[str, Any]) -> Dict[str, A
 
 
 def _build_follow_up_dict(session_follow: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    follow_up["next_tests"] est une LISTE (multiselect).
+    Pour le PDF, on convertit en texte lisible.
+    """
     if not session_follow:
         return {}
+
+    nxt = session_follow.get("next_tests", [])
+    if isinstance(nxt, list):
+        next_tests_txt = ", ".join([str(x).strip() for x in nxt if str(x).strip()])
+    else:
+        next_tests_txt = str(nxt or "").strip()
+
     return {
         "next_date": str(session_follow.get("next_date", "")),
-        "next_tests": session_follow.get("next_tests", ""),
+        "next_tests": next_tests_txt,
         "plan": session_follow.get("plan", ""),
         "clinician_notes": session_follow.get("clinician_notes", ""),
     }
@@ -146,6 +157,19 @@ def _build_pdf_payload() -> Dict[str, Any]:
         "recommendations": recommendations,
         "follow_up": follow_up,
     }
+
+
+def _get_rules_engine() -> Optional[RulesEngine]:
+    """
+    Cache RulesEngine en session (évite rechargements, utile pour list_all_biomarkers()).
+    """
+    if not os.path.exists(RULES_EXCEL_PATH):
+        return None
+
+    if "rules_engine" not in st.session_state:
+        st.session_state["rules_engine"] = RulesEngine(RULES_EXCEL_PATH)
+
+    return st.session_state["rules_engine"]
 
 
 # ---------------------------------------------------------------------
@@ -236,8 +260,6 @@ if "follow_up" not in st.session_state:
 with st.sidebar:
     st.header("👤 Patient")
 
-    # ✅ Keys pour que Streamlit conserve bien les valeurs
-    # On initialise une fois si absent
     if "ui_patient_sex" not in st.session_state:
         st.session_state.ui_patient_sex = st.session_state.patient_info.get("sex", "F")
 
@@ -258,7 +280,6 @@ with st.sidebar:
                 key="ui_patient_age",
             )
         with cols[1]:
-            # ✅ FIX: key + index basé sur session_state
             current_sex = st.session_state.ui_patient_sex
             patient_sex = st.selectbox(
                 "Sexe",
@@ -303,7 +324,6 @@ with st.sidebar:
         st.markdown("</div>", unsafe_allow_html=True)
 
         if st.form_submit_button("💾 Enregistrer"):
-            # ✅ sauvegarde fiable du sexe (valeur du selectbox)
             st.session_state.ui_patient_sex = st.session_state.ui_patient_sex_select
 
             st.session_state.patient_info = {
@@ -399,7 +419,9 @@ with st.sidebar:
 
                 patient_fmt = _patient_to_rules_engine_format(st.session_state.patient_info)
 
-                engine = RulesEngine(RULES_EXCEL_PATH)
+                # ✅ engine cached
+                engine = _get_rules_engine() or RulesEngine(RULES_EXCEL_PATH)
+
                 st.session_state.recommendations = engine.generate_recommendations(
                     biology_data=biology_df,
                     microbiome_data=st.session_state.microbiome_data,
@@ -601,6 +623,16 @@ with tabs[2]:
 
 with tabs[3]:
     st.subheader("📅 Suivi")
+
+    engine = _get_rules_engine()
+    all_biomarkers = engine.list_all_biomarkers() if engine is not None else []
+
+    # Valeur initiale: follow_up["next_tests"] doit être une LISTE
+    prev_tests = st.session_state.follow_up.get("next_tests", [])
+    if isinstance(prev_tests, str):
+        # migration si ancienne version stockait un texte
+        prev_tests = [x.strip() for x in prev_tests.split(",") if x.strip()]
+
     col1, col2 = st.columns([1, 2])
     with col1:
         next_date = st.date_input(
@@ -608,13 +640,29 @@ with tabs[3]:
             value=st.session_state.follow_up.get("next_date", date.today()),
             key="follow_next_date",
         )
+
     with col2:
-        next_tests = st.text_input(
-            "Examens / bilans à recontrôler",
-            value=st.session_state.follow_up.get("next_tests", ""),
-            key="follow_next_tests",
-            placeholder="Ex: CRPus, ferritine, HbA1c, Vit D, microbiote…",
-        )
+        if all_biomarkers:
+            next_tests_list = st.multiselect(
+                "Examens / bilans à recontrôler",
+                options=all_biomarkers,
+                default=prev_tests,
+                key="follow_next_tests_list",
+                help="Liste issue du fichier de règles (Excel).",
+            )
+        else:
+            st.warning("Règles non chargées → liste biomarqueurs indisponible.")
+            next_tests_list = prev_tests
+
+    manual_add = st.text_input(
+        "Ajouter un biomarqueur (manuel)",
+        value="",
+        placeholder="Ex: LBP, DAO, Homocystéine…",
+        key="follow_manual_add",
+    )
+    if manual_add.strip():
+        if manual_add.strip() not in next_tests_list:
+            next_tests_list = next_tests_list + [manual_add.strip()]
 
     plan = st.text_area(
         "Plan de suivi",
@@ -635,7 +683,7 @@ with tabs[3]:
     if st.button("💾 Enregistrer le suivi"):
         st.session_state.follow_up = {
             "next_date": next_date,
-            "next_tests": next_tests,
+            "next_tests": next_tests_list,  # ✅ LISTE
             "plan": plan,
             "clinician_notes": clinician_notes,
         }
