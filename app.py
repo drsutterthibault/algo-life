@@ -145,6 +145,7 @@ def _build_pdf_payload() -> Dict[str, Any]:
     recommendations = {
         "raw": recos,
         "edited": st.session_state.edited_recommendations or {},
+        "bio_manual_overrides": st.session_state.get("bio_manual_overrides", {}) or {},
     }
 
     follow_up = _build_follow_up_dict(st.session_state.follow_up)
@@ -170,6 +171,109 @@ def _get_rules_engine() -> Optional[RulesEngine]:
         st.session_state["rules_engine"] = RulesEngine(RULES_EXCEL_PATH)
 
     return st.session_state["rules_engine"]
+
+
+def _build_text_blocks_from_recos(recos: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Construit des blocs texte classés: interprétation / nutrition / micronutrition / lifestyle / microbiote / analyse croisée.
+    """
+    out: Dict[str, str] = {}
+
+    # Actions prioritaires
+    out["Actions prioritaires"] = "\n".join([f"• {x}" for x in (recos.get("priority_actions", []) or [])]).strip()
+
+    # Biologie : classé
+    bio = recos.get("biology_interpretations", []) or []
+    interp_lines, nutri_lines, micro_lines, life_lines = [], [], [], []
+
+    for x in bio:
+        biom = str(x.get("biomarker", "")).strip()
+        if not biom:
+            continue
+        status = x.get("status", "")
+        val = x.get("value", "")
+        unit = x.get("unit", "")
+        head = f"{biom} — {status} — {val} {unit}".strip()
+
+        interpretation = (x.get("interpretation") or "").strip()
+        nutrition = (x.get("nutrition_reco") or "").strip()
+        micronutrition = (x.get("micronutrition_reco") or "").strip()
+        lifestyle = (x.get("lifestyle_reco") or "").strip()
+
+        if interpretation:
+            interp_lines.append(head)
+            interp_lines.append(f"Interprétation: {interpretation}")
+            interp_lines.append("")
+
+        if nutrition:
+            nutri_lines.append(head)
+            nutri_lines.append(f"Nutrition: {nutrition}")
+            nutri_lines.append("")
+
+        if micronutrition:
+            micro_lines.append(head)
+            micro_lines.append(f"Micronutrition: {micronutrition}")
+            micro_lines.append("")
+
+        if lifestyle:
+            life_lines.append(head)
+            life_lines.append(f"Lifestyle: {lifestyle}")
+            life_lines.append("")
+
+    out["Interprétations biologie"] = "\n".join(interp_lines).strip()
+    out["Nutrition"] = "\n".join(nutri_lines).strip()
+    out["Micronutrition"] = "\n".join(micro_lines).strip()
+    out["Lifestyle"] = "\n".join(life_lines).strip()
+
+    # Microbiote (évite le “Résumé None/None”)
+    micro_list = recos.get("microbiome_interpretations", []) or []
+    micro_txt = []
+
+    msum = recos.get("microbiome_summary") or {}
+    di = msum.get("dysbiosis_index", None)
+    dv = msum.get("diversity", None)
+    if di is not None or (dv is not None and str(dv).strip() and str(dv).lower() != "none"):
+        micro_txt.append(
+            f"Résumé: dysbiosis_index={di if di is not None else '—'}, diversity={dv if dv is not None else '—'}"
+        )
+        micro_txt.append("")
+
+    for m in micro_list:
+        title = (m.get("title") or m.get("group") or "").strip()
+        status = (m.get("status") or m.get("result") or "").strip()
+        if title:
+            micro_txt.append(f"{title} — {status}".strip("— ").strip())
+        interpretation = (m.get("interpretation") or "").strip()
+        nut = (m.get("nutrition_reco") or "").strip()
+        supp = (m.get("supplementation_reco") or "").strip()
+        life = (m.get("lifestyle_reco") or "").strip()
+
+        if interpretation:
+            micro_txt.append(f"Interprétation: {interpretation}")
+        if nut:
+            micro_txt.append(f"Nutrition: {nut}")
+        if supp:
+            micro_txt.append(f"Supplémentation: {supp}")
+        if life:
+            micro_txt.append(f"Lifestyle: {life}")
+        micro_txt.append("")
+
+    out["Recommandations microbiote"] = "\n".join(micro_txt).strip()
+
+    # Analyse croisée -> uniquement dans Recos (pas dans Interprétation)
+    cross = recos.get("cross_analysis", []) or []
+    cross_txt = []
+    for c in cross:
+        title = (c.get("title") or "").strip()
+        desc = (c.get("description") or "").strip()
+        if title:
+            cross_txt.append(title)
+        if desc:
+            cross_txt.append(desc)
+        cross_txt.append("")
+    out["Analyse croisée"] = "\n".join(cross_txt).strip()
+
+    return out
 
 
 # ---------------------------------------------------------------------
@@ -253,6 +357,8 @@ if "data_extracted" not in st.session_state:
     st.session_state.data_extracted = False
 if "follow_up" not in st.session_state:
     st.session_state.follow_up = {}
+if "bio_manual_overrides" not in st.session_state:
+    st.session_state.bio_manual_overrides = {}  # {biomarker: {interpretation,nutrition,micronutrition,lifestyle}}
 
 # ---------------------------------------------------------------------
 # SIDEBAR
@@ -413,7 +519,9 @@ with st.sidebar:
 
                 if isinstance(st.session_state.microbiome_data, dict) and "dysbiosis_index" in st.session_state.microbiome_data:
                     try:
-                        st.session_state.microbiome_data["dysbiosis_index"] = int(st.session_state.microbiome_data["dysbiosis_index"])
+                        st.session_state.microbiome_data["dysbiosis_index"] = int(
+                            st.session_state.microbiome_data["dysbiosis_index"]
+                        )
                     except Exception:
                         pass
 
@@ -428,52 +536,11 @@ with st.sidebar:
                     patient_info=patient_fmt,
                 )
 
-                recos = st.session_state.recommendations or {}
-                edited = {}
-                edited["Actions prioritaires"] = "\n".join([f"• {x}" for x in (recos.get("priority_actions", []) or [])])
+                # ✅ Reconstruire les textes (classés)
+                st.session_state.edited_recommendations = _build_text_blocks_from_recos(
+                    st.session_state.recommendations or {}
+                )
 
-                bio = recos.get("biology_interpretations", []) or []
-                bio_txt = []
-                for x in bio:
-                    bio_txt.append(f"{x.get('biomarker','')} — {x.get('status','')} — {x.get('value','')} {x.get('unit','')}".strip())
-                    if x.get("interpretation"):
-                        bio_txt.append(f"Interprétation: {x['interpretation']}")
-                    if x.get("nutrition_reco"):
-                        bio_txt.append(f"Nutrition: {x['nutrition_reco']}")
-                    if x.get("micronutrition_reco"):
-                        bio_txt.append(f"Micronutrition: {x['micronutrition_reco']}")
-                    if x.get("lifestyle_reco"):
-                        bio_txt.append(f"Lifestyle: {x['lifestyle_reco']}")
-                    bio_txt.append("")
-                edited["Recommandations biologie"] = "\n".join(bio_txt).strip()
-
-                micro = recos.get("microbiome_interpretations", []) or []
-                micro_txt = []
-                if recos.get("microbiome_summary"):
-                    micro_txt.append(f"Résumé: {recos.get('microbiome_summary')}")
-                    micro_txt.append("")
-                for m in micro:
-                    title = m.get("title") or m.get("group") or ""
-                    micro_txt.append(f"{title} — {m.get('status','')}".strip("— "))
-                    if m.get("interpretation"):
-                        micro_txt.append(f"Interprétation: {m['interpretation']}")
-                    if m.get("recommendations"):
-                        micro_txt.append(f"Reco: {m['recommendations']}")
-                    micro_txt.append("")
-                edited["Recommandations microbiote"] = "\n".join(micro_txt).strip()
-
-                cross = recos.get("cross_analysis", []) or []
-                cross_txt = []
-                for c in cross:
-                    cross_txt.append(c.get("title", ""))
-                    if c.get("description"):
-                        cross_txt.append(c["description"])
-                    if c.get("recommendations"):
-                        cross_txt.append(f"Reco: {c['recommendations']}")
-                    cross_txt.append("")
-                edited["Analyse croisée"] = "\n".join(cross_txt).strip()
-
-                st.session_state.edited_recommendations = edited
                 st.session_state.data_extracted = True
                 st.success("✅ Recommandations générées")
 
@@ -511,6 +578,9 @@ else:
 
 tabs = st.tabs(["📊 Analyse", "🧠 Interprétation", "📝 Recommandations", "📅 Suivi", "📄 Export PDF"])
 
+# ---------------------------------------------------------------------
+# TAB 0 - ANALYSE
+# ---------------------------------------------------------------------
 with tabs[0]:
     st.subheader("📊 Analyse (données extraites)")
     colA, colB = st.columns(2)
@@ -567,6 +637,9 @@ with tabs[0]:
             else:
                 st.info("Aucun groupe bactérien trouvé (liste vide).")
 
+# ---------------------------------------------------------------------
+# TAB 1 - INTERPRETATION
+# ---------------------------------------------------------------------
 with tabs[1]:
     st.subheader("🧠 Interprétation (rules engine)")
     recos = st.session_state.recommendations or {}
@@ -584,60 +657,176 @@ with tabs[1]:
         st.markdown("### Biologie")
         bio = recos.get("biology_interpretations", []) or []
         if bio:
-            df = pd.DataFrame([{
-                "Biomarqueur": x.get("biomarker", ""),
-                "Valeur": f"{x.get('value','')} {x.get('unit','')}".strip(),
-                "Référence": x.get("reference", ""),
-                "Statut": x.get("status", ""),
-                "Interprétation": x.get("interpretation", ""),
-            } for x in bio])
+            df = pd.DataFrame(
+                [
+                    {
+                        "Biomarqueur": x.get("biomarker", ""),
+                        "Valeur": f"{x.get('value','')} {x.get('unit','')}".strip(),
+                        "Référence": x.get("reference", ""),
+                        "Statut": x.get("status", ""),
+                        "Interprétation": x.get("interpretation", ""),
+                    }
+                    for x in bio
+                ]
+            )
+            # ✅ pas de colonnes reco vides ici
             st.dataframe(df, use_container_width=True)
         else:
             st.write("—")
 
         st.markdown("### Microbiote")
         msum = recos.get("microbiome_summary", {}) or {}
-        if msum:
-            st.info(f"Résumé: {msum}")
+        # ✅ éviter l’affichage None/None
+        di = msum.get("dysbiosis_index", None)
+        dv = msum.get("diversity", None)
+        if di is not None or (dv is not None and str(dv).strip() and str(dv).lower() != "none"):
+            st.info(f"Résumé: dysbiosis_index={di if di is not None else '—'}, diversity={dv if dv is not None else '—'}")
+
         micro = recos.get("microbiome_interpretations", []) or []
         if micro:
-            dfm = pd.DataFrame([{
-                "Élément": (x.get("title") or x.get("group") or ""),
-                "Statut": x.get("status", ""),
-                "Interprétation": x.get("interpretation", ""),
-                "Reco": x.get("recommendations", ""),
-            } for x in micro])
+            dfm = pd.DataFrame(
+                [
+                    {
+                        "Élément": (x.get("title") or x.get("group") or ""),
+                        "Statut": x.get("status", x.get("result", "")),
+                        "Interprétation": x.get("interpretation", ""),
+                    }
+                    for x in micro
+                ]
+            )
             st.dataframe(dfm, use_container_width=True)
         else:
             st.write("—")
 
-        st.markdown("### Analyse croisée")
-        cross = recos.get("cross_analysis", []) or []
-        if cross:
-            for c in cross:
-                st.markdown(f"**{c.get('title','')}**")
-                if c.get("description"):
-                    st.write(c["description"])
-                if c.get("recommendations"):
-                    st.write(f"Reco: {c['recommendations']}")
-                st.divider()
-        else:
-            st.write("—")
-
+        # ✅ demandé: enlever le tableau Analyse croisée ici (uniquement dans Recommandations)
         with st.expander("Debug (JSON brut)"):
             st.json(recos)
 
+# ---------------------------------------------------------------------
+# TAB 2 - RECOMMANDATIONS
+# ---------------------------------------------------------------------
 with tabs[2]:
     st.subheader("📝 Recommandations (éditables)")
+
     if not st.session_state.data_extracted or not st.session_state.edited_recommendations:
         st.warning("Aucune recommandation éditable (génère d'abord via le bouton de la sidebar).")
     else:
-        for section, txt in (st.session_state.edited_recommendations or {}).items():
+        recos = st.session_state.recommendations or {}
+        bio = recos.get("biology_interpretations", []) or []
+
+        st.markdown("## 🧪 Biologie — édition manuelle (par biomarqueur)")
+        if not bio:
+            st.info("Aucune interprétation biologie à éditer.")
+        else:
+            for b in bio:
+                biom = str(b.get("biomarker", "")).strip()
+                if not biom:
+                    continue
+
+                # init overrides
+                if biom not in st.session_state.bio_manual_overrides:
+                    st.session_state.bio_manual_overrides[biom] = {
+                        "interpretation": b.get("interpretation", "") or "",
+                        "nutrition": b.get("nutrition_reco", "") or "",
+                        "micronutrition": b.get("micronutrition_reco", "") or "",
+                        "lifestyle": b.get("lifestyle_reco", "") or "",
+                    }
+
+                status = b.get("status", "")
+                val = b.get("value", "")
+                unit = b.get("unit", "")
+                head = f"{biom} — {status} — {val} {unit}".strip()
+
+                with st.expander(head):
+                    ov = st.session_state.bio_manual_overrides[biom]
+
+                    ov["interpretation"] = st.text_area(
+                        "Interprétation (modifiable)",
+                        value=ov.get("interpretation", ""),
+                        height=90,
+                        key=f"ov_interp_{biom}",
+                    )
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        ov["nutrition"] = st.text_area(
+                            "Nutrition",
+                            value=ov.get("nutrition", ""),
+                            height=110,
+                            key=f"ov_nut_{biom}",
+                        )
+                    with c2:
+                        ov["micronutrition"] = st.text_area(
+                            "Micronutrition",
+                            value=ov.get("micronutrition", ""),
+                            height=110,
+                            key=f"ov_micro_{biom}",
+                        )
+
+                    ov["lifestyle"] = st.text_area(
+                        "Lifestyle",
+                        value=ov.get("lifestyle", ""),
+                        height=90,
+                        key=f"ov_life_{biom}",
+                    )
+
+                    st.session_state.bio_manual_overrides[biom] = ov
+
+            # ✅ Rebuild blocs classés à partir des overrides (pour texte + PDF)
+            interp_lines, nutri_lines, micro_lines, life_lines = [], [], [], []
+            for biom, ov in (st.session_state.bio_manual_overrides or {}).items():
+                ov = ov or {}
+                if ov.get("interpretation", "").strip():
+                    interp_lines.append(biom)
+                    interp_lines.append(ov["interpretation"].strip())
+                    interp_lines.append("")
+                if ov.get("nutrition", "").strip():
+                    nutri_lines.append(biom)
+                    nutri_lines.append(ov["nutrition"].strip())
+                    nutri_lines.append("")
+                if ov.get("micronutrition", "").strip():
+                    micro_lines.append(biom)
+                    micro_lines.append(ov["micronutrition"].strip())
+                    micro_lines.append("")
+                if ov.get("lifestyle", "").strip():
+                    life_lines.append(biom)
+                    life_lines.append(ov["lifestyle"].strip())
+                    life_lines.append("")
+
+            st.session_state.edited_recommendations["Interprétations biologie"] = "\n".join(interp_lines).strip()
+            st.session_state.edited_recommendations["Nutrition"] = "\n".join(nutri_lines).strip()
+            st.session_state.edited_recommendations["Micronutrition"] = "\n".join(micro_lines).strip()
+            st.session_state.edited_recommendations["Lifestyle"] = "\n".join(life_lines).strip()
+
+        st.divider()
+
+        # ✅ Sections éditables (classées)
+        ordered_sections = [
+            "Actions prioritaires",
+            "Interprétations biologie",
+            "Nutrition",
+            "Micronutrition",
+            "Lifestyle",
+            "Recommandations microbiote",
+            "Analyse croisée",
+        ]
+
+        for section in ordered_sections:
+            if section not in st.session_state.edited_recommendations:
+                continue
+            txt = st.session_state.edited_recommendations.get(section, "") or ""
             st.markdown(f"### {section}")
+
+            # ✅ hauteur adaptée pour micronutrition (meilleure mise en page)
+            height = 220
+            if section in ("Nutrition", "Micronutrition"):
+                height = 280
+            if section == "Analyse croisée":
+                height = 260
+
             st.session_state.edited_recommendations[section] = st.text_area(
                 f"Texte - {section}",
                 value=txt,
-                height=220,
+                height=height,
                 key=f"edit_{section}",
             )
             st.divider()
@@ -648,6 +837,7 @@ with tabs[2]:
             "microbiome": st.session_state.microbiome_data,
             "recommendations_raw": st.session_state.recommendations,
             "recommendations_edited": st.session_state.edited_recommendations,
+            "bio_manual_overrides": st.session_state.bio_manual_overrides,
             "export_date": datetime.now().isoformat(),
         }
 
@@ -658,6 +848,9 @@ with tabs[2]:
             mime="application/json",
         )
 
+# ---------------------------------------------------------------------
+# TAB 3 - SUIVI
+# ---------------------------------------------------------------------
 with tabs[3]:
     st.subheader("📅 Suivi")
 
@@ -726,6 +919,9 @@ with tabs[3]:
         }
         st.success("✅ Suivi enregistré")
 
+# ---------------------------------------------------------------------
+# TAB 4 - EXPORT PDF
+# ---------------------------------------------------------------------
 with tabs[4]:
     st.subheader("📄 Export PDF")
     if not PDF_EXPORT_AVAILABLE:
