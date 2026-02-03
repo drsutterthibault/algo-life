@@ -197,6 +197,165 @@ class DNALogo(Flowable):
         c.drawPath(path, stroke=1)
 
 
+class BiomarkerCard(Flowable):
+    """Carte moderne pour biomarqueur - Style capture d'écran"""
+    
+    def __init__(
+        self,
+        name: str,
+        value: float,
+        ref_min: Optional[float],
+        ref_max: Optional[float],
+        unit: str = "",
+        status: str = "Normal",
+        width: float = 8 * cm,
+        height: float = 3.5 * cm,
+    ):
+        super().__init__()
+        self.name = name
+        self.value = value
+        self.ref_min = ref_min
+        self.ref_max = ref_max
+        self.unit = unit
+        self.status = status.lower()
+        self.width = width
+        self.height = height
+    
+    def draw(self):
+        c = self.canv
+        
+        # === CARTE AVEC FOND BLANC ET OMBRE ===
+        # Fond blanc arrondi
+        c.setFillColor(colors.white)
+        c.setStrokeColor(colors.HexColor("#E0E0E0"))
+        c.setLineWidth(1)
+        c.roundRect(0, 0, self.width, self.height, 0.5*cm, fill=1, stroke=1)
+        
+        # === NOM DU BIOMARQUEUR ===
+        # Point de couleur selon status
+        if self.status == "normal":
+            dot_color = BrandColors.NORMAL
+        elif "bas" in self.status or "low" in self.status:
+            dot_color = BrandColors.LOW
+        elif "élevé" in self.status or "high" in self.status or "haut" in self.status:
+            dot_color = BrandColors.HIGH
+        else:
+            dot_color = BrandColors.GREY
+        
+        # Dessiner le point
+        c.setFillColor(dot_color)
+        c.circle(0.5*cm, self.height - 0.7*cm, 0.15*cm, fill=1, stroke=0)
+        
+        # Nom du biomarqueur
+        c.setFont("Helvetica", 11)
+        c.setFillColor(BrandColors.DARK_GREY)
+        c.drawString(0.9*cm, self.height - 0.8*cm, self.name)
+        
+        # === BARRE DE JAUGE ===
+        if self.ref_min is not None and self.ref_max is not None:
+            self._draw_gauge_bar(c)
+        else:
+            # Pas de référence - afficher juste la valeur
+            c.setFont("Helvetica-Bold", 14)
+            c.setFillColor(BrandColors.PRIMARY)
+            value_text = f"{self.value:.2f}".rstrip('0').rstrip('.') + f" {self.unit}".strip()
+            c.drawCentredString(self.width / 2, self.height / 2, value_text)
+    
+    def _draw_gauge_bar(self, c):
+        """Dessine la barre de jauge comme dans la capture d'écran"""
+        
+        # Dimensions de la barre
+        bar_x = 0.8*cm
+        bar_y = 1.8*cm
+        bar_width = self.width - 1.6*cm
+        bar_height = 0.35*cm
+        
+        # Calculer la plage d'affichage
+        ref_range = self.ref_max - self.ref_min
+        display_min = self.ref_min - ref_range * 0.2
+        display_max = self.ref_max + ref_range * 0.2
+        display_range = display_max - display_min
+        
+        if display_range <= 0:
+            display_range = 1
+        
+        # Positions relatives dans la barre
+        normal_start_x = (self.ref_min - display_min) / display_range * bar_width
+        normal_end_x = (self.ref_max - display_min) / display_range * bar_width
+        normal_width = normal_end_x - normal_start_x
+        
+        # === DESSINER LES ZONES DE COULEUR ===
+        # Zone basse (rouge-orangé)
+        c.setFillColor(colors.HexColor("#EF5350"))
+        c.rect(bar_x, bar_y, normal_start_x * 0.5, bar_height, fill=1, stroke=0)
+        
+        # Transition orange
+        c.setFillColor(colors.HexColor("#FF9800"))
+        c.rect(bar_x + normal_start_x * 0.5, bar_y, normal_start_x * 0.5, bar_height, fill=1, stroke=0)
+        
+        # Zone normale (vert)
+        c.setFillColor(colors.HexColor("#66BB6A"))
+        c.rect(bar_x + normal_start_x, bar_y, normal_width, bar_height, fill=1, stroke=0)
+        
+        # Transition orange haute
+        c.setFillColor(colors.HexColor("#FF9800"))
+        c.rect(bar_x + normal_end_x, bar_y, (bar_width - normal_end_x) * 0.5, bar_height, fill=1, stroke=0)
+        
+        # Zone haute (rouge)
+        c.setFillColor(colors.HexColor("#EF5350"))
+        c.rect(bar_x + normal_end_x + (bar_width - normal_end_x) * 0.5, bar_y, 
+               (bar_width - normal_end_x) * 0.5, bar_height, fill=1, stroke=0)
+        
+        # Bordure de la barre
+        c.setStrokeColor(colors.HexColor("#BDBDBD"))
+        c.setLineWidth(0.5)
+        c.rect(bar_x, bar_y, bar_width, bar_height, fill=0, stroke=1)
+        
+        # === CURSEUR DE VALEUR ===
+        # Calculer la position du curseur
+        if self.value < display_min:
+            cursor_x = bar_x
+        elif self.value > display_max:
+            cursor_x = bar_x + bar_width
+        else:
+            cursor_x = bar_x + (self.value - display_min) / display_range * bar_width
+        
+        # Dessiner le curseur (cercle vert avec bordure blanche)
+        c.setFillColor(BrandColors.NORMAL)
+        c.setStrokeColor(colors.white)
+        c.setLineWidth(2)
+        c.circle(cursor_x, bar_y + bar_height / 2, 0.25*cm, fill=1, stroke=1)
+        
+        # Ligne pointillée verticale depuis le curseur
+        c.setStrokeColor(colors.HexColor("#9E9E9E"))
+        c.setDash(2, 2)
+        c.setLineWidth(0.5)
+        c.line(cursor_x, bar_y + bar_height, cursor_x, bar_y + bar_height + 0.4*cm)
+        c.setDash()  # Reset dash
+        
+        # === VALEURS MIN/MAX ===
+        c.setFont("Helvetica", 9)
+        c.setFillColor(BrandColors.GREY)
+        
+        # Min
+        c.drawString(bar_x, bar_y - 0.35*cm, f"{self.ref_min:.2f}".rstrip('0').rstrip('.'))
+        
+        # Max
+        max_text = f"{self.ref_max:.2f}".rstrip('0').rstrip('.')
+        c.drawRightString(bar_x + bar_width, bar_y - 0.35*cm, max_text)
+        
+        # === VALEUR ACTUELLE ===
+        c.setFont("Helvetica-Bold", 14)
+        c.setFillColor(BrandColors.DARK_GREY)
+        
+        value_text = f"{self.value:.2f}".rstrip('0').rstrip('.')
+        if self.unit:
+            value_text += f" {self.unit}"
+        
+        # Centré sous la barre
+        c.drawCentredString(self.width / 2, 0.5*cm, value_text)
+
+
 class PremiumGauge(Flowable):
     """Jauge premium pour biomarqueurs avec design moderne"""
     
@@ -811,7 +970,7 @@ class PremiumPDFGenerator:
     # ═══════════════════════════════════════════════════════════════════════
     
     def add_biology_section(self, biology_data: Dict[str, Any]):
-        """Section biologie avec jauges premium"""
+        """Section biologie avec cartes modernes comme la capture d'écran"""
         
         # Titre de section
         self.story.append(Paragraph(
@@ -828,8 +987,14 @@ class PremiumPDFGenerator:
         self.story.append(Paragraph(intro_text, self.styles["Body"]))
         self.story.append(Spacer(1, 0.5*cm))
         
-        # Récupérer les biomarqueurs
-        biomarkers = biology_data.get("biomarkers", {})
+        # Récupérer les biomarqueurs - SUPPORT DES DEUX FORMATS
+        # Format 1: {"biomarkers": {"Nom": {...}}}
+        # Format 2: {"Nom": {...}} (format app.py direct)
+        if "biomarkers" in biology_data:
+            biomarkers = biology_data["biomarkers"]
+        else:
+            # Format direct de app.py
+            biomarkers = {k: v for k, v in biology_data.items() if isinstance(v, dict)}
         
         if not biomarkers:
             self.story.append(Paragraph(
@@ -838,7 +1003,7 @@ class PremiumPDFGenerator:
             ))
             return
         
-        # Grouper les biomarqueurs par catégorie si disponible
+        # Grouper les biomarqueurs par catégorie
         categorized = self._categorize_biomarkers(biomarkers)
         
         for category, markers in categorized.items():
@@ -850,12 +1015,68 @@ class PremiumPDFGenerator:
                 ))
                 self.story.append(Spacer(1, 0.3*cm))
             
-            # Afficher chaque biomarqueur avec sa jauge
-            for marker_name, marker_data in markers.items():
-                self._add_biomarker_gauge(marker_name, marker_data)
-                self.story.append(Spacer(1, 0.4*cm))
+            # Afficher les biomarqueurs en cartes 2x2
+            self._add_biomarker_cards_grid(markers)
+            self.story.append(Spacer(1, 0.5*cm))
         
         self.story.append(PageBreak())
+    
+    def _add_biomarker_cards_grid(self, markers: Dict[str, Any]):
+        """Affiche les biomarqueurs en grille de cartes 2x2 comme la capture d'écran"""
+        
+        marker_items = list(markers.items())
+        cards_data = []
+        row = []
+        
+        for marker_name, marker_data in marker_items:
+            # Créer la carte pour ce biomarqueur
+            card = self._create_biomarker_card(marker_name, marker_data)
+            row.append(card)
+            
+            # 2 cartes par ligne
+            if len(row) == 2:
+                cards_data.append(row)
+                row = []
+        
+        # Ajouter la dernière ligne si impaire
+        if row:
+            cards_data.append(row + [Spacer(1, 1)])
+        
+        # Créer la table de cartes
+        if cards_data:
+            cards_table = Table(
+                cards_data,
+                colWidths=[8.5*cm, 8.5*cm],
+                rowHeights=[4*cm] * len(cards_data)
+            )
+            cards_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            
+            self.story.append(cards_table)
+    
+    def _create_biomarker_card(self, name: str, data: Dict[str, Any]) -> 'BiomarkerCard':
+        """Crée une carte biomarqueur moderne comme la capture d'écran"""
+        
+        value = _safe_float(data.get("value", 0))
+        unit = _safe_str(data.get("unit", ""))
+        reference = _safe_str(data.get("reference", ""))
+        status = _safe_str(data.get("status", "Normal"))
+        
+        # Parser la référence
+        ref_min, ref_max = parse_reference_range(reference)
+        
+        return BiomarkerCard(
+            name=name,
+            value=value,
+            ref_min=ref_min,
+            ref_max=ref_max,
+            unit=unit,
+            status=status,
+            width=8*cm,
+            height=3.5*cm,
+        )
     
     def _categorize_biomarkers(self, biomarkers: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """Catégorise les biomarqueurs par type"""
@@ -1085,9 +1306,17 @@ class PremiumPDFGenerator:
     # ═══════════════════════════════════════════════════════════════════════
     
     def add_cross_analysis_section(self, cross_analysis: Dict[str, Any]):
-        """Section analyse croisée multimodale"""
+        """Section analyse croisée multimodale améliorée"""
         
         if not cross_analysis:
+            return
+        
+        # Récupérer les données - support de plusieurs formats
+        cross_analysis_list = cross_analysis.get("cross_analysis", [])
+        priority_actions = cross_analysis.get("priority_actions", [])
+        
+        # Si vide, ne pas afficher la section
+        if not cross_analysis_list and not priority_actions:
             return
         
         # Titre de section
@@ -1100,50 +1329,88 @@ class PremiumPDFGenerator:
         # Introduction
         intro_text = """
         Cette section présente les corrélations identifiées entre vos données biologiques
-        et votre microbiote, permettant une approche intégrée de votre santé.
+        et votre microbiote, permettant une approche intégrée et personnalisée de votre santé.
         """
         self.story.append(Paragraph(intro_text, self.styles["Body"]))
         self.story.append(Spacer(1, 0.5*cm))
         
-        # Observations principales
-        observations = cross_analysis.get("observations", [])
-        if observations:
+        # === OBSERVATIONS / CROSS ANALYSIS ===
+        if cross_analysis_list:
             self.story.append(Paragraph(
-                "<b>Observations principales</b>",
+                "<b>🔍 Observations croisées</b>",
                 self.styles["SubsectionTitle"]
             ))
             self.story.append(Spacer(1, 0.3*cm))
             
-            for obs in observations:
-                obs_text = _safe_str(obs.get("text", obs)) if isinstance(obs, dict) else _safe_str(obs)
-                obs_para = Paragraph(f"• {obs_text}", self.styles["Body"])
-                self.story.append(obs_para)
-                self.story.append(Spacer(1, 0.2*cm))
-        
-        # Corrélations
-        correlations = cross_analysis.get("correlations", [])
-        if correlations:
-            self.story.append(Spacer(1, 0.3*cm))
-            self.story.append(Paragraph(
-                "<b>Corrélations identifiées</b>",
-                self.styles["SubsectionTitle"]
-            ))
-            self.story.append(Spacer(1, 0.3*cm))
-            
-            for corr in correlations:
-                if isinstance(corr, dict):
-                    corr_text = _safe_str(corr.get("description", ""))
-                    priority = _safe_str(corr.get("priority", "medium")).lower()
+            for item in cross_analysis_list:
+                # Extraire le texte selon le format
+                if isinstance(item, dict):
+                    obs_text = _safe_str(item.get("text", item.get("observation", item.get("description", ""))))
+                    category = _safe_str(item.get("category", item.get("type", "info"))).lower()
                 else:
-                    corr_text = _safe_str(corr)
+                    obs_text = _safe_str(item)
+                    category = "info"
+                
+                if not obs_text:
+                    continue
+                
+                # Couleur selon catégorie
+                if "critique" in category or "critical" in category or "urgent" in category:
+                    bg_color = colors.HexColor("#FFEBEE")
+                    border_color = BrandColors.CRITICAL
+                    icon = "🔴"
+                elif "attention" in category or "warning" in category:
+                    bg_color = colors.HexColor("#FFF3E0")
+                    border_color = BrandColors.WARNING
+                    icon = "🟡"
+                else:
+                    bg_color = colors.HexColor("#E3F2FD")
+                    border_color = BrandColors.PRIMARY
+                    icon = "🔵"
+                
+                obs_para = Paragraph(f"{icon} {obs_text}", self.styles["Body"])
+                
+                obs_table = Table([[obs_para]], colWidths=[16*cm])
+                obs_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), bg_color),
+                    ('BOX', (0, 0), (-1, -1), 1.5, border_color),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                    ('ROUNDEDCORNERS', [5, 5, 5, 5]),
+                ]))
+                
+                self.story.append(obs_table)
+                self.story.append(Spacer(1, 0.3*cm))
+        
+        # === ACTIONS PRIORITAIRES ===
+        if priority_actions:
+            self.story.append(Spacer(1, 0.3*cm))
+            self.story.append(Paragraph(
+                "<b>⚡ Actions prioritaires recommandées</b>",
+                self.styles["SubsectionTitle"]
+            ))
+            self.story.append(Spacer(1, 0.3*cm))
+            
+            for i, action in enumerate(priority_actions, 1):
+                # Extraire le texte selon le format
+                if isinstance(action, dict):
+                    action_text = _safe_str(action.get("text", action.get("action", action.get("description", ""))))
+                    priority = _safe_str(action.get("priority", "medium")).lower()
+                else:
+                    action_text = _safe_str(action)
                     priority = "medium"
                 
-                # Icône de priorité
-                if priority == "high":
+                if not action_text:
+                    continue
+                
+                # Icône selon priorité
+                if priority == "high" or priority == "élevée":
                     icon = "🔴"
                     bg_color = colors.HexColor("#FFEBEE")
                     border_color = BrandColors.CRITICAL
-                elif priority == "low":
+                elif priority == "low" or priority == "basse":
                     icon = "🟢"
                     bg_color = colors.HexColor("#E8F5E9")
                     border_color = BrandColors.NORMAL
@@ -1152,19 +1419,20 @@ class PremiumPDFGenerator:
                     bg_color = colors.HexColor("#FFF3E0")
                     border_color = BrandColors.WARNING
                 
-                corr_para = Paragraph(f"{icon} {corr_text}", self.styles["Body"])
+                action_para = Paragraph(f"<b>{i}.</b> {icon} {action_text}", self.styles["Body"])
                 
-                corr_table = Table([[corr_para]], colWidths=[16*cm])
-                corr_table.setStyle(TableStyle([
+                action_table = Table([[action_para]], colWidths=[16*cm])
+                action_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, -1), bg_color),
-                    ('BOX', (0, 0), (-1, -1), 1.5, border_color),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 10),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-                    ('TOPPADDING', (0, 0), (-1, -1), 8),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('BOX', (0, 0), (-1, -1), 2, border_color),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                    ('ROUNDEDCORNERS', [5, 5, 5, 5]),
                 ]))
                 
-                self.story.append(corr_table)
+                self.story.append(action_table)
                 self.story.append(Spacer(1, 0.3*cm))
         
         self.story.append(PageBreak())
@@ -1174,7 +1442,7 @@ class PremiumPDFGenerator:
     # ═══════════════════════════════════════════════════════════════════════
     
     def add_recommendations_section(self, recommendations: Dict[str, Any]):
-        """Section recommandations regroupées et structurées"""
+        """Section recommandations regroupées et structurées - Support format app.py"""
         
         # Titre de section
         self.story.append(Paragraph(
@@ -1201,8 +1469,18 @@ class PremiumPDFGenerator:
         self.story.append(warning)
         self.story.append(Spacer(1, 0.5*cm))
         
+        # Support de plusieurs formats: {"raw": {...}, "edited": {...}} ou direct {...}
+        reco_data = recommendations.get("raw", recommendations) if "raw" in recommendations else recommendations
+        edited_data = recommendations.get("edited", {})
+        
+        # Merger les données edited si présentes
+        if edited_data:
+            for key in ["nutrition", "micronutrition", "microbiome", "lifestyle", "supplementation"]:
+                if key in edited_data and edited_data[key]:
+                    reco_data[key] = edited_data[key]
+        
         # === RECOMMANDATIONS NUTRITION ===
-        nutrition_recs = recommendations.get("nutrition", [])
+        nutrition_recs = reco_data.get("nutrition", reco_data.get("Nutrition", []))
         if nutrition_recs:
             self._add_recommendation_subsection(
                 "🥗 NUTRITION",
@@ -1211,7 +1489,7 @@ class PremiumPDFGenerator:
             )
         
         # === RECOMMANDATIONS MICRONUTRITION ===
-        micronutrition_recs = recommendations.get("micronutrition", [])
+        micronutrition_recs = reco_data.get("micronutrition", reco_data.get("Micronutrition", []))
         if micronutrition_recs:
             self._add_recommendation_subsection(
                 "💊 MICRONUTRITION & SUPPLÉMENTATION",
@@ -1220,7 +1498,7 @@ class PremiumPDFGenerator:
             )
         
         # === RECOMMANDATIONS MICROBIOTE ===
-        microbiome_recs = recommendations.get("microbiome", [])
+        microbiome_recs = reco_data.get("microbiome", reco_data.get("Microbiome", []))
         if microbiome_recs:
             self._add_recommendation_subsection(
                 "🦠 MICROBIOTE",
@@ -1229,7 +1507,7 @@ class PremiumPDFGenerator:
             )
         
         # === RECOMMANDATIONS LIFESTYLE ===
-        lifestyle_recs = recommendations.get("lifestyle", [])
+        lifestyle_recs = reco_data.get("lifestyle", reco_data.get("Lifestyle", []))
         if lifestyle_recs:
             self._add_recommendation_subsection(
                 "🏃 LIFESTYLE",
@@ -1238,7 +1516,7 @@ class PremiumPDFGenerator:
             )
         
         # === SUPPLÉMENTATION DÉTAILLÉE ===
-        supplementation = recommendations.get("supplementation", [])
+        supplementation = reco_data.get("supplementation", reco_data.get("Supplementation", []))
         if supplementation:
             self.story.append(Spacer(1, 0.5*cm))
             self.story.append(Paragraph(
@@ -1259,11 +1537,11 @@ class PremiumPDFGenerator:
             ]
             
             for suppl in supplementation:
-                nom = _safe_str(suppl.get("nom", "N/A"))
-                dosage = _safe_str(suppl.get("dosage", "N/A"))
-                frequence = _safe_str(suppl.get("frequence", "N/A"))
-                duree = _safe_str(suppl.get("duree", "N/A"))
-                objectif = _safe_str(suppl.get("objectif", "N/A"))
+                nom = _safe_str(suppl.get("nom", suppl.get("name", "N/A")))
+                dosage = _safe_str(suppl.get("dosage", suppl.get("dose", "N/A")))
+                frequence = _safe_str(suppl.get("frequence", suppl.get("frequency", "N/A")))
+                duree = _safe_str(suppl.get("duree", suppl.get("duration", "N/A")))
+                objectif = _safe_str(suppl.get("objectif", suppl.get("goal", suppl.get("objective", "N/A"))))
                 
                 suppl_data.append([
                     Paragraph(nom, self.styles["BodySmall"]),
@@ -1298,30 +1576,36 @@ class PremiumPDFGenerator:
     def _add_recommendation_subsection(
         self,
         title: str,
-        recommendations: List[Dict[str, Any]],
+        recommendations: List[Any],
         color: colors.Color
     ):
-        """Ajoute une sous-section de recommandations"""
+        """Ajoute une sous-section de recommandations - Support strings et dicts"""
         
         self.story.append(Paragraph(title, self.styles["SubsectionTitle"]))
         self.story.append(Spacer(1, 0.3*cm))
         
         for i, rec in enumerate(recommendations, 1):
-            rec_text = _safe_str(rec.get("text", rec.get("recommendation", "")))
-            priority = _safe_str(rec.get("priority", "medium")).lower()
+            # Support de plusieurs formats
+            if isinstance(rec, dict):
+                rec_text = _safe_str(rec.get("text", rec.get("recommendation", rec.get("description", ""))))
+                priority = _safe_str(rec.get("priority", "medium")).lower()
+            else:
+                # String simple
+                rec_text = _safe_str(rec)
+                priority = "medium"
+            
+            if not rec_text:
+                continue
             
             # Icône de priorité
-            if priority == "high" or priority == "élevée":
+            if priority == "high" or priority == "élevée" or priority == "haute":
                 icon = "🔴"
             elif priority == "medium" or priority == "moyenne":
                 icon = "🟡"
             else:
                 icon = "🟢"
             
-            rec_para = Paragraph(
-                f"{icon} {rec_text}",
-                self.styles["Body"]
-            )
+            rec_para = Paragraph(f"{icon} {rec_text}", self.styles["Body"])
             
             # Encadrer dans un tableau pour le style
             rec_table = Table(
@@ -1345,7 +1629,7 @@ class PremiumPDFGenerator:
     # ═══════════════════════════════════════════════════════════════════════
     
     def add_follow_up_section(self, follow_up: Dict[str, Any]):
-        """Section plan de suivi"""
+        """Section plan de suivi - Support format app.py"""
         
         # Titre de section
         self.story.append(Paragraph(
@@ -1362,10 +1646,15 @@ class PremiumPDFGenerator:
         self.story.append(Paragraph(intro_text, self.styles["Body"]))
         self.story.append(Spacer(1, 0.5*cm))
         
-        # Contrôles
+        # Support de plusieurs formats
+        # Format 1: {"controles": [...]} (ancien)
+        # Format 2: {"next_date": ..., "next_tests": ..., "plan": ...} (app.py)
+        
+        # Vérifier s'il y a des contrôles (ancien format)
         controles = follow_up.get("controles", [])
         
         if controles:
+            # Ancien format avec contrôles
             controle_data = [
                 [
                     Paragraph("<b>Type d'analyse</b>", self.styles["BodySmall"]),
@@ -1409,6 +1698,69 @@ class PremiumPDFGenerator:
             ]))
             
             self.story.append(controle_table)
+        
+        # Format app.py
+        next_date = _safe_str(follow_up.get("next_date", "")).strip()
+        next_tests = _safe_str(follow_up.get("next_tests", "")).strip()
+        plan = _safe_str(follow_up.get("plan", "")).strip()
+        clinician_notes = _safe_str(follow_up.get("clinician_notes", "")).strip()
+        
+        if next_date or next_tests or plan:
+            # Date du prochain contrôle
+            if next_date:
+                self.story.append(Spacer(1, 0.3*cm))
+                self.story.append(Paragraph(
+                    f"<b>📆 Date du prochain contrôle:</b> {next_date}",
+                    self.styles["Body"]
+                ))
+            
+            # Analyses recommandées
+            if next_tests:
+                self.story.append(Spacer(1, 0.3*cm))
+                self.story.append(Paragraph(
+                    "<b>🔬 Analyses recommandées:</b>",
+                    self.styles["SubsectionTitle"]
+                ))
+                self.story.append(Spacer(1, 0.2*cm))
+                
+                # Afficher dans un cadre
+                tests_para = Paragraph(next_tests, self.styles["Body"])
+                tests_table = Table([[tests_para]], colWidths=[16*cm])
+                tests_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), BrandColors.BG_LIGHT_BLUE),
+                    ('BOX', (0, 0), (-1, -1), 1, BrandColors.ACCENT),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                    ('ROUNDEDCORNERS', [5, 5, 5, 5]),
+                ]))
+                self.story.append(tests_table)
+            
+            # Plan de suivi
+            if plan:
+                self.story.append(Spacer(1, 0.3*cm))
+                self.story.append(Paragraph(
+                    "<b>📋 Plan de suivi:</b>",
+                    self.styles["SubsectionTitle"]
+                ))
+                self.story.append(Spacer(1, 0.2*cm))
+                
+                plan_para = Paragraph(plan, self.styles["Body"])
+                plan_table = Table([[plan_para]], colWidths=[16*cm])
+                plan_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#FFF9E6")),
+                    ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor("#FFD700")),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                    ('ROUNDEDCORNERS', [5, 5, 5, 5]),
+                ]))
+                self.story.append(plan_table)
+        
+        # Notes cliniques (ne pas afficher dans le PDF patient)
+        # Ces notes sont pour usage interne uniquement
     
     # ═══════════════════════════════════════════════════════════════════════
     # FOOTER & GENERATION
