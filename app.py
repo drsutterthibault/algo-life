@@ -366,33 +366,58 @@ tabs = st.tabs([
 with tabs[0]:
     st.subheader("📥 Import des Données")
     
+    # Instructions claires
+    st.info("""
+    **📌 Comment importer vos fichiers :**
+    1. Cliquez sur le bouton **"Browse files"** ci-dessous
+    2. Parcourez votre ordinateur (Bureau, Documents, Téléchargements, etc.)
+    3. Sélectionnez votre fichier PDF ou Excel
+    4. Le fichier sera uploadé automatiquement
+    """)
+    
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("### 🧪 Biologie")
         bio_pdf = st.file_uploader(
-            "PDF Biologie (SYNLAB/UNILABS)",
+            "📄 Cliquez sur 'Browse files' pour sélectionner votre PDF Biologie (SYNLAB/UNILABS)",
             type=["pdf"],
-            key="bio_pdf"
+            key="bio_pdf",
+            help="Sélectionnez un fichier PDF depuis n'importe quel dossier de votre ordinateur"
         )
         bio_excel = st.file_uploader(
-            "Excel Biologie (optionnel)",
+            "📊 Excel Biologie (optionnel)",
             type=["xlsx", "xls"],
-            key="bio_excel"
+            key="bio_excel",
+            help="Fichier Excel optionnel pour enrichir les données"
         )
+        
+        # Afficher le nom du fichier uploadé
+        if bio_pdf:
+            st.success(f"✅ Fichier biologie chargé : {bio_pdf.name}")
+        if bio_excel:
+            st.success(f"✅ Excel biologie chargé : {bio_excel.name}")
     
     with col2:
         st.markdown("### 🦠 Microbiote")
         micro_pdf = st.file_uploader(
-            "PDF Microbiote (IDK GutMAP)",
+            "📄 Cliquez sur 'Browse files' pour sélectionner votre PDF Microbiote (IDK GutMAP)",
             type=["pdf"],
-            key="micro_pdf"
+            key="micro_pdf",
+            help="Sélectionnez un fichier PDF depuis n'importe quel dossier de votre ordinateur"
         )
         micro_excel = st.file_uploader(
-            "Excel Microbiote (optionnel)",
+            "📊 Excel Microbiote (optionnel)",
             type=["xlsx", "xls"],
-            key="micro_excel"
+            key="micro_excel",
+            help="Fichier Excel optionnel pour enrichir les données"
         )
+        
+        # Afficher le nom du fichier uploadé
+        if micro_pdf:
+            st.success(f"✅ Fichier microbiote chargé : {micro_pdf.name}")
+        if micro_excel:
+            st.success(f"✅ Excel microbiote chargé : {micro_excel.name}")
     
     if st.button("🚀 Extraire et Analyser", type="primary", use_container_width=True):
         if not bio_pdf and not micro_pdf:
