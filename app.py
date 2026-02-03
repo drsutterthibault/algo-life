@@ -1,7 +1,7 @@
 """
 ALGO-LIFE - Plateforme Médecin
 Application Streamlit pour l'analyse multimodale de santé
-VERSION AVEC RECOMMANDATIONS ÉDITABLES
+VERSION AVEC RECOMMANDATIONS ÉDITABLES - CORRIGÉE
 """
 
 import streamlit as st
@@ -26,7 +26,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS personnalisé pour le nouveau design
+# CSS personnalisé
 st.markdown("""
 <style>
     .editable-zone {
@@ -41,6 +41,9 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# CHEMIN VERS LE FICHIER EXCEL DES RÈGLES
+RULES_EXCEL_PATH = "rules_combined.xlsx"  # Modifie ce chemin selon ton fichier
 
 # FONCTION HELPER POUR COMPILER LES RECOMMANDATIONS AUTO
 def compile_recommendations_text(reco, category):
@@ -215,8 +218,6 @@ if 'rules_engine' not in st.session_state:
     st.session_state.rules_engine = None
 if 'recommendations' not in st.session_state:
     st.session_state.recommendations = None
-if 'current_page' not in st.session_state:
-    st.session_state.current_page = "Import & Données"
 if 'editable_reco' not in st.session_state:
     st.session_state.editable_reco = {}
 if 'reco_initialized' not in st.session_state:
@@ -325,17 +326,23 @@ elif page == "Import Données":
         if st.button("🚀 Lancer l'Analyse Complète", type="primary", use_container_width=True):
             with st.spinner("Analyse..."):
                 try:
-                    engine = RulesEngine()
-                    reco = engine.generate_recommendations(
-                        st.session_state.biology_data,
-                        st.session_state.microbiome_data
-                    )
-                    st.session_state.recommendations = reco
-                    st.session_state.reco_initialized = False
-                    st.success("✅ Analyse terminée!")
-                    st.balloons()
+                    # CORRECTION: Initialiser RulesEngine avec le chemin du fichier Excel
+                    if not os.path.exists(RULES_EXCEL_PATH):
+                        st.error(f"❌ Fichier des règles introuvable: {RULES_EXCEL_PATH}")
+                        st.info("💡 Créez le fichier 'rules_combined.xlsx' ou modifiez RULES_EXCEL_PATH dans le code")
+                    else:
+                        engine = RulesEngine(RULES_EXCEL_PATH)  # ← CORRECTION ICI
+                        reco = engine.generate_recommendations(
+                            st.session_state.biology_data,
+                            st.session_state.microbiome_data
+                        )
+                        st.session_state.recommendations = reco
+                        st.session_state.reco_initialized = False
+                        st.success("✅ Analyse terminée!")
+                        st.balloons()
                 except Exception as e:
                     st.error(f"❌ Erreur: {str(e)}")
+                    st.exception(e)
 
 elif page == "Interprétations":
     st.markdown("## 📊 Interprétations")
@@ -517,6 +524,7 @@ elif page == "Export PDF":
                     
             except Exception as e:
                 st.error(f"❌ Erreur: {str(e)}")
+                st.exception(e)
 
 st.markdown("---")
 st.caption("ALGO-LIFE © 2026 - Version Beta v1.0")
