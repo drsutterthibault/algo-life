@@ -1,12 +1,9 @@
 """
-UNILABS - Plateforme Multimodale d'Analyse Bio-Fonctionnelle (ALGO-LIFE Engine)
-Streamlit App - Import (PDF/Excel) + Extraction + Rules Engine
+UNILABS - Plateforme Multimodale
+Analyse bio-fonctionnelle + microbiote · Extraction (PDF/Excel) · Interprétation · Recommandations (Rules Engine)
++ Suivi + Export PDF
 
-PATCHED UI:
-- Branding Unilabs
-- Sidebar: Antécédents médicaux (au lieu de Notes médicales)
-- Ajout poids/taille + IMC
-- Onglets sous la bannière
+Auteur: Dr Thibault SUTTER
 """
 
 from __future__ import annotations
@@ -15,8 +12,8 @@ import os
 import sys
 import re
 import tempfile
-from datetime import datetime
-from typing import Dict, Any
+from datetime import datetime, date
+from typing import Dict, Any, Optional
 
 import pandas as pd
 import streamlit as st
@@ -30,6 +27,13 @@ sys.path.insert(0, BASE_DIR)
 from extractors import extract_synlab_biology, extract_idk_microbiome  # noqa
 from rules_engine import RulesEngine  # noqa
 
+# PDF export (ton module)
+try:
+    from pdf_generator import generate_multimodal_report  # noqa
+    PDF_EXPORT_AVAILABLE = True
+except Exception:
+    PDF_EXPORT_AVAILABLE = False
+
 # ✅ Chemin robuste (Streamlit Cloud safe)
 RULES_EXCEL_PATH = os.path.join(BASE_DIR, "data", "Bases_regles_Synlab.xlsx")
 
@@ -38,14 +42,12 @@ RULES_EXCEL_PATH = os.path.join(BASE_DIR, "data", "Bases_regles_Synlab.xlsx")
 # HELPERS
 # ---------------------------------------------------------------------
 def _file_to_temp_path(uploaded_file, suffix: str) -> str:
-    """Save Streamlit UploadedFile to a temp path and return it."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded_file.read())
         return tmp.name
 
 
-def _safe_float(x):
-    """Convert any messy value to float, else None."""
+def _safe_float(x) -> Optional[float]:
     try:
         if x is None:
             return None
@@ -56,7 +58,7 @@ def _safe_float(x):
         return None
 
 
-def _calc_bmi(weight_kg: Any, height_cm: Any):
+def _calc_bmi(weight_kg: Any, height_cm: Any) -> Optional[float]:
     w = _safe_float(weight_kg)
     h = _safe_float(height_cm)
     if w is None or h is None or h <= 0:
@@ -71,6 +73,7 @@ def _dict_bio_to_dataframe(bio_dict: Dict[str, Any]) -> pd.DataFrame:
     """
     Convert biology dict into DataFrame expected by RulesEngine:
     columns: Biomarqueur, Valeur, Unité, Référence
+    + convert Valeur to float (avoid str > int errors)
     """
     rows = []
     for name, data in (bio_dict or {}).items():
@@ -85,25 +88,22 @@ def _dict_bio_to_dataframe(bio_dict: Dict[str, Any]) -> pd.DataFrame:
         else:
             val, unit, ref = data, "", ""
 
-        rows.append(
-            {"Biomarqueur": biomarker, "Valeur": val, "Unité": unit, "Référence": ref}
-        )
+        rows.append({"Biomarqueur": biomarker, "Valeur": val, "Unité": unit, "Référence": ref})
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        # ✅ CRITICAL PATCH: convert to float to avoid "str > int"
         df["Valeur"] = df["Valeur"].apply(_safe_float)
     return df
 
 
 def _patient_to_rules_engine_format(patient_info: Dict[str, Any]) -> Dict[str, Any]:
-    """Map UI patient fields to what rules_engine.py expects (genre=Homme/Femme)."""
+    """
+    rules_engine.py attend patient_info['genre'] = Homme/Femme.
+    Dans l'UI on utilise F/H.
+    """
     sex = (patient_info or {}).get("sex", "F")
-    genre = "Homme" if sex == "M" else "Femme"
-
-    # On passe "notes" = antécédents (pour que RulesEngine garde le champ sans casser)
+    genre = "Homme" if sex == "H" else "Femme"
     antecedents = (patient_info or {}).get("antecedents", "")
-
     return {
         "nom": (patient_info or {}).get("name", ""),
         "age": (patient_info or {}).get("age", None),
@@ -113,83 +113,66 @@ def _patient_to_rules_engine_format(patient_info: Dict[str, Any]) -> Dict[str, A
     }
 
 
-def _format_recos_for_editing(recos: Dict[str, Any]) -> Dict[str, str]:
+def _build_follow_up_dict(session_follow: Dict[str, Any]) -> Dict[str, Any]:
+    """Structure simple pour le PDF / suivi."""
+    if not session_follow:
+        return {}
+    return {
+        "next_date": str(session_follow.get("next_date", "")),
+        "next_tests": session_follow.get("next_tests", ""),
+        "plan": session_follow.get("plan", ""),
+        "clinician_notes": session_follow.get("clinician_notes", ""),
+    }
+
+
+def _build_pdf_payload() -> Dict[str, Any]:
     """
-    Make editable text blocks from RulesEngine output.
-    Works even if some keys are missing.
+    Construit un payload compatible avec pdf_generator.generate_multimodal_report
     """
-    out = {}
+    patient = st.session_state.patient_info or {}
 
-    pa = recos.get("priority_actions", []) or []
-    out["Actions prioritaires"] = "\n".join([f"• {x}" for x in pa]) if pa else ""
+    # patient data enrichi
+    patient_data = {
+        "name": patient.get("name", ""),
+        "age": patient.get("age", ""),
+        "sex": patient.get("sex", ""),
+        "date": str(patient.get("date", "")),
+        "weight_kg": patient.get("weight_kg", None),
+        "height_cm": patient.get("height_cm", None),
+        "bmi": patient.get("bmi", None),
+        "antecedents": patient.get("antecedents", ""),
+    }
 
-    bio = recos.get("biology_interpretations", []) or []
-    lines = []
-    for b in bio:
-        biom = b.get("biomarker", "")
-        val = b.get("value", "")
-        unit = b.get("unit", "")
-        status = b.get("status", "")
-        ref = b.get("reference", "")
-        interp = b.get("interpretation", "")
-        nutr = b.get("nutrition_reco", "")
-        micro = b.get("micronutrition_reco", "")
-        life = b.get("lifestyle_reco", "")
+    biology_data = st.session_state.biology_data or {}
+    microbiome_data = st.session_state.microbiome_data or {}
 
-        header = f"{biom} — {val} {unit} (Ref: {ref}) — Statut: {status}".strip()
-        if header.strip("— "):
-            lines.append(header)
-        if interp:
-            lines.append(f"Interprétation: {interp}")
-        if nutr:
-            lines.append(f"Nutrition: {nutr}")
-        if micro:
-            lines.append(f"Micronutrition: {micro}")
-        if life:
-            lines.append(f"Lifestyle: {life}")
-        lines.append("")
-    out["Interprétation biologie"] = "\n".join(lines).strip()
+    # cross analysis + recommendations : on réutilise la structure du RulesEngine
+    recos = st.session_state.recommendations or {}
+    cross_analysis = {
+        "cross_analysis": recos.get("cross_analysis", []),
+        "priority_actions": recos.get("priority_actions", []),
+    }
 
-    micro_list = recos.get("microbiome_interpretations", []) or []
-    mlines = []
-    summary = recos.get("microbiome_summary", {}) or {}
-    if summary:
-        mlines.append(f"Résumé microbiote: {summary}")
-        mlines.append("")
-    for m in micro_list:
-        title = m.get("title") or m.get("group") or ""
-        status = m.get("status", "")
-        interp = m.get("interpretation", "")
-        reco = m.get("recommendations", "")
-        if title or status:
-            mlines.append(f"{title} — {status}".strip("— "))
-        if interp:
-            mlines.append(f"Interprétation: {interp}")
-        if reco:
-            mlines.append(f"Reco: {reco}")
-        mlines.append("")
-    out["Interprétation microbiote"] = "\n".join(mlines).strip()
+    # recommandations: on donne aussi la version éditée
+    recommendations = {
+        "raw": recos,
+        "edited": st.session_state.edited_recommendations or {},
+    }
 
-    cross = recos.get("cross_analysis", []) or []
-    clines = []
-    for c in cross:
-        t = c.get("title", "")
-        d = c.get("description", "")
-        r = c.get("recommendations", "")
-        if t:
-            clines.append(t)
-        if d:
-            clines.append(d)
-        if r:
-            clines.append(f"Reco: {r}")
-        clines.append("")
-    out["Analyse croisée"] = "\n".join(clines).strip()
+    follow_up = _build_follow_up_dict(st.session_state.follow_up)
 
-    return out
+    return {
+        "patient_data": patient_data,
+        "biology_data": biology_data,
+        "microbiome_data": microbiome_data,
+        "cross_analysis": cross_analysis,
+        "recommendations": recommendations,
+        "follow_up": follow_up,
+    }
 
 
 # ---------------------------------------------------------------------
-# STREAMLIT UI
+# STREAMLIT PAGE
 # ---------------------------------------------------------------------
 st.set_page_config(
     page_title="UNILABS - Plateforme Multimodale",
@@ -198,6 +181,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------------------------------------------------------------------
+# CSS (Fix selectbox clipping + date input size + general style)
+# ---------------------------------------------------------------------
 st.markdown(
     """
 <style>
@@ -206,7 +192,7 @@ st.markdown(
     padding: 1.2rem 1.3rem;
     border-radius: 14px;
     color: white;
-    margin-bottom: 1.0rem;
+    margin-bottom: 0.9rem;
 }
 .main-header h1 { margin: 0; font-size: 2.0rem; }
 .main-header .sub { opacity: 0.95; margin-top: 0.35rem; font-size: 0.98rem; }
@@ -216,7 +202,7 @@ st.markdown(
     padding: 0.85rem 1rem;
     border-radius: 12px;
     border-left: 5px solid #1F6AA5;
-    margin: 0.5rem 0 1rem 0;
+    margin: 0.2rem 0 0.9rem 0;
 }
 
 .mini-box {
@@ -226,20 +212,32 @@ st.markdown(
     padding: 0.7rem 0.8rem;
 }
 .mini-title { font-weight: 700; margin-bottom: 0.35rem; }
-.small-note { color: rgba(255,255,255,0.9); font-size: 0.92rem; }
 .small-muted { color: #5b6572; font-size: 0.9rem; }
 hr { border: none; border-top: 1px solid #eceff4; margin: 0.9rem 0; }
+
+/* -------- Fix Selectbox / DateInput heights (BaseWeb) -------- */
+div[data-baseweb="select"] > div { min-height: 46px !important; }
+div[data-baseweb="select"] span { line-height: 46px !important; }
+div[data-baseweb="select"] input { padding-top: 10px !important; padding-bottom: 10px !important; }
+
+div[data-baseweb="input"] > div { min-height: 46px !important; }
+div[data-baseweb="input"] input { padding-top: 10px !important; padding-bottom: 10px !important; }
+
+/* Make date column a bit wider on sidebar */
+.sidebar-date .stDateInput { width: 100% !important; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ✅ Bannière
+# ---------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------
 st.markdown(
     """
 <div class="main-header">
   <h1>UNILABS · Plateforme Multimodale</h1>
-  <div class="sub">Analyse bio-fonctionnelle + microbiote · Extraction (PDF/Excel) · Interprétation · Recommandations (Rules Engine)</div>
+  <div class="sub">Analyse bio-fonctionnelle + microbiote · Extraction (PDF/Excel) · Interprétation · Recommandations · Suivi · Export PDF</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -260,7 +258,8 @@ if "edited_recommendations" not in st.session_state:
     st.session_state.edited_recommendations = {}
 if "data_extracted" not in st.session_state:
     st.session_state.data_extracted = False
-
+if "follow_up" not in st.session_state:
+    st.session_state.follow_up = {}
 
 # ---------------------------------------------------------------------
 # SIDEBAR
@@ -269,24 +268,32 @@ with st.sidebar:
     st.header("👤 Patient")
 
     with st.form("patient_form"):
-        # Identité
         patient_name = st.text_input("Nom complet", value=st.session_state.patient_info.get("name", ""))
 
-        cols = st.columns(3)
+        cols = st.columns([1, 1, 1.4])  # date plus large
         with cols[0]:
             patient_age = st.number_input(
-                "Âge", min_value=0, max_value=120, value=int(st.session_state.patient_info.get("age", 30))
-            )
-        with cols[1]:
-            patient_sex = st.selectbox(
-                "Sexe", ["F", "M"], index=0 if st.session_state.patient_info.get("sex", "F") == "F" else 1
-            )
-        with cols[2]:
-            patient_date = st.date_input(
-                "Date analyse", value=st.session_state.patient_info.get("date", datetime.now().date())
+                "Âge",
+                min_value=0,
+                max_value=120,
+                value=int(st.session_state.patient_info.get("age", 30)),
             )
 
-        # Morphologie
+        with cols[1]:
+            patient_sex = st.selectbox(
+                "Sexe",
+                ["F", "H"],
+                index=0 if st.session_state.patient_info.get("sex", "F") == "F" else 1,
+            )
+
+        with cols[2]:
+            st.markdown('<div class="sidebar-date">', unsafe_allow_html=True)
+            patient_date = st.date_input(
+                "Date analyse",
+                value=st.session_state.patient_info.get("date", datetime.now().date()),
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+
         cols2 = st.columns(2)
         with cols2[0]:
             patient_weight = st.number_input(
@@ -306,12 +313,9 @@ with st.sidebar:
             )
 
         bmi = _calc_bmi(patient_weight, patient_height)
-        if bmi is None:
-            st.caption("IMC: —")
-        else:
-            st.caption(f"IMC: **{bmi:.1f}**")
+        st.caption("IMC: —" if bmi is None else f"IMC: **{bmi:.1f}**")
 
-        # ✅ Antécédents médicaux (petit cadre)
+        # Antécédents (petit cadre)
         st.markdown('<div class="mini-box">', unsafe_allow_html=True)
         st.markdown('<div class="mini-title">Antécédents médicaux</div>', unsafe_allow_html=True)
         patient_antecedents = st.text_area(
@@ -337,11 +341,10 @@ with st.sidebar:
             st.success("✅ Patient enregistré")
 
     st.markdown("<hr/>", unsafe_allow_html=True)
-    st.header("📁 Import")
 
+    st.header("📁 Import")
     biology_file = st.file_uploader("Biologie (PDF/Excel)", type=["pdf", "xlsx", "xls"], key="bio_file")
     microbiome_file = st.file_uploader("Microbiote (PDF/Excel)", type=["pdf", "xlsx", "xls"], key="micro_file")
-
     st.caption("📌 Règles: data/Bases_regles_Synlab.xlsx")
 
     if st.button("🔍 Extraire + Générer", type="primary"):
@@ -349,9 +352,9 @@ with st.sidebar:
             st.error("❌ Enregistre le patient avant")
         else:
             try:
-                # ---------------- BIO ----------------
+                # BIO
                 if biology_file:
-                    st.info("🔄 Extraction biologie...")
+                    st.info("🔄 Extraction biologie…")
                     if biology_file.type == "application/pdf":
                         tmp = _file_to_temp_path(biology_file, ".pdf")
                         try:
@@ -378,9 +381,9 @@ with st.sidebar:
                         st.session_state.biology_data = bio_dict
                     st.success(f"✅ Biologie: {len(st.session_state.biology_data)} items")
 
-                # ---------------- MICRO ----------------
+                # MICRO
                 if microbiome_file:
-                    st.info("🔄 Extraction microbiote...")
+                    st.info("🔄 Extraction microbiote…")
                     if microbiome_file.type == "application/pdf":
                         tmp = _file_to_temp_path(microbiome_file, ".pdf")
                         try:
@@ -403,16 +406,15 @@ with st.sidebar:
                         st.session_state.microbiome_data = micro
                     st.success("✅ Microbiote importé")
 
-                # ---------------- RULES ----------------
+                # RULES
                 if not os.path.exists(RULES_EXCEL_PATH):
                     st.error(f"❌ Fichier règles introuvable: {RULES_EXCEL_PATH}")
                     st.stop()
 
-                st.info("🤖 Génération recommandations (Rules Engine)...")
-
+                st.info("🤖 Génération recommandations (Rules Engine)…")
                 biology_df = _dict_bio_to_dataframe(st.session_state.biology_data)
 
-                # ✅ micro: cast dysbiosis_index if present
+                # cast dysbiosis_index if present
                 if isinstance(st.session_state.microbiome_data, dict) and "dysbiosis_index" in st.session_state.microbiome_data:
                     try:
                         st.session_state.microbiome_data["dysbiosis_index"] = int(st.session_state.microbiome_data["dysbiosis_index"])
@@ -428,7 +430,57 @@ with st.sidebar:
                     patient_info=patient_fmt,
                 )
 
-                st.session_state.edited_recommendations = _format_recos_for_editing(st.session_state.recommendations)
+                # Texte éditable = on réutilise les sections de recos (simple)
+                # Tu peux éditer dans l’onglet Recommandations.
+                recos = st.session_state.recommendations or {}
+                edited = {}
+                edited["Actions prioritaires"] = "\n".join([f"• {x}" for x in (recos.get("priority_actions", []) or [])])
+
+                # Biologie
+                bio = recos.get("biology_interpretations", []) or []
+                bio_txt = []
+                for x in bio:
+                    bio_txt.append(f"{x.get('biomarker','')} — {x.get('status','')} — {x.get('value','')} {x.get('unit','')}".strip())
+                    if x.get("interpretation"):
+                        bio_txt.append(f"Interprétation: {x['interpretation']}")
+                    if x.get("nutrition_reco"):
+                        bio_txt.append(f"Nutrition: {x['nutrition_reco']}")
+                    if x.get("micronutrition_reco"):
+                        bio_txt.append(f"Micronutrition: {x['micronutrition_reco']}")
+                    if x.get("lifestyle_reco"):
+                        bio_txt.append(f"Lifestyle: {x['lifestyle_reco']}")
+                    bio_txt.append("")
+                edited["Recommandations biologie"] = "\n".join(bio_txt).strip()
+
+                # Microbiote
+                micro = recos.get("microbiome_interpretations", []) or []
+                micro_txt = []
+                if recos.get("microbiome_summary"):
+                    micro_txt.append(f"Résumé: {recos.get('microbiome_summary')}")
+                    micro_txt.append("")
+                for m in micro:
+                    title = m.get("title") or m.get("group") or ""
+                    micro_txt.append(f"{title} — {m.get('status','')}".strip("— "))
+                    if m.get("interpretation"):
+                        micro_txt.append(f"Interprétation: {m['interpretation']}")
+                    if m.get("recommendations"):
+                        micro_txt.append(f"Reco: {m['recommendations']}")
+                    micro_txt.append("")
+                edited["Recommandations microbiote"] = "\n".join(micro_txt).strip()
+
+                # Analyse croisée
+                cross = recos.get("cross_analysis", []) or []
+                cross_txt = []
+                for c in cross:
+                    cross_txt.append(c.get("title", ""))
+                    if c.get("description"):
+                        cross_txt.append(c["description"])
+                    if c.get("recommendations"):
+                        cross_txt.append(f"Reco: {c['recommendations']}")
+                    cross_txt.append("")
+                edited["Analyse croisée"] = "\n".join(cross_txt).strip()
+
+                st.session_state.edited_recommendations = edited
                 st.session_state.data_extracted = True
                 st.success("✅ Recommandations générées")
 
@@ -439,15 +491,13 @@ with st.sidebar:
 # ---------------------------------------------------------------------
 # MAIN CONTENT
 # ---------------------------------------------------------------------
-patient = st.session_state.patient_info
+patient = st.session_state.patient_info or {}
 
-# ✅ Bandeau patient + IMC
+# ✅ Bandeau patient
 if patient.get("name"):
     bmi = patient.get("bmi", None)
     bmi_txt = "—" if bmi is None else f"{float(bmi):.1f}"
-
-    antecedents = patient.get("antecedents", "").strip()
-    antecedents_preview = antecedents if antecedents else "—"
+    antecedents = patient.get("antecedents", "").strip() or "—"
 
     st.markdown(
         f"""
@@ -458,81 +508,242 @@ if patient.get("name"):
     · Poids: {patient.get('weight_kg','—')} kg · Taille: {patient.get('height_cm','—')} cm · IMC: <b>{bmi_txt}</b>
   </div>
   <div class="small-muted" style="margin-top:0.35rem;">
-    <b>Antécédents:</b> {antecedents_preview}
+    <b>Antécédents:</b> {antecedents}
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
-
-    # ✅ Onglets sous la bannière (comme demandé)
-    tab1, tab2, tab3 = st.tabs(["📊 Analyse", "🧠 Interprétation", "📝 Recommandations"])
-
-    with tab1:
-        st.subheader("📊 Analyse (données extraites)")
-        colA, colB = st.columns(2)
-
-        with colA:
-            st.markdown("### Biologie")
-            df_bio = _dict_bio_to_dataframe(st.session_state.biology_data)
-            if df_bio.empty:
-                st.info("Aucune donnée biologie importée.")
-            else:
-                st.dataframe(df_bio, use_container_width=True)
-
-        with colB:
-            st.markdown("### Microbiote")
-            if st.session_state.microbiome_data:
-                st.json(st.session_state.microbiome_data)
-            else:
-                st.info("Aucune donnée microbiote importée.")
-
-    with tab2:
-        st.subheader("🧠 Interprétation (rules engine)")
-        if not st.session_state.recommendations:
-            st.warning("Aucune interprétation disponible (génère d'abord).")
-        else:
-            # On affiche brut + blocs (interprétation)
-            st.markdown("### Actions prioritaires")
-            pa = st.session_state.recommendations.get("priority_actions", []) or []
-            if pa:
-                st.write("\n".join([f"- {x}" for x in pa]))
-            else:
-                st.write("—")
-
-            st.markdown("### Détails interprétation (biologie + microbiote + analyse croisée)")
-            st.json(st.session_state.recommendations)
-
-    with tab3:
-        st.subheader("📝 Recommandations (éditables)")
-        if not st.session_state.data_extracted or not st.session_state.edited_recommendations:
-            st.warning("Aucune recommandation éditable (génère d'abord).")
-        else:
-            for section, txt in st.session_state.edited_recommendations.items():
-                st.markdown(f"### {section}")
-                st.session_state.edited_recommendations[section] = st.text_area(
-                    f"Texte - {section}",
-                    value=txt,
-                    height=220,
-                    key=f"edit_{section}",
-                )
-                st.divider()
-
-            export = {
-                "patient": st.session_state.patient_info,
-                "biology_df": _dict_bio_to_dataframe(st.session_state.biology_data).to_dict(orient="records"),
-                "microbiome": st.session_state.microbiome_data,
-                "recommendations_raw": st.session_state.recommendations,
-                "recommendations_edited": st.session_state.edited_recommendations,
-                "export_date": datetime.now().isoformat(),
-            }
-
-            st.download_button(
-                "⬇️ Télécharger export JSON",
-                data=pd.Series(export).to_json(),
-                file_name=f"unilabs_export_{patient.get('name','patient').replace(' ', '_')}.json",
-                mime="application/json",
-            )
-
 else:
     st.info("👈 Commence par enregistrer un patient dans la sidebar.")
+
+# ✅ Onglets SOUS la bannière (et après le bandeau patient)
+tabs = st.tabs(["📊 Analyse", "🧠 Interprétation", "📝 Recommandations", "📅 Suivi", "📄 Export PDF"])
+
+# ---------------------------------------------------------------------
+# TAB 1 - Analyse
+# ---------------------------------------------------------------------
+with tabs[0]:
+    st.subheader("📊 Analyse (données extraites)")
+
+    colA, colB = st.columns(2)
+    with colA:
+        st.markdown("### Biologie")
+        df_bio = _dict_bio_to_dataframe(st.session_state.biology_data)
+        if df_bio.empty:
+            st.info("Aucune donnée biologie importée.")
+        else:
+            st.dataframe(df_bio, use_container_width=True)
+
+    with colB:
+        st.markdown("### Microbiote")
+        if st.session_state.microbiome_data:
+            st.json(st.session_state.microbiome_data)
+        else:
+            st.info("Aucune donnée microbiote importée.")
+
+# ---------------------------------------------------------------------
+# TAB 2 - Interprétation (plus en mode code)
+# ---------------------------------------------------------------------
+with tabs[1]:
+    st.subheader("🧠 Interprétation (rules engine)")
+
+    recos = st.session_state.recommendations or {}
+    if not recos:
+        st.warning("Aucune interprétation disponible (génère d'abord via le bouton de la sidebar).")
+    else:
+        # Actions prioritaires
+        st.markdown("### Actions prioritaires")
+        pa = recos.get("priority_actions", []) or []
+        if pa:
+            for x in pa:
+                st.write(f"• {x}")
+        else:
+            st.write("—")
+
+        # Biologie (table lisible)
+        st.markdown("### Biologie")
+        bio = recos.get("biology_interpretations", []) or []
+        if not bio:
+            st.write("—")
+        else:
+            df = pd.DataFrame([{
+                "Biomarqueur": x.get("biomarker", ""),
+                "Valeur": f"{x.get('value','')} {x.get('unit','')}".strip(),
+                "Référence": x.get("reference", ""),
+                "Statut": x.get("status", ""),
+                "Interprétation": x.get("interpretation", ""),
+            } for x in bio])
+            st.dataframe(df, use_container_width=True)
+
+            with st.expander("Voir détails recommandations biologie (nutrition / micronutrition / lifestyle)"):
+                for x in bio:
+                    st.markdown(f"**{x.get('biomarker','')}** — Statut: `{x.get('status','')}`")
+                    if x.get("nutrition_reco"):
+                        st.write(f"Nutrition: {x['nutrition_reco']}")
+                    if x.get("micronutrition_reco"):
+                        st.write(f"Micronutrition: {x['micronutrition_reco']}")
+                    if x.get("lifestyle_reco"):
+                        st.write(f"Lifestyle: {x['lifestyle_reco']}")
+                    st.divider()
+
+        # Microbiote
+        st.markdown("### Microbiote")
+        msum = recos.get("microbiome_summary", {}) or {}
+        if msum:
+            st.info(f"Résumé: {msum}")
+
+        micro = recos.get("microbiome_interpretations", []) or []
+        if not micro:
+            st.write("—")
+        else:
+            dfm = pd.DataFrame([{
+                "Élément": (x.get("title") or x.get("group") or ""),
+                "Statut": x.get("status", ""),
+                "Interprétation": x.get("interpretation", ""),
+                "Reco": x.get("recommendations", ""),
+            } for x in micro])
+            st.dataframe(dfm, use_container_width=True)
+
+        # Analyse croisée
+        st.markdown("### Analyse croisée")
+        cross = recos.get("cross_analysis", []) or []
+        if not cross:
+            st.write("—")
+        else:
+            for c in cross:
+                st.markdown(f"**{c.get('title','')}**")
+                if c.get("description"):
+                    st.write(c["description"])
+                if c.get("recommendations"):
+                    st.write(f"Reco: {c['recommendations']}")
+                st.divider()
+
+        with st.expander("Debug (JSON brut)"):
+            st.json(recos)
+
+# ---------------------------------------------------------------------
+# TAB 3 - Recommandations éditables
+# ---------------------------------------------------------------------
+with tabs[2]:
+    st.subheader("📝 Recommandations (éditables)")
+
+    if not st.session_state.data_extracted or not st.session_state.edited_recommendations:
+        st.warning("Aucune recommandation éditable (génère d'abord via le bouton de la sidebar).")
+    else:
+        for section, txt in (st.session_state.edited_recommendations or {}).items():
+            st.markdown(f"### {section}")
+            st.session_state.edited_recommendations[section] = st.text_area(
+                f"Texte - {section}",
+                value=txt,
+                height=220,
+                key=f"edit_{section}",
+            )
+            st.divider()
+
+        export = {
+            "patient": st.session_state.patient_info,
+            "biology_df": _dict_bio_to_dataframe(st.session_state.biology_data).to_dict(orient="records"),
+            "microbiome": st.session_state.microbiome_data,
+            "recommendations_raw": st.session_state.recommendations,
+            "recommendations_edited": st.session_state.edited_recommendations,
+            "export_date": datetime.now().isoformat(),
+        }
+
+        st.download_button(
+            "⬇️ Télécharger export JSON",
+            data=pd.Series(export).to_json(),
+            file_name=f"unilabs_export_{(patient.get('name','patient')).replace(' ', '_')}.json",
+            mime="application/json",
+        )
+
+# ---------------------------------------------------------------------
+# TAB 4 - Suivi
+# ---------------------------------------------------------------------
+with tabs[3]:
+    st.subheader("📅 Suivi")
+
+    # Inputs de suivi
+    default_next = st.session_state.follow_up.get("next_date", (date.today().replace(day=date.today().day) ))
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        next_date = st.date_input(
+            "Prochain contrôle",
+            value=st.session_state.follow_up.get("next_date", date.today()),
+            key="follow_next_date",
+        )
+    with col2:
+        next_tests = st.text_input(
+            "Examens / bilans à recontrôler",
+            value=st.session_state.follow_up.get("next_tests", ""),
+            key="follow_next_tests",
+            placeholder="Ex: CRPus, ferritine, HbA1c, Vit D, microbiote…",
+        )
+
+    plan = st.text_area(
+        "Plan de suivi (3–6 semaines / 3 mois / etc.)",
+        value=st.session_state.follow_up.get("plan", ""),
+        key="follow_plan",
+        height=120,
+        placeholder="Ex: ajustements nutritionnels + supplémentation + activité + recontrôle…",
+    )
+
+    clinician_notes = st.text_area(
+        "Notes internes (optionnel)",
+        value=st.session_state.follow_up.get("clinician_notes", ""),
+        key="follow_notes",
+        height=90,
+        placeholder="Ex: hypothèses, points d’alerte, éléments à vérifier en consultation…",
+    )
+
+    if st.button("💾 Enregistrer le suivi"):
+        st.session_state.follow_up = {
+            "next_date": next_date,
+            "next_tests": next_tests,
+            "plan": plan,
+            "clinician_notes": clinician_notes,
+        }
+        st.success("✅ Suivi enregistré")
+
+# ---------------------------------------------------------------------
+# TAB 5 - Export PDF
+# ---------------------------------------------------------------------
+with tabs[4]:
+    st.subheader("📄 Export PDF")
+
+    if not PDF_EXPORT_AVAILABLE:
+        st.error("❌ Export PDF indisponible: vérifie que pdf_generator.py est présent et que reportlab est installé.")
+    else:
+        if not st.session_state.data_extracted:
+            st.warning("Génère d’abord une analyse + recommandations avant d’exporter.")
+        else:
+            st.info("Le PDF inclura: patient + biologie + microbiote + analyse croisée + recommandations + suivi.")
+
+            pdf_filename = st.text_input(
+                "Nom du fichier PDF",
+                value=f"UNILABS_rapport_{(patient.get('name','patient')).replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+            )
+
+            if st.button("📄 Générer le PDF", type="primary"):
+                payload = _build_pdf_payload()
+                out_path = os.path.join(tempfile.gettempdir(), pdf_filename)
+
+                # On passe les blocs attendus par ton générateur
+                pdf_path = generate_multimodal_report(
+                    patient_data=payload["patient_data"],
+                    biology_data=payload["biology_data"],
+                    microbiome_data=payload["microbiome_data"],
+                    cross_analysis=payload["cross_analysis"],
+                    recommendations=payload["recommendations"],
+                    follow_up=payload["follow_up"],
+                    output_path=out_path,
+                )
+
+                with open(pdf_path, "rb") as f:
+                    st.download_button(
+                        "⬇️ Télécharger le PDF",
+                        data=f.read(),
+                        file_name=pdf_filename,
+                        mime="application/pdf",
+                    )
+                st.success("✅ PDF généré")
