@@ -149,6 +149,80 @@ def _safe_float(x) -> Optional[float]:
         return None
 
 
+def _normalize_reco_sections(reco_raw: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Convertit la sortie du RulesEngine (biology_interpretations / microbiome_interpretations)
+    vers des sections UI stables: Nutrition / Micronutrition / Lifestyle / Microbiome.
+
+    ⚠️ On ne modifie PAS la sortie brute du moteur (utile pour PDF/export).
+    """
+    if not isinstance(reco_raw, dict):
+        return {"Nutrition": [], "Micronutrition": [], "Lifestyle": [], "Microbiome": []}
+
+    nutrition: List[str] = []
+    micronut: List[str] = []
+    lifestyle: List[str] = []
+    microbiome: List[str] = []
+
+    # --- Biologie
+    for item in (reco_raw.get("biology_interpretations") or []):
+        if not isinstance(item, dict):
+            continue
+        biom = str(item.get("biomarker", "")).strip()
+        prefix = f"[{biom}] " if biom else ""
+
+        n = item.get("nutrition_reco")
+        if n:
+            nutrition.append(prefix + str(n).strip())
+
+        m = item.get("micronutrition_reco")
+        if m:
+            micronut.append(prefix + str(m).strip())
+
+        l = item.get("lifestyle_reco")
+        if l:
+            lifestyle.append(prefix + str(l).strip())
+
+    # --- Microbiote
+    for item in (reco_raw.get("microbiome_interpretations") or []):
+        if not isinstance(item, dict):
+            continue
+        grp = str(item.get("group", "")).strip()
+        prefix = f"[{grp}] " if grp else ""
+
+        n = item.get("nutrition_reco")
+        if n:
+            nutrition.append(prefix + str(n).strip())
+            microbiome.append(prefix + str(n).strip())
+
+        s = item.get("supplementation_reco")
+        if s:
+            micronut.append(prefix + str(s).strip())
+            microbiome.append(prefix + str(s).strip())
+
+        l = item.get("lifestyle_reco")
+        if l:
+            lifestyle.append(prefix + str(l).strip())
+            microbiome.append(prefix + str(l).strip())
+
+    def _dedupe(seq: List[str]) -> List[str]:
+        seen = set()
+        out: List[str] = []
+        for x in seq:
+            k = str(x).strip()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(k)
+        return out
+
+    return {
+        "Nutrition": _dedupe(nutrition),
+        "Micronutrition": _dedupe(micronut),
+        "Lifestyle": _dedupe(lifestyle),
+        "Microbiome": _dedupe(microbiome),
+    }
+
+
 def _calc_age_from_birthdate(birthdate: date) -> int:
     """Calcule l'âge à partir de la date de naissance"""
     today = date.today()
@@ -341,8 +415,8 @@ def _generate_cross_analysis(biology_df: pd.DataFrame, microbiome_data: Dict[str
             observations.append("Déficit vitamine D - Impact sur immunité et barrière intestinale")
             actions.append({
                 "text": "Corriger déficit vitamine D (4000 UI/jour, 3 mois)",
-                "priority": "high"
-            })
+                    "priority": "high"
+                })
         
         elif "Ferritine" in marker and "Bas" in status:
             observations.append("Ferritine basse - Peut affecter énergie et absorption intestinale")
@@ -475,6 +549,9 @@ if "microbiome_data" not in st.session_state:
 
 if "recommendations" not in st.session_state:
     st.session_state.recommendations = {}
+
+if "reco_sections" not in st.session_state:
+    st.session_state.reco_sections = {"Nutrition": [], "Micronutrition": [], "Lifestyle": [], "Microbiome": []}
 
 if "edited_recommendations" not in st.session_state:
     st.session_state.edited_recommendations = {}
@@ -817,9 +894,15 @@ with tabs[1]:
                         bio_df = st.session_state.biology_df
                         micro_data = st.session_state.microbiome_data
 
-                        reco = engine.generate_recommendations(patient_fmt, bio_df, micro_data)
-                        
-                        st.session_state.recommendations = reco
+                        reco_raw = engine.generate_recommendations(
+                            biology_data=bio_df,
+                            microbiome_data=micro_data,
+                            patient_info=patient_fmt,
+                        )
+
+                        st.session_state.recommendations = reco_raw
+                        st.session_state.reco_sections = _normalize_reco_sections(reco_raw)
+
                         st.success("✅ Interprétation générée")
                         st.rerun()
                     except Exception as e:
@@ -827,9 +910,9 @@ with tabs[1]:
                         import traceback
                         st.code(traceback.format_exc())
 
-        # AFFICHAGE DES RECOMMANDATIONS
-        if st.session_state.recommendations:
-            reco = st.session_state.recommendations
+        # AFFICHAGE DES RECOMMANDATIONS (UI)
+        if st.session_state.reco_sections:
+            reco = st.session_state.reco_sections
 
             # Nutrition
             nutrition_items = reco.get("Nutrition", [])
@@ -863,7 +946,7 @@ with tabs[1]:
                     st.markdown(f"**{i+1}.** {item}")
                 st.markdown("---")
 
-            # Supplementation
+            # Supplementation (si tu l’utilises plus tard)
             suppl_items = reco.get("Supplementation", [])
             if suppl_items:
                 st.markdown("### 📋 Protocole de Supplémentation")
