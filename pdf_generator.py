@@ -129,7 +129,7 @@ def create_dna_logo(width: float = 4*cm, height: float = 4*cm) -> Drawing:
     return d
 
 
-def create_biomarker_gauge(biomarker: Dict[str, Any], width: float = 16*cm, height: float = 2.8*cm) -> Drawing:
+def create_biomarker_gauge(biomarker: Dict[str, Any], width: float = 16*cm, height: float = 3.5*cm) -> Drawing:
     """
     Crée une jauge visuelle élégante et moderne pour un biomarqueur
     
@@ -732,10 +732,10 @@ def generate_unilabs_report(
                 # Créer la jauge
                 gauge = create_biomarker_gauge(biomarker)
                 story.append(gauge)
-                story.append(Spacer(1, 0.6*cm))
+                story.append(Spacer(1, 1*cm))
                 
-                # Saut de page tous les 7 biomarqueurs
-                if (i + 1) % 7 == 0 and i < len(biomarkers) - 1:
+                # Saut de page tous les 6 biomarqueurs (au lieu de 7)
+                if (i + 1) % 6 == 0 and i < len(biomarkers) - 1:
                     story.append(PageBreak())
             
             story.append(Spacer(1, 0.5*cm))
