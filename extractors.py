@@ -580,6 +580,26 @@ def extract_biology_from_excel(excel_path: str) -> Dict[str, Any]:
         return {}
 
 
+
+# =====================================================================
+# HELPERS - CONVERSION POUR LE PDF/UI
+# =====================================================================
+def biology_dict_to_list(biology: Dict[str, Any], default_category: str = "Autres") -> List[Dict[str, Any]]:
+    """Convertit le dict {name: {value,unit,reference,status}} en liste [{name,...}] utilisable par le PDF/UI."""
+    out: List[Dict[str, Any]] = []
+    for name, d in (biology or {}).items():
+        if not isinstance(d, dict):
+            continue
+        out.append({
+            "name": str(d.get("name", name)).strip(),
+            "value": d.get("value"),
+            "unit": str(d.get("unit", "")).strip(),
+            "reference": str(d.get("reference", "")).strip(),
+            "status": str(d.get("status", "Inconnu")).strip(),
+            "category": str(d.get("category", default_category)).strip() or default_category,
+        })
+    return out
+
 # =====================================================================
 # MAIN EXTRACTION ORCHESTRATOR
 # =====================================================================
