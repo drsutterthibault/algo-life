@@ -1,5 +1,5 @@
 """
-UNILABS - Générateur PDF Premium v2.0
+ALGO-LIFE / UNILABS - Générateur PDF Premium v2.0
 ✅ Design moderne et futuriste
 ✅ Biomarqueurs avec jauges visuelles colorées
 ✅ Logos professionnels
@@ -53,103 +53,6 @@ def _safe_str(x: Any) -> str:
     return str(x).strip()
 
 
-
-
-# ---------------------------------------------------------------------
-# PATCH: normalisation robuste des biomarqueurs (support clés FR/EN)
-# ---------------------------------------------------------------------
-def _first_present(d: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
-    if not isinstance(d, dict):
-        return default
-    lower_map = {str(k).strip().lower(): k for k in d.keys()}
-    for k in keys:
-        lk = str(k).strip().lower()
-        if lk in lower_map:
-            return d.get(lower_map[lk], default)
-    return default
-
-
-def _normalize_status(raw: Any) -> str:
-    s = _safe_str(raw).strip().lower()
-    if not s:
-        return "Inconnu"
-    if s in {"normal", "within", "ok", "dans la norme", "as expected"}:
-        return "Normal"
-    if any(w in s for w in ["surve", "border", "limite", "slight", "mild", "watch", "modéré", "modere"]):
-        return "À surveiller"
-    if any(w in s for w in ["anormal", "abnormal", "haut", "élev", "elev", "high", "low", "bas", "faible", "deviat"]):
-        return "Anormal"
-    return raw if isinstance(raw, str) and raw.strip() else "Inconnu"
-
-
-def normalize_biology_data(biology: Any) -> List[Dict[str, Any]]:
-    """Convertit ce que l'app envoie (df.to_dict('records') avec clés FR) en format attendu par le PDF.
-
-    Sortie: list[dict] avec clés: name, value, unit, reference, status, category
-    """
-    out: List[Dict[str, Any]] = []
-    if biology is None:
-        return out
-
-    # dict {name: {...}} éventuel
-    if isinstance(biology, dict):
-        for k, v in biology.items():
-            if isinstance(v, dict):
-                name = _safe_str(_first_present(v, ["name", "biomarker", "marqueur"], default=k) or k)
-                value = _first_present(v, ["value", "result", "valeur"], default=None)
-                unit = _safe_str(_first_present(v, ["unit", "units", "unité", "unite"], default=""))
-                ref = _safe_str(_first_present(v, ["reference", "ref", "range", "référence", "reference_range"], default=""))
-                status = _normalize_status(_first_present(v, ["status", "flag", "statut"], default=""))
-                category = _safe_str(_first_present(v, ["category", "catégorie", "categorie", "panel", "famille"], default=""))
-            else:
-                name = _safe_str(k)
-                value = v
-                unit = ref = category = ""
-                status = "Inconnu"
-
-            if not name:
-                continue
-            out.append({"name": name, "value": value, "unit": unit, "reference": ref, "status": status, "category": category})
-        return out
-
-    # list of records
-    if isinstance(biology, list):
-        for row in biology:
-            if not isinstance(row, dict):
-                continue
-
-            name = _safe_str(_first_present(row, ["name", "biomarker", "marker"], default=""))
-            if not name:
-                name = _safe_str(_first_present(row, ["Biomarqueur", "Marqueur", "Paramètre", "Parametre"], default=""))
-
-            value = _first_present(row, ["value", "result"], default=None)
-            if value is None or value == "":
-                value = _first_present(row, ["Valeur", "Résultat", "Resultat"], default=None)
-
-            unit = _safe_str(_first_present(row, ["unit", "units"], default=""))
-            if not unit:
-                unit = _safe_str(_first_present(row, ["Unité", "Unite"], default=""))
-
-            ref = _safe_str(_first_present(row, ["reference", "ref", "range", "reference_range"], default=""))
-            if not ref:
-                ref = _safe_str(_first_present(row, ["Référence", "Reference", "Norme"], default=""))
-
-            status = _first_present(row, ["status", "flag"], default="")
-            if not status:
-                status = _first_present(row, ["Statut", "Interprétation", "Interpretation"], default="")
-            status = _normalize_status(status)
-
-            category = _safe_str(_first_present(row, ["category", "panel"], default=""))
-            if not category:
-                category = _safe_str(_first_present(row, ["Catégorie", "Categorie", "Famille"], default=""))
-
-            if not name:
-                continue
-
-            out.append({"name": name, "value": value, "unit": unit, "reference": ref, "status": status, "category": category})
-        return out
-
-    return out
 def _safe_float(x: Any, default: float = 0.0) -> float:
     """Convertit en float de manière sûre"""
     if x is None or x == "":
@@ -198,30 +101,43 @@ def _parse_reference(ref_str: str) -> tuple[float, float]:
 # NORMALISATION DES ENTREES (compatibilité app / extractors / excel)
 # =====================================================================
 def normalize_biology_data(biology_data: Any) -> List[Dict[str, Any]]:
-    """Accepte plusieurs formats et retourne une liste de biomarqueurs au format attendu.
+    """Normalise les biomarqueurs pour le générateur PDF.
 
-    Formats acceptés:
-    - List[Dict] déjà au bon format: {"name","value","unit","reference","status","category"}
-    - Dict[str, Dict]: {"Ferritine": {"value":..., "unit":..., "reference":..., "status":...}, ...}
-    - List[Dict] au format app: {"biomarker"/"marqueur"/"name", "valeur"/"value", "unite"/"unit", "ref"/"reference", "statut"/"status", "category"/"categorie"}
+    ✅ Compatible avec:
+    - list[dict] déjà au bon format: name/value/unit/reference/status/category
+    - dict mapping nom -> dict champs
+    - list[dict] provenant de pandas df.to_dict('records') avec en-têtes FR:
+      'Biomarqueur', 'Valeur', 'Unité', 'Référence', 'Statut', 'Catégorie'
+    - variantes sans accents: Unite, Reference, Categorie, Parametre, etc.
     """
     if not biology_data:
         return []
 
+    def _get(item: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+        for k in keys:
+            if k in item:
+                return item.get(k)
+        return default
+
     # 1) Dict mapping name -> fields
     if isinstance(biology_data, dict):
+        # Si le dict ressemble déjà à un payload (biomarkers/biology_data etc.)
+        for wrapper_key in ("biology_data", "biology", "biomarkers", "markers"):
+            if wrapper_key in biology_data and isinstance(biology_data.get(wrapper_key), (list, dict)):
+                return normalize_biology_data(biology_data.get(wrapper_key))
+
         out: List[Dict[str, Any]] = []
         for k, v in biology_data.items():
             if isinstance(v, dict):
                 out.append({
-                    "name": _safe_str(v.get("name", k)),
-                    "value": v.get("value", v.get("valeur", v.get("result", ""))),
-                    "unit": _safe_str(v.get("unit", v.get("unite", v.get("units", "")))),
-                    "reference": _safe_str(v.get("reference", v.get("ref", v.get("norme", v.get("range", ""))))),
-                    "status": _safe_str(v.get("status", v.get("statut", ""))),
-                    "category": _safe_str(v.get("category", v.get("categorie", "Autres"))) or "Autres",
+                    "name": _safe_str(v.get("name", v.get("Biomarqueur", k))),
+                    "value": v.get("value", v.get("Valeur", v.get("valeur", v.get("result", "")))),
+                    "unit": _safe_str(v.get("unit", v.get("Unité", v.get("Unite", v.get("unite", v.get("units", "")))))),
+                    "reference": _safe_str(v.get("reference", v.get("Référence", v.get("Reference", v.get("ref", v.get("norme", v.get("range", ""))))))),
+                    "status": _safe_str(v.get("status", v.get("Statut", v.get("statut", "")))),
+                    "category": _safe_str(v.get("category", v.get("Catégorie", v.get("Categorie", v.get("categorie", "Autres"))))) or "Autres",
                 })
-        return out
+        return [b for b in out if b.get("name")]
 
     # 2) List of dicts
     if isinstance(biology_data, list):
@@ -230,33 +146,38 @@ def normalize_biology_data(biology_data: Any) -> List[Dict[str, Any]]:
             if not isinstance(item, dict):
                 continue
 
-            name = item.get("name") or item.get("biomarker") or item.get("marqueur") or item.get("parametre") or item.get("parameter")
-            # Si c'est un dict extrait brut type {"Ferritine": {...}} dans une liste
-            if name is None and len(item) == 1 and isinstance(next(iter(item.values())), dict):
+            # Cas "dict encapsulé" : [{"Ferritine": {...}}]
+            if len(item) == 1 and isinstance(next(iter(item.values())), dict) and not any(k in item for k in ("name","Biomarqueur","biomarker","marqueur")):
                 k = next(iter(item.keys()))
                 v = next(iter(item.values()))
                 out.append({
-                    "name": _safe_str(v.get("name", k)),
-                    "value": v.get("value", v.get("valeur", v.get("result", ""))),
-                    "unit": _safe_str(v.get("unit", v.get("unite", v.get("units", "")))),
-                    "reference": _safe_str(v.get("reference", v.get("ref", v.get("norme", v.get("range", ""))))),
-                    "status": _safe_str(v.get("status", v.get("statut", ""))),
-                    "category": _safe_str(v.get("category", v.get("categorie", "Autres"))) or "Autres",
+                    "name": _safe_str(v.get("name", v.get("Biomarqueur", k))),
+                    "value": v.get("value", v.get("Valeur", v.get("valeur", v.get("result", "")))),
+                    "unit": _safe_str(v.get("unit", v.get("Unité", v.get("Unite", v.get("unite", v.get("units", "")))))),
+                    "reference": _safe_str(v.get("reference", v.get("Référence", v.get("Reference", v.get("ref", v.get("norme", v.get("range", ""))))))),
+                    "status": _safe_str(v.get("status", v.get("Statut", v.get("statut", "")))),
+                    "category": _safe_str(v.get("category", v.get("Catégorie", v.get("Categorie", v.get("categorie", "Autres"))))) or "Autres",
                 })
                 continue
 
+            name = (
+                item.get("name")
+                or item.get("biomarker") or item.get("marqueur")
+                or item.get("Biomarqueur") or item.get("Marqueur")
+                or item.get("parametre") or item.get("Paramètre") or item.get("Parametre")
+                or item.get("parameter")
+            )
+
             out.append({
                 "name": _safe_str(name),
-                "value": item.get("value", item.get("valeur", item.get("result", ""))),
-                "unit": _safe_str(item.get("unit", item.get("unite", item.get("units", "")))),
-                "reference": _safe_str(item.get("reference", item.get("ref", item.get("norme", item.get("range", ""))))),
-                "status": _safe_str(item.get("status", item.get("statut", ""))),
-                "category": _safe_str(item.get("category", item.get("categorie", "Autres"))) or "Autres",
+                "value": _get(item, "value", "valeur", "result", "Valeur", "Résultat", "Resultat", default=""),
+                "unit": _safe_str(_get(item, "unit", "unite", "units", "Unité", "Unite", default="")),
+                "reference": _safe_str(_get(item, "reference", "ref", "norme", "range", "Référence", "Reference", default="")),
+                "status": _safe_str(_get(item, "status", "statut", "Statut", "flag", default="")),
+                "category": _safe_str(_get(item, "category", "categorie", "Catégorie", "Categorie", default="Autres")) or "Autres",
             })
 
-        # Filtrer les entrées totalement vides
-        out = [b for b in out if b.get("name")]
-        return out
+        return [b for b in out if b.get("name")]
 
     return []
 
@@ -611,9 +532,6 @@ def generate_unilabs_report(
     Returns:
         Chemin du fichier généré
     """
-    # PATCH: normaliser les biomarqueurs (support clés FR provenant du DataFrame Streamlit)
-    biology_data = normalize_biology_data(biology_data)
-
     
     # Configuration document avec canvas personnalisé
     doc = SimpleDocTemplate(
