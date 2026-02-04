@@ -884,6 +884,46 @@ def generate_unilabs_report(
     return output_path
 
 
+def generate_multimodal_report(
+    patient_data: Dict[str, Any],
+    biology_data: List[Dict[str, Any]],
+    microbiome_data: Dict[str, Any],
+    recommendations: Dict[str, List[str]],
+    cross_analysis: List[Dict[str, Any]],
+    follow_up: Dict[str, Any],
+    bio_age_result: Optional[Dict[str, Any]] = None,
+    output_path: str = "rapport_algo_life.pdf"
+) -> str:
+    """
+    Fonction wrapper pour compatibilité avec l'ancien code
+    Génère un rapport PDF multimodal avec templates visuels
+    
+    Args:
+        patient_data: Informations patient
+        biology_data: Liste des biomarqueurs
+        microbiome_data: Données microbiome
+        recommendations: Dict avec clés Prioritaires, Nutrition, Micronutrition, etc.
+        cross_analysis: Analyses croisées
+        follow_up: Plan de suivi
+        bio_age_result: Résultat âge biologique (optionnel)
+        output_path: Chemin de sortie
+    
+    Returns:
+        Chemin du fichier généré
+    """
+    # Appeler la fonction principale avec les nouveaux paramètres
+    return generate_unilabs_report(
+        patient_data=patient_data,
+        biology_data=biology_data,
+        microbiome_data=microbiome_data,
+        recommendations=recommendations,
+        cross_analysis=cross_analysis,
+        follow_up=follow_up,
+        bio_age_result=bio_age_result,
+        output_path=output_path
+    )
+
+
 # =====================================================================
 # EXEMPLE D'UTILISATION
 # =====================================================================
