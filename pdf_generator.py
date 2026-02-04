@@ -19,45 +19,46 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm, mm
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-    PageBreak,
-    Image,
-    KeepTogether,
-    ListFlowable,
-    Flowable,
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, 
+    KeepTogether, Image as ReportLabImage, Frame, PageTemplate
 )
-
-from reportlab.graphics.shapes import Drawing, Rect, Line, Circle, String
-
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-def _safe_float(x: Any, default: float = 0.0) -> float:
-    try:
-        if x is None:
-            return default
-        if isinstance(x, (int, float)):
-            return float(x)
-        s = str(x).strip().replace(",", ".")
-        if s == "":
-            return default
-        return float(s)
-    except Exception:
-        return default
+from reportlab.pdfgen import canvas
+from reportlab.graphics.shapes import Drawing, Rect, Circle, Line, String, Polygon
+from reportlab.graphics import renderPDF
 
 
-def _clean_str(x: Any) -> str:
-    if x is None:
+# =====================================================================
+# COLORS & DESIGN CONSTANTS
+# =====================================================================
+PRIMARY_BLUE = colors.HexColor("#0066CC")  # UNILABS Blue
+ACCENT_CYAN = colors.HexColor("#00BCD4")   # AlgoLife Cyan
+DNA_PURPLE = colors.HexColor("#6A1B9A")    # DNA Purple
+NORMAL_GREEN = colors.HexColor("#4CAF50")
+WARNING_ORANGE = colors.HexColor("#FF9800")
+CRITICAL_RED = colors.HexColor("#F44336")
+GREY_DARK = colors.HexColor("#424242")
+GREY_MEDIUM = colors.HexColor("#757575")
+GREY_LIGHT = colors.HexColor("#EEEEEE")
+WHITE = colors.white
+BACKGROUND_LIGHT = colors.HexColor("#FAFAFA")
+
+
+# =====================================================================
+# HELPERS
+# =====================================================================
+def _safe_str(x: Any) -> str:
+    """Convertit en string de manière sûre"""
+    if x is None or x == "":
         return ""
     return str(x).strip()
 
 
+
+
+# ---------------------------------------------------------------------
+# PATCH: normalisation robuste des biomarqueurs (support clés FR/EN)
+# ---------------------------------------------------------------------
 def _first_present(d: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
-    """Return first present key from d among keys, case-insensitive, and supporting nested dict."""
     if not isinstance(d, dict):
         return default
     lower_map = {str(k).strip().lower(): k for k in d.keys()}
@@ -69,475 +70,1232 @@ def _first_present(d: Dict[str, Any], keys: List[str], default: Any = None) -> A
 
 
 def _normalize_status(raw: Any) -> str:
-    """Normalize status to one of: Normal, À surveiller, Anormal (plus fallback)."""
-    s = _clean_str(raw).lower()
+    s = _safe_str(raw).strip().lower()
     if not s:
         return "Inconnu"
-    # Normal
     if s in {"normal", "within", "ok", "dans la norme", "as expected"}:
         return "Normal"
-    # Monitor / borderline
-    if any(w in s for w in ["surve", "border", "limite", "modéré", "slightly", "mild", "watch"]):
+    if any(w in s for w in ["surve", "border", "limite", "slight", "mild", "watch", "modéré", "modere"]):
         return "À surveiller"
-    # Abnormal high/low
-    if any(w in s for w in ["anormal", "abnormal", "haut", "élev", "high", "low", "bas", "faible", "deviating"]):
+    if any(w in s for w in ["anormal", "abnormal", "haut", "élev", "elev", "high", "low", "bas", "faible", "deviat"]):
         return "Anormal"
     return raw if isinstance(raw, str) and raw.strip() else "Inconnu"
 
 
-# ---------------------------------------------------------------------
-# PATCH CRITIQUE: Normalisation biologie depuis app.py (DF -> dict records)
-# ---------------------------------------------------------------------
 def normalize_biology_data(biology: Any) -> List[Dict[str, Any]]:
-    """
-    Accept many possible shapes:
-    - list[dict] with keys: name/value/unit/reference/status/category
-    - list[dict] coming from pandas df.to_dict('records') with FRENCH headers:
-      Biomarqueur / Valeur / Unité / Référence / Statut / Catégorie
-    - dict mapping biomarker_name -> dict(value/unit/reference/status/...)
-    - other minor variants
+    """Convertit ce que l'app envoie (df.to_dict('records') avec clés FR) en format attendu par le PDF.
 
-    Returns list of normalized dicts with:
-      name, value, unit, reference, status, category
+    Sortie: list[dict] avec clés: name, value, unit, reference, status, category
     """
     out: List[Dict[str, Any]] = []
-
     if biology is None:
         return out
 
-    # If dict: { "CRP": {..}, ... }
+    # dict {name: {...}} éventuel
     if isinstance(biology, dict):
-        # could already be payload with "biomarkers" key
-        if any(k in [str(x).lower() for x in biology.keys()] for k in ["biomarkers", "markers", "biology"]):
-            inner = _first_present(biology, ["biomarkers", "markers", "biology"], default=None)
-            return normalize_biology_data(inner)
-
-        # Otherwise assume mapping name -> dict
         for k, v in biology.items():
             if isinstance(v, dict):
-                name = _clean_str(_first_present(v, ["name", "biomarker", "marqueur"], default=k) or k)
-                value = _first_present(v, ["value", "result", "valeur", "mesure"], default=None)
-                unit = _first_present(v, ["unit", "units", "unité", "unite"], default="")
-                ref = _first_present(v, ["reference", "ref", "range", "référence", "reference_range"], default="")
-                status = _first_present(v, ["status", "flag", "statut"], default=_first_present(v, ["interpretation"], default=""))
-                category = _first_present(v, ["category", "panel", "famille", "catégorie", "categorie"], default="")
+                name = _safe_str(_first_present(v, ["name", "biomarker", "marqueur"], default=k) or k)
+                value = _first_present(v, ["value", "result", "valeur"], default=None)
+                unit = _safe_str(_first_present(v, ["unit", "units", "unité", "unite"], default=""))
+                ref = _safe_str(_first_present(v, ["reference", "ref", "range", "référence", "reference_range"], default=""))
+                status = _normalize_status(_first_present(v, ["status", "flag", "statut"], default=""))
+                category = _safe_str(_first_present(v, ["category", "catégorie", "categorie", "panel", "famille"], default=""))
             else:
-                name = _clean_str(k)
+                name = _safe_str(k)
                 value = v
-                unit, ref, status, category = "", "", "", ""
+                unit = ref = category = ""
+                status = "Inconnu"
 
             if not name:
                 continue
-
-            out.append(
-                dict(
-                    name=name,
-                    value=value,
-                    unit=_clean_str(unit),
-                    reference=_clean_str(ref),
-                    status=_normalize_status(status),
-                    category=_clean_str(category),
-                )
-            )
+            out.append({"name": name, "value": value, "unit": unit, "reference": ref, "status": status, "category": category})
         return out
 
-    # If list: records
+    # list of records
     if isinstance(biology, list):
         for row in biology:
             if not isinstance(row, dict):
                 continue
 
-            # Support EN keys
-            name = _first_present(row, ["name", "biomarker", "marker"], default=None)
-            value = _first_present(row, ["value", "result"], default=None)
-            unit = _first_present(row, ["unit", "units"], default="")
-            ref = _first_present(row, ["reference", "ref", "range", "reference_range"], default="")
-            status = _first_present(row, ["status", "flag"], default="")
-            category = _first_present(row, ["category", "panel"], default="")
-
-            # Support FR keys from your DataFrame
+            name = _safe_str(_first_present(row, ["name", "biomarker", "marker"], default=""))
             if not name:
-                name = _first_present(row, ["Biomarqueur", "Marqueur", "Paramètre", "Parametre"], default="")
+                name = _safe_str(_first_present(row, ["Biomarqueur", "Marqueur", "Paramètre", "Parametre"], default=""))
 
+            value = _first_present(row, ["value", "result"], default=None)
             if value is None or value == "":
                 value = _first_present(row, ["Valeur", "Résultat", "Resultat"], default=None)
 
+            unit = _safe_str(_first_present(row, ["unit", "units"], default=""))
             if not unit:
-                unit = _first_present(row, ["Unité", "Unite"], default="")
+                unit = _safe_str(_first_present(row, ["Unité", "Unite"], default=""))
 
+            ref = _safe_str(_first_present(row, ["reference", "ref", "range", "reference_range"], default=""))
             if not ref:
-                ref = _first_present(row, ["Référence", "Reference", "Norme"], default="")
+                ref = _safe_str(_first_present(row, ["Référence", "Reference", "Norme"], default=""))
 
+            status = _first_present(row, ["status", "flag"], default="")
             if not status:
-                status = _first_present(row, ["Statut", "Flag", "Interprétation", "Interpretation"], default="")
+                status = _first_present(row, ["Statut", "Interprétation", "Interpretation"], default="")
+            status = _normalize_status(status)
 
+            category = _safe_str(_first_present(row, ["category", "panel"], default=""))
             if not category:
-                category = _first_present(row, ["Catégorie", "Categorie", "Famille"], default="")
+                category = _safe_str(_first_present(row, ["Catégorie", "Categorie", "Famille"], default=""))
 
-            name = _clean_str(name)
             if not name:
                 continue
 
-            out.append(
-                dict(
-                    name=name,
-                    value=value,
-                    unit=_clean_str(unit),
-                    reference=_clean_str(ref),
-                    status=_normalize_status(status),
-                    category=_clean_str(category),
-                )
-            )
-
+            out.append({"name": name, "value": value, "unit": unit, "reference": ref, "status": status, "category": category})
         return out
 
     return out
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    """Convertit en float de manière sûre"""
+    if x is None or x == "":
+        return default
+    try:
+        # Remplacer virgule par point si nécessaire
+        if isinstance(x, str):
+            x = x.replace(",", ".")
+        return float(x)
+    except Exception:
+        return default
 
 
-# ---------------------------------------------------------------------
-# Design blocks
-# ---------------------------------------------------------------------
-styles = getSampleStyleSheet()
-
-STYLE_TITLE = ParagraphStyle(
-    "Title",
-    parent=styles["Title"],
-    fontName="Helvetica-Bold",
-    fontSize=20,
-    leading=24,
-    textColor=colors.HexColor("#111827"),
-    alignment=TA_LEFT,
-)
-
-STYLE_SUBTITLE = ParagraphStyle(
-    "Subtitle",
-    parent=styles["Normal"],
-    fontName="Helvetica",
-    fontSize=11,
-    leading=14,
-    textColor=colors.HexColor("#374151"),
-    alignment=TA_LEFT,
-)
-
-STYLE_H2 = ParagraphStyle(
-    "H2",
-    parent=styles["Heading2"],
-    fontName="Helvetica-Bold",
-    fontSize=14,
-    leading=18,
-    textColor=colors.HexColor("#111827"),
-    spaceBefore=10,
-    spaceAfter=6,
-)
-
-STYLE_BODY = ParagraphStyle(
-    "Body",
-    parent=styles["Normal"],
-    fontName="Helvetica",
-    fontSize=10,
-    leading=13,
-    textColor=colors.HexColor("#111827"),
-    alignment=TA_JUSTIFY,
-)
-
-STYLE_SMALL = ParagraphStyle(
-    "Small",
-    parent=styles["Normal"],
-    fontName="Helvetica",
-    fontSize=9,
-    leading=12,
-    textColor=colors.HexColor("#374151"),
-)
+def _parse_reference(ref_str: str) -> tuple[float, float]:
+    """
+    Parse une référence au format 'min-max' ou 'min — max'
+    Retourne (min, max) ou (0.0, 100.0) si impossible à parser
+    """
+    try:
+        if not ref_str or ref_str == "Non spécifiées" or ref_str == "":
+            return (0.0, 100.0)
+        
+        # Nettoyer et normaliser le format
+        ref_str = str(ref_str).strip()
+        ref_str = ref_str.replace(" — ", "-").replace("—", "-").replace(" - ", "-")
+        
+        parts = ref_str.split("-")
+        
+        if len(parts) == 2:
+            min_val = _safe_float(parts[0].strip(), 0.0)
+            max_val = _safe_float(parts[1].strip(), 100.0)
+            
+            # Vérifier que min < max
+            if min_val >= max_val:
+                return (0.0, 100.0)
+            
+            return (min_val, max_val)
+        
+        return (0.0, 100.0)
+    except Exception:
+        return (0.0, 100.0)
 
 
-def _header_band(width: float, height: float, patient: Dict[str, Any]) -> Drawing:
+
+# =====================================================================
+# NORMALISATION DES ENTREES (compatibilité app / extractors / excel)
+# =====================================================================
+def normalize_biology_data(biology_data: Any) -> List[Dict[str, Any]]:
+    """Accepte plusieurs formats et retourne une liste de biomarqueurs au format attendu.
+
+    Formats acceptés:
+    - List[Dict] déjà au bon format: {"name","value","unit","reference","status","category"}
+    - Dict[str, Dict]: {"Ferritine": {"value":..., "unit":..., "reference":..., "status":...}, ...}
+    - List[Dict] au format app: {"biomarker"/"marqueur"/"name", "valeur"/"value", "unite"/"unit", "ref"/"reference", "statut"/"status", "category"/"categorie"}
+    """
+    if not biology_data:
+        return []
+
+    # 1) Dict mapping name -> fields
+    if isinstance(biology_data, dict):
+        out: List[Dict[str, Any]] = []
+        for k, v in biology_data.items():
+            if isinstance(v, dict):
+                out.append({
+                    "name": _safe_str(v.get("name", k)),
+                    "value": v.get("value", v.get("valeur", v.get("result", ""))),
+                    "unit": _safe_str(v.get("unit", v.get("unite", v.get("units", "")))),
+                    "reference": _safe_str(v.get("reference", v.get("ref", v.get("norme", v.get("range", ""))))),
+                    "status": _safe_str(v.get("status", v.get("statut", ""))),
+                    "category": _safe_str(v.get("category", v.get("categorie", "Autres"))) or "Autres",
+                })
+        return out
+
+    # 2) List of dicts
+    if isinstance(biology_data, list):
+        out: List[Dict[str, Any]] = []
+        for item in biology_data:
+            if not isinstance(item, dict):
+                continue
+
+            name = item.get("name") or item.get("biomarker") or item.get("marqueur") or item.get("parametre") or item.get("parameter")
+            # Si c'est un dict extrait brut type {"Ferritine": {...}} dans une liste
+            if name is None and len(item) == 1 and isinstance(next(iter(item.values())), dict):
+                k = next(iter(item.keys()))
+                v = next(iter(item.values()))
+                out.append({
+                    "name": _safe_str(v.get("name", k)),
+                    "value": v.get("value", v.get("valeur", v.get("result", ""))),
+                    "unit": _safe_str(v.get("unit", v.get("unite", v.get("units", "")))),
+                    "reference": _safe_str(v.get("reference", v.get("ref", v.get("norme", v.get("range", ""))))),
+                    "status": _safe_str(v.get("status", v.get("statut", ""))),
+                    "category": _safe_str(v.get("category", v.get("categorie", "Autres"))) or "Autres",
+                })
+                continue
+
+            out.append({
+                "name": _safe_str(name),
+                "value": item.get("value", item.get("valeur", item.get("result", ""))),
+                "unit": _safe_str(item.get("unit", item.get("unite", item.get("units", "")))),
+                "reference": _safe_str(item.get("reference", item.get("ref", item.get("norme", item.get("range", ""))))),
+                "status": _safe_str(item.get("status", item.get("statut", ""))),
+                "category": _safe_str(item.get("category", item.get("categorie", "Autres"))) or "Autres",
+            })
+
+        # Filtrer les entrées totalement vides
+        out = [b for b in out if b.get("name")]
+        return out
+
+    return []
+
+
+def create_dna_logo(width: float = 4*cm, height: float = 4*cm) -> Drawing:
+    """
+    Crée un logo ADN stylisé pour ALGO-LIFE
+    """
     d = Drawing(width, height)
-    # Background
-    d.add(Rect(0, 0, width, height, fillColor=colors.HexColor("#EEF2FF"), strokeColor=colors.HexColor("#E5E7EB")))
-    # Accent line
-    d.add(Line(0, 0, width, 0, strokeColor=colors.HexColor("#6366F1"), strokeWidth=3))
-
-    title = "Rapport Multimodal - Biologie fonctionnelle & Microbiote"
-    d.add(String(12, height - 18, title, fontName="Helvetica-Bold", fontSize=13, fillColor=colors.HexColor("#111827")))
-
-    name = f"{patient.get('prenom','') or ''} {patient.get('nom','') or ''}".strip()
-    dob = patient.get("dob", "")
-    date_rapport = patient.get("date_rapport", datetime.now().strftime("%d/%m/%Y"))
-
-    meta = f"Patient: {name or '—'}   |   Date naissance: {dob or '—'}   |   Rapport: {date_rapport}"
-    d.add(String(12, height - 34, meta, fontName="Helvetica", fontSize=9, fillColor=colors.HexColor("#374151")))
-
+    
+    # Hélice ADN simplifiée
+    center_x = width / 2
+    center_y = height / 2
+    
+    # Spirale gauche (bleu)
+    for i in range(8):
+        y = height * 0.1 + (i * height * 0.1)
+        x_offset = 0.3 * cm * (1 if i % 2 == 0 else -1)
+        
+        circle = Circle(center_x + x_offset, y, 0.15*cm)
+        circle.fillColor = PRIMARY_BLUE
+        circle.strokeColor = PRIMARY_BLUE
+        d.add(circle)
+    
+    # Spirale droite (cyan)
+    for i in range(8):
+        y = height * 0.1 + (i * height * 0.1)
+        x_offset = 0.3 * cm * (-1 if i % 2 == 0 else 1)
+        
+        circle = Circle(center_x + x_offset, y, 0.15*cm)
+        circle.fillColor = ACCENT_CYAN
+        circle.strokeColor = ACCENT_CYAN
+        d.add(circle)
+    
     return d
 
 
-class HR(Flowable):
-    def __init__(self, width: float, thickness: float = 1, color=colors.HexColor("#E5E7EB")):
-        super().__init__()
-        self.width = width
-        self.thickness = thickness
-        self.color = color
-        self.height = thickness + 2
-
-    def draw(self):
-        self.canv.setStrokeColor(self.color)
-        self.canv.setLineWidth(self.thickness)
-        self.canv.line(0, 1, self.width, 1)
-
-
-def _status_color(status: str):
-    s = _normalize_status(status)
-    if s == "Normal":
-        return colors.HexColor("#10B981")  # green
-    if s == "À surveiller":
-        return colors.HexColor("#F59E0B")  # amber
-    if s == "Anormal":
-        return colors.HexColor("#EF4444")  # red
-    return colors.HexColor("#6B7280")      # gray
-
-
-def _biomarker_row_table(rows: List[Dict[str, Any]]) -> Table:
-    data = [["Biomarqueur", "Valeur", "Unité", "Référence", "Statut"]]
-    for r in rows:
-        data.append([r.get("name", ""), str(r.get("value", "")), r.get("unit", ""), r.get("reference", ""), r.get("status", "")])
-
-    tbl = Table(data, colWidths=[6.2 * cm, 2.4 * cm, 1.8 * cm, 5.0 * cm, 2.4 * cm])
-    tbl.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("ALIGN", (1, 1), (3, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
-                ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ]
-        )
-    )
-
-    # Colorize status cell per row
-    for i in range(1, len(data)):
-        st_col = _status_color(data[i][4])
-        tbl.setStyle(TableStyle([("TEXTCOLOR", (4, i), (4, i), st_col), ("FONTNAME", (4, i), (4, i), "Helvetica-Bold")]))
-
-    return tbl
-
-
-def _section_box(title: str, content_flowables: List[Any]) -> List[Any]:
-    out = [Paragraph(title, STYLE_H2), Spacer(1, 3)]
-    out.extend(content_flowables)
-    out.append(Spacer(1, 8))
-    return out
-
-
-def _summary_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
-    n = 0
-    m = 0
-    a = 0
-    for r in rows:
-        s = _normalize_status(r.get("status", ""))
-        if s == "Normal":
-            n += 1
-        elif s == "À surveiller":
-            m += 1
-        elif s == "Anormal":
-            a += 1
-    return {"normal": n, "monitor": m, "abnormal": a}
-
-
-def _summary_table(counts: Dict[str, int]) -> Table:
-    data = [
-        ["Synthèse", "Normal", "À surveiller", "Anormal"],
-        ["Biomarqueurs", str(counts.get("normal", 0)), str(counts.get("monitor", 0)), str(counts.get("abnormal", 0))],
+def create_biomarker_gauge(biomarker: Dict[str, Any], width: float = 16*cm, height: float = 3.5*cm) -> Drawing:
+    """
+    Crée une jauge visuelle élégante et moderne pour un biomarqueur
+    
+    Args:
+        biomarker: Dict avec keys: name, value, unit, reference, status
+        width: Largeur du dessin
+        height: Hauteur du dessin
+    
+    Returns:
+        Drawing ReportLab
+    """
+    d = Drawing(width, height)
+    
+    # Récupération des données
+    name = _safe_str(biomarker.get("name", ""))
+    value = _safe_float(biomarker.get("value"), 0.0)
+    unit = _safe_str(biomarker.get("unit", ""))
+    reference = _safe_str(biomarker.get("reference", ""))
+    status = _safe_str(biomarker.get("status", "Inconnu"))
+    
+    # Parse la référence
+    min_ref, max_ref = _parse_reference(reference)
+    
+    # Configuration de la jauge
+    gauge_width = width * 0.65
+    gauge_height = 12
+    gauge_x = width * 0.22
+    gauge_y = height * 0.35
+    
+    # Couleur du statut
+    if status == "Normal" or status == "normal":
+        status_color = NORMAL_GREEN
+    elif status.lower() in ["bas","faible","low"]:
+        status_color = WARNING_ORANGE
+    elif status.lower() in ["élevé","elevé","haut","high"]:
+        status_color = CRITICAL_RED
+    else:
+        status_color = GREY_MEDIUM
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 1. Indicateur de statut (cercle coloré à gauche)
+    # ─────────────────────────────────────────────────────────────────
+    dot_x = width * 0.015
+    dot_y = height * 0.65
+    
+    status_circle = Circle(dot_x, dot_y, 6)
+    status_circle.fillColor = status_color
+    status_circle.strokeColor = status_color
+    d.add(status_circle)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 2. Nom du biomarqueur
+    # ─────────────────────────────────────────────────────────────────
+    name_str = String(dot_x + 12, dot_y - 3, name[:60])  # Limiter à 60 caractères
+    name_str.fontName = 'Helvetica-Bold'
+    name_str.fontSize = 11
+    name_str.fillColor = GREY_DARK
+    d.add(name_str)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 3. Barre de référence (fond gris)
+    # ─────────────────────────────────────────────────────────────────
+    bg_rect = Rect(gauge_x, gauge_y, gauge_width, gauge_height)
+    bg_rect.fillColor = GREY_LIGHT
+    bg_rect.strokeColor = colors.HexColor("#CCCCCC")
+    bg_rect.strokeWidth = 0.5
+    bg_rect.rx = 3  # Coins arrondis
+    bg_rect.ry = 3
+    d.add(bg_rect)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 4. Zone normale (barre verte au centre)
+    # ─────────────────────────────────────────────────────────────────
+    # La zone normale représente 40-60% de la largeur totale
+    normal_start_x = gauge_x + (gauge_width * 0.35)
+    normal_width = gauge_width * 0.30
+    
+    normal_rect = Rect(normal_start_x, gauge_y + 1, normal_width, gauge_height - 2)
+    normal_rect.fillColor = NORMAL_GREEN
+    normal_rect.strokeColor = None
+    normal_rect.fillOpacity = 0.3
+    normal_rect.rx = 2
+    normal_rect.ry = 2
+    d.add(normal_rect)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 5. Indicateur de position de la valeur du patient
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Calculer la position relative de la valeur
+    if max_ref > min_ref and min_ref != max_ref:
+        # Position relative entre min et max
+        value_position_pct = (value - min_ref) / (max_ref - min_ref)
+    else:
+        value_position_pct = 0.5  # Centré par défaut
+    
+    # Limiter entre 0 et 1
+    value_position_pct = max(0.0, min(1.0, value_position_pct))
+    
+    # Position X de l'indicateur
+    indicator_x = gauge_x + (gauge_width * value_position_pct)
+    
+    # Triangle pointant vers le bas (indicateur)
+    triangle_points = [
+        indicator_x, gauge_y + gauge_height + 2,
+        indicator_x - 5, gauge_y + gauge_height + 12,
+        indicator_x + 5, gauge_y + gauge_height + 12
     ]
-    tbl = Table(data, colWidths=[5.0 * cm, 3.2 * cm, 3.2 * cm, 3.2 * cm])
-    tbl.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
-                ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#F9FAFB")]),
-                ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ]
-        )
+    
+    triangle = Polygon(triangle_points)
+    triangle.fillColor = status_color
+    triangle.strokeColor = status_color
+    d.add(triangle)
+    
+    # Ligne verticale de l'indicateur
+    indicator_line = Line(indicator_x, gauge_y, indicator_x, gauge_y + gauge_height)
+    indicator_line.strokeColor = status_color
+    indicator_line.strokeWidth = 2
+    d.add(indicator_line)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 6. Labels des bornes de référence
+    # ─────────────────────────────────────────────────────────────────
+    
+    # Borne min
+    if min_ref != 0.0 or max_ref != 100.0:  # N'afficher que si les bornes sont définies
+        min_label = String(gauge_x - 5, gauge_y + gauge_height / 2 - 3, f"{min_ref:.1f}")
+        min_label.fontName = 'Helvetica'
+        min_label.fontSize = 8
+        min_label.fillColor = GREY_MEDIUM
+        min_label.textAnchor = 'end'
+        d.add(min_label)
+        
+        # Borne max
+        max_label = String(gauge_x + gauge_width + 5, gauge_y + gauge_height / 2 - 3, f"{max_ref:.1f}")
+        max_label.fontName = 'Helvetica'
+        max_label.fontSize = 8
+        max_label.fillColor = GREY_MEDIUM
+        max_label.textAnchor = 'start'
+        d.add(max_label)
+    
+    # ─────────────────────────────────────────────────────────────────
+    # 7. Valeur du patient (grand texte à droite)
+    # ─────────────────────────────────────────────────────────────────
+    
+    value_text = f"{value:.2f}" if value < 100 else f"{value:.1f}"
+    if unit:
+        value_text += f" {unit}"
+    
+    value_x = gauge_x + gauge_width + 0.8*cm
+    value_label = String(value_x, gauge_y + gauge_height / 2 - 5, value_text)
+    value_label.fontName = 'Helvetica-Bold'
+    value_label.fontSize = 14
+    value_label.fillColor = status_color
+    value_label.textAnchor = 'start'
+    d.add(value_label)
+    
+    # Label "Normes:" au-dessus de la jauge
+    if min_ref != 0.0 or max_ref != 100.0:
+        norms_label = String(gauge_x, gauge_y - 8, f"Normes : {min_ref:.1f} — {max_ref:.1f}")
+        norms_label.fontName = 'Helvetica'
+        norms_label.fontSize = 8
+        norms_label.fillColor = GREY_MEDIUM
+        d.add(norms_label)
+    
+    return d
+
+
+def create_recommendation_box(title: str, items: List[str], color: colors.HexColor = PRIMARY_BLUE) -> Table:
+    """
+    Crée une boîte de recommandation stylisée
+    
+    Args:
+        title: Titre de la section
+        items: Liste des items à afficher
+        color: Couleur de la bordure et du titre
+    
+    Returns:
+        Table ReportLab formatée
+    """
+    from reportlab.lib.styles import getSampleStyleSheet
+    
+    styles = getSampleStyleSheet()
+    
+    # Style pour le titre
+    title_style = ParagraphStyle(
+        'RecoTitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        fontName='Helvetica-Bold',
+        textColor=color,
+        spaceAfter=5
     )
-    # Color numbers
-    tbl.setStyle(TableStyle([("TEXTCOLOR", (1, 1), (1, 1), colors.HexColor("#10B981")),
-                             ("TEXTCOLOR", (2, 1), (2, 1), colors.HexColor("#F59E0B")),
-                             ("TEXTCOLOR", (3, 1), (3, 1), colors.HexColor("#EF4444")),
-                             ("FONTNAME", (1, 1), (3, 1), "Helvetica-Bold")]))
-    return tbl
+    
+    # Style pour les items
+    item_style = ParagraphStyle(
+        'RecoItem',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=13,
+        leftIndent=10,
+        bulletIndent=5
+    )
+    
+    # Construire les données
+    data = [[Paragraph(title, title_style)]]
+    
+    for item in items:
+        data.append([Paragraph(f"• {item}", item_style)])
+    
+    # Créer la table
+    table = Table(data, colWidths=[16*cm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
+        ('BOX', (0, 0), (-1, -1), 1.5, color),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ('TOPPADDING', (0, 0), (0, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (0, 0), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    
+    return table
 
 
-def _microbiome_section(microbiome: Dict[str, Any]) -> List[Any]:
+# =====================================================================
+# PDF HEADER/FOOTER
+# =====================================================================
+class NumberedCanvas(canvas.Canvas):
+    """Canvas personnalisé avec en-têtes et pieds de page"""
+    
+    def __init__(self, *args, **kwargs):
+        canvas.Canvas.__init__(self, *args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_decorations(num_pages)
+            canvas.Canvas.showPage(self)
+        canvas.Canvas.save(self)
+
+    def draw_page_decorations(self, num_pages):
+        """Dessine l'en-tête et le pied de page"""
+        page_num = self._pageNumber
+        
+        # En-tête (pas sur la première page)
+        if page_num > 1:
+            self.saveState()
+            self.setFont('Helvetica', 8)
+            self.setFillColor(GREY_MEDIUM)
+            
+            # Ligne de séparation
+            self.setStrokeColor(PRIMARY_BLUE)
+            self.setLineWidth(1)
+            self.line(2*cm, A4[1] - 1.5*cm, A4[0] - 2*cm, A4[1] - 1.5*cm)
+            
+            # Texte en-tête
+            self.drawString(2*cm, A4[1] - 1.3*cm, "ALGO-LIFE | UNILABS Group")
+            self.drawRightString(A4[0] - 2*cm, A4[1] - 1.3*cm, f"Page {page_num} / {num_pages}")
+            
+            self.restoreState()
+        
+        # Pied de page
+        self.saveState()
+        self.setFont('Helvetica', 7)
+        self.setFillColor(GREY_MEDIUM)
+        
+        # Ligne de séparation
+        self.setStrokeColor(GREY_LIGHT)
+        self.setLineWidth(0.5)
+        self.line(2*cm, 1.5*cm, A4[0] - 2*cm, 1.5*cm)
+        
+        # Texte pied de page
+        self.drawString(2*cm, 1*cm, "CONFIDENTIEL - Document médical")
+        self.drawRightString(A4[0] - 2*cm, 1*cm, f"Dr Thibault SUTTER, PhD | contact@algo-life.com")
+        
+        self.restoreState()
+
+
+# =====================================================================
+# PDF GENERATOR
+# =====================================================================
+def generate_unilabs_report(
+    patient_data: Dict[str, Any],
+    biology_data: List[Dict[str, Any]],
+    microbiome_data: Optional[Dict[str, Any]] = None,
+    recommendations: Optional[Dict[str, List[str]]] = None,
+    cross_analysis: Optional[List[Dict[str, Any]]] = None,
+    follow_up: Optional[Dict[str, Any]] = None,
+    bio_age_result: Optional[Dict[str, Any]] = None,
+    output_path: str = "rapport_unilabs.pdf"
+) -> str:
     """
-    Accepts typical microbiome structures:
-      - di_score / diversity_status
-      - bacterial_groups (list) / bacteria_groups
-      - bacteria_individual (list)
+    Génère un rapport PDF UNILABS/ALGO-LIFE avec design moderne
+    
+    Args:
+        patient_data: Dict avec name, age, sex, birth_date, report_date, clinical_context
+        biology_data: Liste de dicts avec name, value, unit, reference, status, category
+        microbiome_data: Données microbiome (optionnel)
+        recommendations: Dict avec sections (Nutrition, Micronutrition, etc.)
+        cross_analysis: Analyses croisées (optionnel)
+        follow_up: Plan de suivi (optionnel)
+        bio_age_result: Résultat âge biologique (optionnel)
+        output_path: Chemin de sortie
+    
+    Returns:
+        Chemin du fichier généré
     """
-    if not isinstance(microbiome, dict) or not microbiome:
-        return [Paragraph("Aucune donnée microbiote fournie.", STYLE_SMALL)]
+    # PATCH: normaliser les biomarqueurs (support clés FR provenant du DataFrame Streamlit)
+    biology_data = normalize_biology_data(biology_data)
 
-    di = microbiome.get("di_score") or microbiome.get("DI") or microbiome.get("di") or ""
-    diversity = microbiome.get("diversity_status") or microbiome.get("diversity") or ""
-
-    groups = microbiome.get("bacterial_groups") or microbiome.get("bacteria_groups") or []
-    bacteria = microbiome.get("bacteria_individual") or microbiome.get("bacteria") or []
-
-    flow: List[Any] = []
-    flow.append(Paragraph(f"<b>DI</b> : {di or '—'} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Diversité</b> : {diversity or '—'}", STYLE_BODY))
-    flow.append(Spacer(1, 6))
-
-    # Groups table
-    if isinstance(groups, list) and groups:
-        data = [["Groupe", "Nom", "Statut"]]
-        for g in groups[:18]:
-            if not isinstance(g, dict):
-                continue
-            group = _clean_str(g.get("group") or g.get("code") or "")
-            name = _clean_str(g.get("name") or g.get("label") or "")
-            stt = _clean_str(g.get("status") or g.get("deviation") or "")
-            data.append([group, name, stt])
-
-        tbl = Table(data, colWidths=[2.0 * cm, 10.0 * cm, 5.0 * cm])
-        tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ]
-            )
-        )
-        flow.append(Paragraph("<b>Groupes bactériens</b>", STYLE_SMALL))
-        flow.append(tbl)
-        flow.append(Spacer(1, 8))
-
-    # Bacteria table
-    if isinstance(bacteria, list) and bacteria:
-        data = [["Bactérie", "Abondance", "Unité", "Statut"]]
-        for b in bacteria[:20]:
-            if not isinstance(b, dict):
-                continue
-            name = _clean_str(b.get("name") or b.get("taxon") or "")
-            abundance = _clean_str(b.get("abundance") or b.get("value") or "")
-            unit = _clean_str(b.get("unit") or "")
-            stt = _clean_str(b.get("status") or b.get("deviation") or "")
-            data.append([name, abundance, unit, stt])
-
-        tbl = Table(data, colWidths=[8.5 * cm, 3.0 * cm, 2.0 * cm, 3.5 * cm])
-        tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ]
-            )
-        )
-        flow.append(Paragraph("<b>Bactéries (extrait)</b>", STYLE_SMALL))
-        flow.append(tbl)
-
-    if len(flow) == 0:
-        return [Paragraph("Aucune donnée microbiote structurée détectée.", STYLE_SMALL)]
-    return flow
-
-
-# ---------------------------------------------------------------------
-# Main entrypoint
-# ---------------------------------------------------------------------
-def generate_multimodal_report(payload: Dict[str, Any], output_path: Optional[str] = None) -> str:
-    """
-    Compatible with your app.py call:
-      generate_multimodal_report(payload_dict)
-    """
-    if output_path is None:
-        out_dir = os.path.join(os.getcwd(), "exports")
-        os.makedirs(out_dir, exist_ok=True)
-        output_path = os.path.join(out_dir, f"UNILABS_rapport_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
-
-    patient = payload.get("patient", {}) if isinstance(payload, dict) else {}
-    raw_biology = payload.get("biology") if isinstance(payload, dict) else None
-    raw_microbiome = payload.get("microbiome") if isinstance(payload, dict) else None
-
-    biology_rows = normalize_biology_data(raw_biology)
-    counts = _summary_counts(biology_rows)
-
+    
+    # Configuration document avec canvas personnalisé
     doc = SimpleDocTemplate(
         output_path,
         pagesize=A4,
-        rightMargin=14 * mm,
-        leftMargin=14 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
-        title="Rapport Multimodal",
-        author="ALGO-LIFE / UNILABS",
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2.5*cm,
+        bottomMargin=2*cm
+    )
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    
+    style_title = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=32,
+        textColor=PRIMARY_BLUE,
+        spaceAfter=10,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    style_subtitle = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Normal'],
+        fontSize=14,
+        textColor=GREY_MEDIUM,
+        alignment=TA_CENTER,
+        fontName='Helvetica',
+        spaceAfter=20
+    )
+    
+    style_section = ParagraphStyle(
+        'SectionTitle',
+        parent=styles['Heading2'],
+        fontSize=16,
+        textColor=PRIMARY_BLUE,
+        spaceBefore=20,
+        spaceAfter=12,
+        fontName='Helvetica-Bold',
+        borderWidth=0,
+        borderPadding=8,
+        leftIndent=0
+    )
+    
+    style_subsection = ParagraphStyle(
+        'Subsection',
+        parent=styles['Heading3'],
+        fontSize=13,
+        textColor=ACCENT_CYAN,
+        spaceBefore=15,
+        spaceAfter=8,
+        fontName='Helvetica-Bold'
+    )
+    
+    style_body = ParagraphStyle(
+        'BodyText',
+        parent=styles['BodyText'],
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY
+    )
+    
+    style_body_left = ParagraphStyle(
+        'BodyTextLeft',
+        parent=style_body,
+        alignment=TA_LEFT
+    )
+    
+    story = []
+    # ─────────────────────────────────────────────────────────────────
+    # NORMALISATION (évite biomarqueurs vides / 0.00 quand les clés diffèrent)
+    # ─────────────────────────────────────────────────────────────────
+    biology_data = normalize_biology_data(biology_data)
+
+    # Si toujours vide, on garde une trace visible (plutôt qu'un rapport vide qui ressemble à un bug)
+    if not biology_data:
+        # On n'interrompt pas la génération (microbiote/reco peuvent exister),
+        # mais on affichera un message clair dans le rapport.
+        biology_data = []
+
+
+    
+    # ═════════════════════════════════════════════════════════════════
+    # PAGE DE GARDE
+    # ═════════════════════════════════════════════════════════════════
+    
+    # Logo DNA
+    logo = create_dna_logo(width=6*cm, height=6*cm)
+    story.append(logo)
+    story.append(Spacer(1, 1*cm))
+    
+    # Titres
+    story.append(Paragraph("Rapport d'Analyses Biologiques", style_title))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(
+        '<font color="#0066CC"><b>UNILABS</b></font> <font color="#00BCD4">× ALGO-LIFE</font>',
+        ParagraphStyle('BrandTitle', parent=style_title, fontSize=24, spaceAfter=5)
+    ))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph("Analyse complète et recommandations personnalisées", style_subtitle))
+    story.append(Spacer(1, 2*cm))
+    
+    # Informations patient dans un cadre
+    patient_name = _safe_str(patient_data.get("name", ""))
+    patient_sex = _safe_str(patient_data.get("sex", ""))
+    patient_birth = _safe_str(patient_data.get("birth_date", ""))
+    report_date = _safe_str(patient_data.get("report_date", datetime.now().strftime("%d/%m/%Y")))
+    
+    patient_info_data = [
+        [Paragraph("<b>PATIENT</b>", style_body), Paragraph(patient_name, style_body)],
+        [Paragraph("<b>GENRE</b>", style_body), Paragraph(patient_sex, style_body)],
+        [Paragraph("<b>DATE DE NAISSANCE</b>", style_body), Paragraph(patient_birth, style_body)],
+        [Paragraph("<b>DATE DU RAPPORT</b>", style_body), Paragraph(report_date, style_body)],
+    ]
+    
+    patient_table = Table(patient_info_data, colWidths=[6*cm, 10*cm])
+    patient_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), BACKGROUND_LIGHT),
+        ('BOX', (0, 0), (-1, -1), 1.5, PRIMARY_BLUE),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.5, GREY_LIGHT),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LEFTPADDING', (0, 0), (-1, -1), 15),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+    ]))
+    
+    story.append(patient_table)
+    story.append(Spacer(1, 1.5*cm))
+    
+    # Contexte clinique
+    clinical_context = _safe_str(patient_data.get("clinical_context", ""))
+    if clinical_context:
+        story.append(Paragraph("Contexte clinique", style_subsection))
+        story.append(Paragraph(f"• {clinical_context}", style_body_left))
+        story.append(Spacer(1, 1*cm))
+    
+    # Âge biologique
+    if bio_age_result:
+        bio_age = _safe_float(bio_age_result.get("biological_age"), 0)
+        chrono_age = _safe_float(bio_age_result.get("chronological_age"), 0)
+        delta = _safe_float(bio_age_result.get("delta"), 0)
+        
+        story.append(Paragraph("Âge Biologique", style_subsection))
+        
+        age_data = [
+            [Paragraph("<b>Âge Biologique</b>", style_body), 
+             Paragraph(f'<font size="18" color="#0066CC"><b>{bio_age:.1f} ans</b></font>', style_body)],
+            [Paragraph("Chronologique :", style_body), Paragraph(f"{chrono_age:.1f} ans", style_body)],
+            [Paragraph("Delta :", style_body), 
+             Paragraph(f'<font color="{"#4CAF50" if delta < 0 else "#F44336"}">{delta:+.1f} ans ({delta/chrono_age*100:+.1f}%)</font>', style_body)],
+        ]
+        
+        age_table = Table(age_data, colWidths=[7*cm, 9*cm])
+        age_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#E3F2FD")),
+            ('BOX', (0, 0), (-1, -1), 1, ACCENT_CYAN),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 15),
+        ]))
+        
+        story.append(age_table)
+        story.append(Spacer(1, 0.5*cm))
+        
+        interpretation = bio_age_result.get("interpretation", "")
+        if interpretation:
+            story.append(Paragraph(interpretation, style_body_left))
+    
+    story.append(Spacer(1, 1*cm))
+    story.append(Paragraph(
+        "<b>CONFIDENTIEL - Usage médical uniquement</b>",
+        ParagraphStyle('Conf', parent=style_body, fontSize=9, alignment=TA_CENTER, textColor=CRITICAL_RED)
+    ))
+    
+    story.append(PageBreak())
+    
+    # ═════════════════════════════════════════════════════════════════
+    # RÉSUMÉ GLOBAL DES BIOMARQUEURS
+    # ═════════════════════════════════════════════════════════════════
+    
+    if not biology_data:
+        story.append(Paragraph("Résumé global des biomarqueurs", style_section))
+        story.append(Paragraph("Aucun biomarqueur exploitable n'a été reçu par le générateur PDF (format/clé non reconnus).", style_body_left))
+        story.append(Spacer(1, 0.8*cm))
+    else:
+        story.append(Paragraph("Résumé global des biomarqueurs", style_section))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Compter les statuts
+        normal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() == "normal"])
+        to_watch_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["à surveiller","a surveiller","surveiller","borderline","limite","inconnu","unknown"]])
+        abnormal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["bas","faible","low","élevé","elevé","haut","high","anormal","abnormal"]])
+        
+        # Créer des cercles colorés avec les chiffres
+        summary_drawing = Drawing(16*cm, 3*cm)
+        
+        # Cercle Normaux (vert)
+        circle1 = Circle(2*cm, 1.5*cm, 1*cm)
+        circle1.fillColor = NORMAL_GREEN
+        circle1.strokeColor = NORMAL_GREEN
+        circle1.strokeWidth = 3
+        summary_drawing.add(circle1)
+        
+        label1_count = String(2*cm, 1.5*cm, str(normal_count))
+        label1_count.fontName = 'Helvetica-Bold'
+        label1_count.fontSize = 24
+        label1_count.fillColor = WHITE
+        label1_count.textAnchor = 'middle'
+        summary_drawing.add(label1_count)
+        
+        label1_text = String(2*cm, 0.3*cm, "Normaux")
+        label1_text.fontName = 'Helvetica'
+        label1_text.fontSize = 11
+        label1_text.fillColor = GREY_DARK
+        label1_text.textAnchor = 'middle'
+        summary_drawing.add(label1_text)
+        
+        # Cercle À surveiller (orange)
+        circle2 = Circle(8*cm, 1.5*cm, 1*cm)
+        circle2.fillColor = WARNING_ORANGE
+        circle2.strokeColor = WARNING_ORANGE
+        circle2.strokeWidth = 3
+        summary_drawing.add(circle2)
+        
+        label2_count = String(8*cm, 1.5*cm, str(to_watch_count))
+        label2_count.fontName = 'Helvetica-Bold'
+        label2_count.fontSize = 24
+        label2_count.fillColor = WHITE
+        label2_count.textAnchor = 'middle'
+        summary_drawing.add(label2_count)
+        
+        label2_text = String(8*cm, 0.3*cm, "À surveiller")
+        label2_text.fontName = 'Helvetica'
+        label2_text.fontSize = 11
+        label2_text.fillColor = GREY_DARK
+        label2_text.textAnchor = 'middle'
+        summary_drawing.add(label2_text)
+        
+        # Cercle Anormaux (rouge)
+        circle3 = Circle(14*cm, 1.5*cm, 1*cm)
+        circle3.fillColor = CRITICAL_RED
+        circle3.strokeColor = CRITICAL_RED
+        circle3.strokeWidth = 3
+        summary_drawing.add(circle3)
+        
+        label3_count = String(14*cm, 1.5*cm, str(abnormal_count))
+        label3_count.fontName = 'Helvetica-Bold'
+        label3_count.fontSize = 24
+        label3_count.fillColor = WHITE
+        label3_count.textAnchor = 'middle'
+        summary_drawing.add(label3_count)
+        
+        label3_text = String(14*cm, 0.3*cm, "Anormaux")
+        label3_text.fontName = 'Helvetica'
+        label3_text.fontSize = 11
+        label3_text.fillColor = GREY_DARK
+        label3_text.textAnchor = 'middle'
+        summary_drawing.add(label3_text)
+        
+        story.append(summary_drawing)
+        story.append(Spacer(1, 1.5*cm))
+    
+    # ═════════════════════════════════════════════════════════════════
+    # BIOMARQUEURS PAR CATÉGORIE
+    # ═════════════════════════════════════════════════════════════════
+    
+    if biology_data and len(biology_data) > 0:
+        story.append(PageBreak())
+        story.append(Paragraph("Biomarqueurs", style_section))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Grouper par catégorie
+        categories = {}
+        for biomarker in biology_data:
+            category = _safe_str(biomarker.get("category", "Autres"))
+            if not category:
+                category = "Autres"
+            
+            if category not in categories:
+                categories[category] = []
+            
+            categories[category].append(biomarker)
+        
+        # Afficher chaque catégorie
+        for category, biomarkers in categories.items():
+            story.append(Paragraph(category, style_subsection))
+            story.append(Spacer(1, 0.3*cm))
+            
+            for i, biomarker in enumerate(biomarkers):
+                # Créer la jauge
+                gauge = create_biomarker_gauge(biomarker)
+                story.append(gauge)
+                story.append(Spacer(1, 1*cm))
+                
+                # Saut de page tous les 6 biomarqueurs (au lieu de 7)
+                if (i + 1) % 6 == 0 and i < len(biomarkers) - 1:
+                    story.append(PageBreak())
+            
+            story.append(Spacer(1, 0.5*cm))
+        
+        story.append(PageBreak())
+    
+    
+    # ═════════════════════════════════════════════════════════════════
+    # MICROBIOTE (TABLEAUX SOUS LA BIOLOGIE)
+    # ═════════════════════════════════════════════════════════════════
+    if microbiome_data:
+        story.append(Paragraph("Microbiote", style_section))
+        story.append(Spacer(1, 0.5*cm))
+
+        di = microbiome_data.get("dysbiosis_index")
+        diversity = _safe_str(microbiome_data.get("diversity", ""))
+        div_metrics = microbiome_data.get("diversity_metrics") or {}
+
+        summary_rows = [
+            [Paragraph("<b>Indice de dysbiose (DI)</b>", style_body), Paragraph(_safe_str(di), style_body)],
+            [Paragraph("<b>Diversité</b>", style_body), Paragraph(diversity or "Non disponible", style_body)],
+        ]
+        if isinstance(div_metrics, dict) and div_metrics:
+            sh = div_metrics.get("shannon")
+            si = div_metrics.get("simpson")
+            if sh is not None:
+                summary_rows.append([Paragraph("Shannon", style_body), Paragraph(_safe_str(sh), style_body)])
+            if si is not None:
+                summary_rows.append([Paragraph("Simpson", style_body), Paragraph(_safe_str(si), style_body)])
+
+        micro_table = Table(summary_rows, colWidths=[7*cm, 9*cm])
+        micro_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F3F7FF")),
+            ('BOX', (0, 0), (-1, -1), 1.2, ACCENT_CYAN),
+            ('INNERGRID', (0, 0), (-1, -1), 0.25, GREY_LIGHT),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(micro_table)
+        story.append(Spacer(1, 0.8*cm))
+
+        # Groupes (résumé)
+        groups = microbiome_data.get("bacteria_groups") or []
+        if isinstance(groups, list) and groups:
+            story.append(Paragraph("Résumé par groupes", style_subsection))
+            gdata = [[Paragraph("<b>Groupe</b>", style_body), Paragraph("<b>Résultat</b>", style_body)]]
+            for g in groups[:18]:
+                gname = _safe_str(g.get("group", g.get("category", "")))
+                gres = _safe_str(g.get("result", ""))
+                gdata.append([Paragraph(gname, style_body_left), Paragraph(gres, style_body_left)])
+            gtab = Table(gdata, colWidths=[12*cm, 4*cm])
+            gtab.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#E0F7FA")),
+                ('BOX', (0, 0), (-1, -1), 1.0, ACCENT_CYAN),
+                ('INNERGRID', (0, 0), (-1, -1), 0.25, GREY_LIGHT),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(gtab)
+            story.append(Spacer(1, 0.8*cm))
+
+        # Bactéries individuelles (top)
+        indiv = microbiome_data.get("bacteria_individual") or []
+        if isinstance(indiv, list) and indiv:
+            story.append(Paragraph("Bactéries individuelles (extrait)", style_subsection))
+            idata = [[Paragraph("<b>ID</b>", style_body), Paragraph("<b>Bactérie</b>", style_body), Paragraph("<b>Cat.</b>", style_body)]]
+            for b in indiv[:30]:
+                idata.append([
+                    Paragraph(_safe_str(b.get("id", "")), style_body_left),
+                    Paragraph(_safe_str(b.get("name", "")), style_body_left),
+                    Paragraph(_safe_str(b.get("category", "")), style_body_left),
+                ])
+            itab = Table(idata, colWidths=[1.5*cm, 12.5*cm, 2*cm])
+            itab.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
+                ('BOX', (0, 0), (-1, -1), 1.0, PRIMARY_BLUE),
+                ('INNERGRID', (0, 0), (-1, -1), 0.25, GREY_LIGHT),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(itab)
+
+        story.append(PageBreak())
+
+    # ═════════════════════════════════════════════════════════════════
+    # RECOMMANDATIONS PERSONNALISÉES
+    # ═════════════════════════════════════════════════════════════════
+    
+    if recommendations:
+        story.append(Paragraph("■ RECOMMANDATIONS PERSONNALISÉES", style_section))
+        story.append(Spacer(1, 0.5*cm))
+        
+        story.append(Paragraph(
+            "Ces recommandations sont générées automatiquement par ALGO-LIFE sur la base de votre profil "
+            "multimodal (biologie + microbiote). Elles visent à optimiser votre santé selon une approche de biologie fonctionnelle.",
+            style_body
+        ))
+        story.append(Spacer(1, 0.3*cm))
+        
+        # Avertissement
+        warning_style = ParagraphStyle(
+            'Warning',
+            parent=style_body,
+            backColor=colors.HexColor("#FFF3E0"),
+            borderColor=WARNING_ORANGE,
+            borderWidth=1.5,
+            borderPadding=12,
+            fontSize=10
+        )
+        story.append(Paragraph(
+            "<b>⚠️ Important:</b> Ces suggestions ne remplacent pas un avis médical. "
+            "Consultez votre médecin avant toute nouvelle supplémentation.",
+            warning_style
+        ))
+        story.append(Spacer(1, 0.8*cm))
+        
+        # Sections de recommandations avec codes couleur
+        sections_config = [
+            ("Prioritaires", "🔥", CRITICAL_RED),
+            ("À surveiller", "⚠️", WARNING_ORANGE),
+            ("Nutrition", "🥗", NORMAL_GREEN),
+            ("Micronutrition", "💊", ACCENT_CYAN),
+            ("Hygiène de vie", "🏃", PRIMARY_BLUE),
+            ("Examens complémentaires", "🔬", DNA_PURPLE),
+            ("Suivi", "📅", GREY_DARK)
+        ]
+        
+        for section_name, icon, color in sections_config:
+            items = recommendations.get(section_name, [])
+            if not items:
+                continue
+            
+            # Créer la boîte de recommandation
+            reco_box = create_recommendation_box(f"{icon} {section_name}", items, color)
+            story.append(reco_box)
+            story.append(Spacer(1, 0.7*cm))
+        
+        story.append(PageBreak())
+    
+    # ═════════════════════════════════════════════════════════════════
+    # PLAN DE SUIVI
+    # ═════════════════════════════════════════════════════════════════
+    
+    if follow_up:
+        story.append(Paragraph("Plan de suivi recommandé", style_section))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Prochain contrôle
+        next_date = _safe_str(follow_up.get("next_date", ""))
+        if next_date:
+            story.append(Paragraph(
+                f'<font color="#0066CC">■</font> <b>Prochain contrôle</b>',
+                style_subsection
+            ))
+            story.append(Paragraph(next_date, style_body_left))
+            story.append(Spacer(1, 0.5*cm))
+        
+        # Biomarqueurs à recontrôler
+        next_tests = follow_up.get("next_tests", [])
+        if next_tests:
+            story.append(Paragraph(
+                f'<font color="#0066CC">■</font> <b>Biomarqueurs à recontrôler</b>',
+                style_subsection
+            ))
+            
+            for test in next_tests:
+                story.append(Paragraph(f"• {test}", style_body_left))
+            
+            story.append(Spacer(1, 0.5*cm))
+        
+        # Objectifs mesurables
+        objectives = _safe_str(follow_up.get("objectives", ""))
+        if objectives:
+            story.append(Paragraph(
+                f'<font color="#4CAF50">■</font> <b>Objectifs mesurables</b>',
+                style_subsection
+            ))
+            story.append(Paragraph(objectives, style_body_left))
+            story.append(Spacer(1, 0.5*cm))
+        
+        # Observations
+        observations = _safe_str(follow_up.get("observations", ""))
+        if observations:
+            story.append(Paragraph(
+                f'<font color="#FF9800">■</font> <b>Observations</b>',
+                style_subsection
+            ))
+            story.append(Paragraph(observations, style_body_left))
+    
+    # ═════════════════════════════════════════════════════════════════
+    # FOOTER FINAL
+    # ═════════════════════════════════════════════════════════════════
+    
+    story.append(PageBreak())
+    story.append(Spacer(1, 3*cm))
+    
+    footer_style = ParagraphStyle(
+        'FooterFinal',
+        parent=styles['Normal'],
+        fontSize=9,
+        alignment=TA_CENTER,
+        textColor=GREY_MEDIUM
+    )
+    
+    story.append(Paragraph('<font color="#0066CC"><b>ALGO-LIFE © 2026</b></font>', footer_style))
+    story.append(Paragraph("Powered by UNILABS Group", footer_style))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph("Dr Thibault SUTTER, PhD", footer_style))
+    story.append(Paragraph("Biologiste spécialisé en biologie fonctionnelle", footer_style))
+    story.append(Paragraph("15+ années d'expertise en médecine fonctionnelle", footer_style))
+    story.append(Spacer(1, 1*cm))
+    story.append(Paragraph(
+        "Ce rapport est généré automatiquement par analyse multimodale IA.<br/>"
+        "Il ne remplace pas un avis médical personnalisé.",
+        footer_style
+    ))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph("■ contact@algo-life.com | ■ www.algo-life.com", footer_style))
+    story.append(Paragraph("■ Genève, Suisse", footer_style))
+    
+    # Build PDF avec le canvas personnalisé
+    doc.build(story, canvasmaker=NumberedCanvas)
+    
+    return output_path
+
+
+def generate_multimodal_report(*args, **kwargs) -> str:
+    """Point d’entrée unique (compatibilité maximale).
+
+    Cas supportés:
+    1) Nouveau format (recommandé) : generate_multimodal_report(payload: dict)
+       payload = {
+         "patient": {...} ou "patient_data": {...},
+         "biology": [...] ou "biology_data": ...,
+         "microbiome": {...} ou "microbiome_data": {...},
+         "recommendations": {...},
+         "cross_analysis": [...],
+         "follow_up": {...},
+         "bio_age_result": {...},
+         "output_path": "..."
+       }
+
+    2) Ancien format : generate_multimodal_report(patient_data=..., biology_data=..., ...)
+       (mêmes paramètres que generate_unilabs_report)
+    """
+    # --- 1) Appel avec payload dict unique
+    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        payload = args[0]
+
+        patient_data = payload.get("patient_data") or payload.get("patient") or {}
+        biology_data = payload.get("biology_data") or payload.get("biology") or []
+        microbiome_data = payload.get("microbiome_data") or payload.get("microbiome") or payload.get("microbiote") or None
+        recommendations = payload.get("recommendations") or payload.get("reco") or None
+        cross_analysis = payload.get("cross_analysis") or payload.get("cross") or None
+        follow_up = payload.get("follow_up") or payload.get("suivi") or None
+        bio_age_result = payload.get("bio_age_result") or payload.get("bio_age") or None
+        output_path = payload.get("output_path") or payload.get("output") or "rapport_algo_life.pdf"
+
+        return generate_unilabs_report(
+            patient_data=patient_data,
+            biology_data=biology_data,
+            microbiome_data=microbiome_data,
+            recommendations=recommendations,
+            cross_analysis=cross_analysis,
+            follow_up=follow_up,
+            bio_age_result=bio_age_result,
+            output_path=output_path,
+        )
+
+    # --- 2) Appel “ancien style” (kwargs)
+    return generate_unilabs_report(
+        patient_data=kwargs.get("patient_data", args[0] if len(args) > 0 else {}),
+        biology_data=kwargs.get("biology_data", args[1] if len(args) > 1 else []),
+        microbiome_data=kwargs.get("microbiome_data", args[2] if len(args) > 2 else None),
+        recommendations=kwargs.get("recommendations", args[3] if len(args) > 3 else None),
+        cross_analysis=kwargs.get("cross_analysis", args[4] if len(args) > 4 else None),
+        follow_up=kwargs.get("follow_up", args[5] if len(args) > 5 else None),
+        bio_age_result=kwargs.get("bio_age_result", kwargs.get("bio_age", None)),
+        output_path=kwargs.get("output_path", "rapport_algo_life.pdf"),
     )
 
-    story: List[Any] = []
 
-    # Header band
-    story.append(_header_band(A4[0] - 28 * mm, 44, patient))
-    story.append(Spacer(1, 10))
-
-    # Intro
-    story.append(Paragraph("Synthèse", STYLE_H2))
-    story.append(_summary_table(counts))
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("Ce rapport présente une lecture multimodale des données biologiques et microbiote.", STYLE_BODY))
-    story.append(Spacer(1, 10))
-    story.append(HR(A4[0] - 28 * mm))
-    story.append(Spacer(1, 10))
-
-    # Biology section
-    story.append(Paragraph("Biologie — Biomarqueurs", STYLE_H2))
-    if not biology_rows:
-        story.append(Paragraph(
-            "Aucun biomarqueur exploitable n'a été reçu par le générateur PDF. "
-            "Cause la plus fréquente : clés inattendues (ex: 'Biomarqueur', 'Valeur', 'Unité', 'Référence', 'Statut'). "
-            "Ce fichier est patché pour les accepter ; si c'est encore vide, alors le payload envoyé est réellement vide.",
-            STYLE_SMALL
-        ))
-    else:
-        # Reduce to safe strings
-        cleaned = []
-        for r in biology_rows:
-            cleaned.append({
-                "name": _clean_str(r.get("name")),
-                "value": r.get("value", ""),
-                "unit": _clean_str(r.get("unit")),
-                "reference": _clean_str(r.get("reference")),
-                "status": _normalize_status(r.get("status")),
-                "category": _clean_str(r.get("category")),
-            })
-        story.append(_biomarker_row_table(cleaned))
-    story.append(PageBreak())
-
-    # Microbiome section
-    story.append(Paragraph("Microbiote — Résumé", STYLE_H2))
-    story.extend(_microbiome_section(raw_microbiome if isinstance(raw_microbiome, dict) else {}))
-
-    # Footer note
-    story.append(Spacer(1, 10))
-    story.append(HR(A4[0] - 28 * mm))
-    story.append(Spacer(1, 6))
-    story.append(Paragraph(
-        "Note: Les interprétations fournies sont informatives et doivent être corrélées au contexte clinique.",
-        STYLE_SMALL
-    ))
-
-    doc.build(story)
-    return output_path
+# =====================================================================
+# EXEMPLE D'UTILISATION
+# =====================================================================
+if __name__ == "__main__":
+    # Données de test
+    patient_data = {
+        "name": "Isabelle FISCHER",
+        "sex": "F",
+        "birth_date": "20/10/1961",
+        "report_date": "16/12/2025",
+        "clinical_context": "Fatigue chronique"
+    }
+    
+    biology_data = [
+        {
+            "name": "Hémoglobine",
+            "value": 14.1,
+            "unit": "g/dL",
+            "reference": "12.0-16.0",
+            "status": "Normal",
+            "category": "Hematologie"
+        },
+        {
+            "name": "Cholestérol total",
+            "value": 2.47,
+            "unit": "g/L",
+            "reference": "1.8-1.9",
+            "status": "Élevé",
+            "category": "Bilan Lipidique"
+        },
+        {
+            "name": "LDL Cholestérol",
+            "value": 1.75,
+            "unit": "g/L",
+            "reference": "1.0-1.3",
+            "status": "Élevé",
+            "category": "Bilan Lipidique"
+        },
+        {
+            "name": "Vitamine D (25-OH totale D2+D3)",
+            "value": 43.7,
+            "unit": "ng/mL",
+            "reference": "30.0-60.0",
+            "status": "Normal",
+            "category": "Vitamines"
+        },
+    ]
+    
+    recommendations = {
+        "À surveiller": [
+            "Cholestérol total: Élevé (2.47 g/L)",
+            "LDL Cholestérol: Élevé (1.75 g/L)"
+        ],
+        "Nutrition": [
+            "Privilégiez un régime de type méditerranéen riche en polyphénols",
+            "Consommez 3-4 portions de poissons gras par semaine",
+            "Limitez les viandes rouges à 1-2 fois par semaine"
+        ],
+        "Micronutrition": [
+            "Oméga-3 EPA/DHA (ratio 2:1) : 2000 mg/jour",
+            "Berbérine : 500 mg, 2 fois par jour"
+        ]
+    }
+    
+    follow_up = {
+        "next_date": "2026-02-16",
+        "next_tests": ["Cholestérol total", "LDL Cholestérol", "Homocystéine"],
+        "objectives": "Réduire le LDL Cholestérol à moins de 1.00 g/L"
+    }
+    
+    bio_age_result = {
+        "biological_age": 64.0,
+        "chronological_age": 64.2,
+        "delta": -0.2,
+        "interpretation": "Bon - Âge en accord avec âge chronologique"
+    }
+    
+    # Générer le PDF
+    output = generate_unilabs_report(
+        patient_data=patient_data,
+        biology_data=biology_data,
+        recommendations=recommendations,
+        follow_up=follow_up,
+        bio_age_result=bio_age_result,
+        output_path="/tmp/test_rapport_unilabs.pdf"
+    )
+    
+    print(f"✅ Rapport généré : {output}")
