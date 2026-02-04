@@ -230,9 +230,9 @@ def create_biomarker_gauge(biomarker: Dict[str, Any], width: float = 16*cm, heig
     # Couleur du statut
     if status == "Normal" or status == "normal":
         status_color = NORMAL_GREEN
-    elif status == "Bas" or status == "bas":
+    elif status.lower() in ["bas","faible","low"]:
         status_color = WARNING_ORANGE
-    elif status == "Élevé" or status == "élevé" or status == "Elevé":
+    elif status.lower() in ["élevé","elevé","haut","high"]:
         status_color = CRITICAL_RED
     else:
         status_color = GREY_MEDIUM
@@ -591,6 +591,13 @@ def generate_unilabs_report(
     # ─────────────────────────────────────────────────────────────────
     biology_data = normalize_biology_data(biology_data)
 
+    # Si toujours vide, on garde une trace visible (plutôt qu'un rapport vide qui ressemble à un bug)
+    if not biology_data:
+        # On n'interrompt pas la génération (microbiote/reco peuvent exister),
+        # mais on affichera un message clair dans le rapport.
+        biology_data = []
+
+
     
     # ═════════════════════════════════════════════════════════════════
     # PAGE DE GARDE
@@ -697,14 +704,18 @@ def generate_unilabs_report(
     # RÉSUMÉ GLOBAL DES BIOMARQUEURS
     # ═════════════════════════════════════════════════════════════════
     
-    if biology_data and len(biology_data) > 0:
+    if not biology_data:
+        story.append(Paragraph("Résumé global des biomarqueurs", style_section))
+        story.append(Paragraph("Aucun biomarqueur exploitable n'a été reçu par le générateur PDF (format/clé non reconnus).", style_body_left))
+        story.append(Spacer(1, 0.8*cm))
+    else:
         story.append(Paragraph("Résumé global des biomarqueurs", style_section))
         story.append(Spacer(1, 0.5*cm))
         
         # Compter les statuts
         normal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() == "normal"])
-        to_watch_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["à surveiller", "a surveiller", "inconnu", "unknown"]])
-        abnormal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["bas", "élevé", "elevé", "anormal"]])
+        to_watch_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["à surveiller","a surveiller","surveiller","borderline","limite","inconnu","unknown"]])
+        abnormal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["bas","faible","low","élevé","elevé","haut","high","anormal","abnormal"]])
         
         # Créer des cercles colorés avec les chiffres
         summary_drawing = Drawing(16*cm, 3*cm)
@@ -902,7 +913,7 @@ def generate_unilabs_report(
 
         story.append(PageBreak())
 
-# ═════════════════════════════════════════════════════════════════
+    # ═════════════════════════════════════════════════════════════════
     # RECOMMANDATIONS PERSONNALISÉES
     # ═════════════════════════════════════════════════════════════════
     
@@ -1044,43 +1055,59 @@ def generate_unilabs_report(
     return output_path
 
 
-def generate_multimodal_report(
-    patient_data: Dict[str, Any],
-    biology_data: List[Dict[str, Any]],
-    microbiome_data: Dict[str, Any],
-    recommendations: Dict[str, List[str]],
-    cross_analysis: List[Dict[str, Any]],
-    follow_up: Dict[str, Any],
-    bio_age_result: Optional[Dict[str, Any]] = None,
-    output_path: str = "rapport_algo_life.pdf"
-) -> str:
+def generate_multimodal_report(*args, **kwargs) -> str:
+    """Point d’entrée unique (compatibilité maximale).
+
+    Cas supportés:
+    1) Nouveau format (recommandé) : generate_multimodal_report(payload: dict)
+       payload = {
+         "patient": {...} ou "patient_data": {...},
+         "biology": [...] ou "biology_data": ...,
+         "microbiome": {...} ou "microbiome_data": {...},
+         "recommendations": {...},
+         "cross_analysis": [...],
+         "follow_up": {...},
+         "bio_age_result": {...},
+         "output_path": "..."
+       }
+
+    2) Ancien format : generate_multimodal_report(patient_data=..., biology_data=..., ...)
+       (mêmes paramètres que generate_unilabs_report)
     """
-    Fonction wrapper pour compatibilité avec l'ancien code
-    Génère un rapport PDF multimodal avec templates visuels
-    
-    Args:
-        patient_data: Informations patient
-        biology_data: Liste des biomarqueurs
-        microbiome_data: Données microbiome
-        recommendations: Dict avec clés Prioritaires, Nutrition, Micronutrition, etc.
-        cross_analysis: Analyses croisées
-        follow_up: Plan de suivi
-        bio_age_result: Résultat âge biologique (optionnel)
-        output_path: Chemin de sortie
-    
-    Returns:
-        Chemin du fichier généré
-    """
-    # Appeler la fonction principale avec les nouveaux paramètres
+    # --- 1) Appel avec payload dict unique
+    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        payload = args[0]
+
+        patient_data = payload.get("patient_data") or payload.get("patient") or {}
+        biology_data = payload.get("biology_data") or payload.get("biology") or []
+        microbiome_data = payload.get("microbiome_data") or payload.get("microbiome") or payload.get("microbiote") or None
+        recommendations = payload.get("recommendations") or payload.get("reco") or None
+        cross_analysis = payload.get("cross_analysis") or payload.get("cross") or None
+        follow_up = payload.get("follow_up") or payload.get("suivi") or None
+        bio_age_result = payload.get("bio_age_result") or payload.get("bio_age") or None
+        output_path = payload.get("output_path") or payload.get("output") or "rapport_algo_life.pdf"
+
+        return generate_unilabs_report(
+            patient_data=patient_data,
+            biology_data=biology_data,
+            microbiome_data=microbiome_data,
+            recommendations=recommendations,
+            cross_analysis=cross_analysis,
+            follow_up=follow_up,
+            bio_age_result=bio_age_result,
+            output_path=output_path,
+        )
+
+    # --- 2) Appel “ancien style” (kwargs)
     return generate_unilabs_report(
-        patient_data=patient_data,
-        biology_data=biology_data,
-        microbiome_data=microbiome_data,
-        recommendations=recommendations,
-        cross_analysis=cross_analysis,
-        follow_up=follow_up,
-        bio_age_result=bio_age_result,
-        output_path=output_path
+        patient_data=kwargs.get("patient_data", args[0] if len(args) > 0 else {}),
+        biology_data=kwargs.get("biology_data", args[1] if len(args) > 1 else []),
+        microbiome_data=kwargs.get("microbiome_data", args[2] if len(args) > 2 else None),
+        recommendations=kwargs.get("recommendations", args[3] if len(args) > 3 else None),
+        cross_analysis=kwargs.get("cross_analysis", args[4] if len(args) > 4 else None),
+        follow_up=kwargs.get("follow_up", args[5] if len(args) > 5 else None),
+        bio_age_result=kwargs.get("bio_age_result", kwargs.get("bio_age", None)),
+        output_path=kwargs.get("output_path", "rapport_algo_life.pdf"),
     )
 
 
