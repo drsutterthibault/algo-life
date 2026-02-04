@@ -1,5 +1,5 @@
 """
-UNILABS / ALGO-LIFE - Plateforme Multimodale v11.0
+UNILABS  Plateforme Multimodale v11.0
 ✅ Affichage complet des recommandations dans l'UI
 ✅ Segmentation claire : Prioritaires, À surveiller, Nutrition, Micronutrition, etc.
 ✅ Analyses croisées multimodales fonctionnelles
@@ -1278,7 +1278,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style="text-align: center; color: #666; padding: 20px;">
-        <strong>ALGO-LIFE © 2026</strong> | Powered by UNILABS Group<br>
+        <strong> Unilabs © 2026</strong> | Powered by UNILABS Group<br>
         Dr Thibault SUTTER, PhD - Biologiste spécialisé en biologie fonctionnelle<br>
         <em>Ce rapport est généré automatiquement par analyse multimodale IA.</em><br>
         <em>Il ne remplace pas un avis médical personnalisé.</em>
