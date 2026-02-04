@@ -216,6 +216,123 @@ def _microbiome_to_dataframe(bacteria: List[Dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+
+def _microbiome_get_groups(microbiome_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Compat: anciens extracteurs ('bacteria') vs nouveaux ('bacteria_groups')."""
+    if not microbiome_dict:
+        return []
+    groups = microbiome_dict.get("bacteria_groups")
+    if isinstance(groups, list) and groups:
+        return groups
+    legacy = microbiome_dict.get("bacteria")
+    if isinstance(legacy, list) and legacy:
+        return legacy
+    return []
+
+
+def _microbiome_get_individual(microbiome_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Bactéries individuelles (si dispo)."""
+    if not microbiome_dict:
+        return []
+    indiv = microbiome_dict.get("bacteria_individual")
+    return indiv if isinstance(indiv, list) else []
+
+
+def _microbiome_summary_dataframe(microbiome_dict: Dict[str, Any]) -> pd.DataFrame:
+    """Tableau résumé microbiote (à afficher sous la biologie)."""
+    if not microbiome_dict:
+        return pd.DataFrame()
+
+    di = microbiome_dict.get("dysbiosis_index")
+    diversity = microbiome_dict.get("diversity")
+
+    groups = _microbiome_get_groups(microbiome_dict)
+    expected = len([g for g in groups if str(g.get("result","")).lower().startswith("expected")])
+    slight = len([g for g in groups if "slightly" in str(g.get("result","")).lower()])
+    deviating = len([g for g in groups if "deviating" in str(g.get("result","")).lower() and "slightly" not in str(g.get("result","")).lower()])
+
+    # Top 5 groupes non attendus
+    non_ok = [g for g in groups if str(g.get("result","")).lower() != "expected"]
+    top_non_ok = ", ".join([f"{g.get('category','')}" for g in non_ok[:5]]) if non_ok else ""
+
+    rows = [
+        {"Paramètre": "Indice de dysbiose (DI)", "Valeur": f"{di}/5" if di is not None else "—", "Détail": ""},
+        {"Paramètre": "Diversité", "Valeur": diversity or "—", "Détail": ""},
+        {"Paramètre": "Groupes attendus", "Valeur": expected, "Détail": ""},
+        {"Paramètre": "Groupes légèrement déviants", "Valeur": slight, "Détail": ""},
+        {"Paramètre": "Groupes déviants", "Valeur": deviating, "Détail": ""},
+    ]
+    if top_non_ok:
+        rows.append({"Paramètre": "Catégories concernées (top)", "Valeur": top_non_ok, "Détail": "Groupes non attendus"})
+    return pd.DataFrame(rows)
+
+
+def _compute_cross_table(bio_df: pd.DataFrame, microbiome_dict: Dict[str, Any]) -> pd.DataFrame:
+    """Petit tableau lisible de signaux croisés Biologie × Microbiote (heuristiques simples)."""
+    if bio_df is None or bio_df.empty or not microbiome_dict:
+        return pd.DataFrame()
+
+    def _get_val(name_candidates: List[str]) -> Optional[float]:
+        for cand in name_candidates:
+            mask = bio_df["Biomarqueur"].astype(str).str.lower().str.contains(cand.lower(), na=False)
+            if mask.any():
+                v = bio_df.loc[mask, "Valeur"].iloc[0]
+                try:
+                    return float(str(v).replace(",", "."))
+                except Exception:
+                    return None
+        return None
+
+    def _get_status(name_candidates: List[str]) -> Optional[str]:
+        for cand in name_candidates:
+            mask = bio_df["Biomarqueur"].astype(str).str.lower().str.contains(cand.lower(), na=False)
+            if mask.any():
+                return str(bio_df.loc[mask, "Statut"].iloc[0])
+        return None
+
+    di = microbiome_dict.get("dysbiosis_index")
+    diversity = str(microbiome_dict.get("diversity") or "").lower()
+
+    # Flags bio
+    crp_status = _get_status(["crp"])
+    ferrit_status = _get_status(["ferritin", "ferritine"])
+    hb_status = _get_status(["hemoglobin", "hémoglobine", "hemoglobine"])
+    vitd_status = _get_status(["vitamin d", "25(oh)", "25-oh", "vit d"])
+
+    flags = []
+    if crp_status in ["Élevé", "Elevé", "High", "Haut"]:
+        flags.append(("Inflammation", "CRP élevée"))
+    if ferrit_status in ["Bas", "Low"] or hb_status in ["Bas", "Low"]:
+        flags.append(("Carence martiale", "Ferritine/Hb basses"))
+    if vitd_status in ["Bas", "Low"]:
+        flags.append(("Hypovitaminose D", "Vitamine D basse"))
+
+    # Micro flags
+    micro_flags = []
+    if isinstance(di, int) and di >= 3:
+        micro_flags.append(("Dysbiose", f"DI {di}/5"))
+    if "below" in diversity or "reduced" in diversity:
+        micro_flags.append(("Diversité basse", str(microbiome_dict.get("diversity"))))
+    if "as expected" in diversity:
+        micro_flags.append(("Diversité OK", str(microbiome_dict.get("diversity"))))
+
+    # Build cross rows
+    rows = []
+    for f in flags:
+        if f[0] == "Inflammation" and any(mf[0] == "Dysbiose" for mf in micro_flags):
+            rows.append({"Signal croisé": "Inflammation + Dysbiose", "Biologie": f[1], "Microbiote": f"DI={di}/5", "Lecture": "Terrain pro-inflammatoire possiblement entretenu par un déséquilibre du microbiote."})
+        if f[0] == "Carence martiale" and (("Diversité basse" in [mf[0] for mf in micro_flags]) or any(mf[0]=="Dysbiose" for mf in micro_flags)):
+            rows.append({"Signal croisé": "Carences + Microbiote", "Biologie": f[1], "Microbiote": (f"DI={di}/5" if di else "—"), "Lecture": "À discuter : absorption/terrain digestif (inflammation muqueuse, dysbiose) et apports."})
+        if f[0] == "Hypovitaminose D" and any(mf[0] == "Dysbiose" for mf in micro_flags):
+            rows.append({"Signal croisé": "Vit D basse + Dysbiose", "Biologie": f[1], "Microbiote": f"DI={di}/5", "Lecture": "Risque immuno-inflammatoire : associer correction Vit D et optimisation microbiote."})
+
+    # fallback: si rien
+    if not rows and (flags or micro_flags):
+        rows.append({"Signal croisé": "Synthèse", "Biologie": ", ".join([x[1] for x in flags]) or "—", "Microbiote": ", ".join([x[1] for x in micro_flags]) or "—", "Lecture": "Signaux présents mais pas de pattern croisé fort selon les heuristiques simples."})
+
+    return pd.DataFrame(rows)
+
+
 def _extract_biomarkers_for_bfrail(bio_df: pd.DataFrame) -> Dict[str, float]:
     """Extrait les biomarqueurs nécessaires au bFRAil Score"""
     markers = {}
@@ -265,6 +382,8 @@ def init_session_state():
         "biology_df": pd.DataFrame(),
         "microbiome_data": {},
         "microbiome_df": pd.DataFrame(),  # ✅ NOUVEAU : DataFrame pour tableau microbiote
+        "microbiome_summary_df": pd.DataFrame(),  # ✅ Résumé microbiote sous biologie
+        "cross_table_df": pd.DataFrame(),  # ✅ Tableau de signaux croisés
         "patient_info": {},
         "consolidated_recommendations": {},
         "cross_analysis": [],
@@ -439,9 +558,12 @@ with tabs[0]:
                         micro_excel_path = _file_to_temp_path(micro_excel, ".xlsx") if micro_excel else None
                         microbiome_dict = extract_idk_microbiome(micro_path, micro_excel_path)
                         st.session_state.microbiome_data = microbiome_dict
+
+                        # ✅ NOUVEAU : Tableau résumé microbiote (DI, diversité, groupes)
+                        st.session_state.microbiome_summary_df = _microbiome_summary_dataframe(microbiome_dict)
                         
                         # ✅ NOUVEAU : Créer le DataFrame microbiote pour tableau éditable
-                        bacteria = microbiome_dict.get("bacteria", [])
+                        bacteria = _microbiome_get_groups(microbiome_dict)
                         st.session_state.microbiome_df = _microbiome_to_dataframe(bacteria)
                     
                     # Génération des recommandations consolidées
@@ -454,6 +576,12 @@ with tabs[0]:
                         )
                         st.session_state.consolidated_recommendations = consolidated
                         st.session_state.cross_analysis = consolidated.get("cross_analysis", [])
+
+                        # ✅ NOUVEAU : Tableau de signaux croisés simple (fallback + UI)
+                        try:
+                            st.session_state.cross_table_df = _compute_cross_table(st.session_state.biology_df, microbiome_dict if microbiome_dict else st.session_state.microbiome_data)
+                        except Exception:
+                            st.session_state.cross_table_df = pd.DataFrame()
                     
                     # Calcul âge biologique si données disponibles
                     if not st.session_state.biology_df.empty:
@@ -544,6 +672,13 @@ with tabs[0]:
                     st.success("✅ Modifications des biomarqueurs sauvegardées !")
                     st.rerun()
         
+
+        # ✅ NOUVEAU : Résumé Microbiote (affiché sous le tableau biologie)
+        if not st.session_state.microbiome_summary_df.empty:
+            st.markdown("---")
+            st.markdown("### 🦠 Microbiote — Résumé (sous la biologie)")
+            st.dataframe(st.session_state.microbiome_summary_df, use_container_width=True, height=240)
+
         # Microbiote
         if st.session_state.microbiome_data:
             st.markdown("### 🦠 Microbiote")
@@ -559,7 +694,7 @@ with tabs[0]:
                 if div:
                     st.info(f"Diversité: {div}")
             
-            bacteria = micro.get("bacteria", [])
+            bacteria = _microbiome_get_groups(micro)
             if bacteria:
                 st.markdown(f"**{len(bacteria)} groupes bactériens analysés**")
                 
@@ -725,6 +860,12 @@ with tabs[1]:
                                 st.info(micro.get('interpretation'))
             
             # Analyses croisées
+            # ✅ Tableau synthèse des signaux croisés
+            if isinstance(st.session_state.get("cross_table_df"), pd.DataFrame) and not st.session_state.cross_table_df.empty:
+                st.markdown("---")
+                st.markdown("### 🔗 Signaux croisés — Tableau synthèse")
+                st.dataframe(st.session_state.cross_table_df, use_container_width=True, height=260)
+
             cross = st.session_state.cross_analysis
             if cross:
                 st.markdown("---")
@@ -760,6 +901,26 @@ with tabs[2]:
     else:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
+
+        # ✅ NOUVEAU : Focus Croisé (Biologie × Microbiote)
+        if isinstance(st.session_state.get("cross_table_df"), pd.DataFrame) and not st.session_state.cross_table_df.empty:
+            st.markdown("### 🔗 Focus Croisé (Biologie × Microbiote)")
+            st.dataframe(st.session_state.cross_table_df, use_container_width=True, height=240)
+            st.markdown("---")
+
+        if st.session_state.cross_analysis:
+            with st.expander("🔄 Analyses croisées détaillées", expanded=False):
+                for ca in st.session_state.cross_analysis:
+                    sev = ca.get("severity", "info")
+                    icon = {"critical":"🔴","warning":"🟠","info":"ℹ️"}.get(sev, "ℹ️")
+                    st.markdown(f"**{icon} {ca.get('title', 'Signal croisé')}**")
+                    if ca.get("description"):
+                        st.write(ca.get("description"))
+                    if ca.get("recommendations"):
+                        st.caption("Recommandations associées :")
+                        for r in ca.get("recommendations"):
+                            st.write(f"• {r}")
+                    st.markdown("---")
         
         if not any(recommendations.values()):
             st.info("ℹ️ Aucune recommandation spécifique générée")
