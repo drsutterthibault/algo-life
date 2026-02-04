@@ -96,6 +96,74 @@ def _parse_reference(ref_str: str) -> tuple[float, float]:
         return (0.0, 100.0)
 
 
+
+# =====================================================================
+# NORMALISATION DES ENTREES (compatibilité app / extractors / excel)
+# =====================================================================
+def normalize_biology_data(biology_data: Any) -> List[Dict[str, Any]]:
+    """Accepte plusieurs formats et retourne une liste de biomarqueurs au format attendu.
+
+    Formats acceptés:
+    - List[Dict] déjà au bon format: {"name","value","unit","reference","status","category"}
+    - Dict[str, Dict]: {"Ferritine": {"value":..., "unit":..., "reference":..., "status":...}, ...}
+    - List[Dict] au format app: {"biomarker"/"marqueur"/"name", "valeur"/"value", "unite"/"unit", "ref"/"reference", "statut"/"status", "category"/"categorie"}
+    """
+    if not biology_data:
+        return []
+
+    # 1) Dict mapping name -> fields
+    if isinstance(biology_data, dict):
+        out: List[Dict[str, Any]] = []
+        for k, v in biology_data.items():
+            if isinstance(v, dict):
+                out.append({
+                    "name": _safe_str(v.get("name", k)),
+                    "value": v.get("value", v.get("valeur", v.get("result", ""))),
+                    "unit": _safe_str(v.get("unit", v.get("unite", v.get("units", "")))),
+                    "reference": _safe_str(v.get("reference", v.get("ref", v.get("norme", v.get("range", ""))))),
+                    "status": _safe_str(v.get("status", v.get("statut", ""))),
+                    "category": _safe_str(v.get("category", v.get("categorie", "Autres"))) or "Autres",
+                })
+        return out
+
+    # 2) List of dicts
+    if isinstance(biology_data, list):
+        out: List[Dict[str, Any]] = []
+        for item in biology_data:
+            if not isinstance(item, dict):
+                continue
+
+            name = item.get("name") or item.get("biomarker") or item.get("marqueur") or item.get("parametre") or item.get("parameter")
+            # Si c'est un dict extrait brut type {"Ferritine": {...}} dans une liste
+            if name is None and len(item) == 1 and isinstance(next(iter(item.values())), dict):
+                k = next(iter(item.keys()))
+                v = next(iter(item.values()))
+                out.append({
+                    "name": _safe_str(v.get("name", k)),
+                    "value": v.get("value", v.get("valeur", v.get("result", ""))),
+                    "unit": _safe_str(v.get("unit", v.get("unite", v.get("units", "")))),
+                    "reference": _safe_str(v.get("reference", v.get("ref", v.get("norme", v.get("range", ""))))),
+                    "status": _safe_str(v.get("status", v.get("statut", ""))),
+                    "category": _safe_str(v.get("category", v.get("categorie", "Autres"))) or "Autres",
+                })
+                continue
+
+            out.append({
+                "name": _safe_str(name),
+                "value": item.get("value", item.get("valeur", item.get("result", ""))),
+                "unit": _safe_str(item.get("unit", item.get("unite", item.get("units", "")))),
+                "reference": _safe_str(item.get("reference", item.get("ref", item.get("norme", item.get("range", ""))))),
+                "status": _safe_str(item.get("status", item.get("statut", ""))),
+                "category": _safe_str(item.get("category", item.get("categorie", "Autres"))) or "Autres",
+            })
+
+        # Filtrer les entrées totalement vides
+        out = [b for b in out if b.get("name")]
+        return out
+
+    return []
+
+
 def create_dna_logo(width: float = 4*cm, height: float = 4*cm) -> Drawing:
     """
     Crée un logo ADN stylisé pour ALGO-LIFE
@@ -518,6 +586,11 @@ def generate_unilabs_report(
     )
     
     story = []
+    # ─────────────────────────────────────────────────────────────────
+    # NORMALISATION (évite biomarqueurs vides / 0.00 quand les clés diffèrent)
+    # ─────────────────────────────────────────────────────────────────
+    biology_data = normalize_biology_data(biology_data)
+
     
     # ═════════════════════════════════════════════════════════════════
     # PAGE DE GARDE
@@ -630,7 +703,7 @@ def generate_unilabs_report(
         
         # Compter les statuts
         normal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() == "normal"])
-        to_watch_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["à surveiller", "a surveiller"]])
+        to_watch_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["à surveiller", "a surveiller", "inconnu", "unknown"]])
         abnormal_count = len([b for b in biology_data if _safe_str(b.get("status", "")).lower() in ["bas", "élevé", "elevé", "anormal"]])
         
         # Créer des cercles colorés avec les chiffres
@@ -742,7 +815,94 @@ def generate_unilabs_report(
         
         story.append(PageBreak())
     
+    
     # ═════════════════════════════════════════════════════════════════
+    # MICROBIOTE (TABLEAUX SOUS LA BIOLOGIE)
+    # ═════════════════════════════════════════════════════════════════
+    if microbiome_data:
+        story.append(Paragraph("Microbiote", style_section))
+        story.append(Spacer(1, 0.5*cm))
+
+        di = microbiome_data.get("dysbiosis_index")
+        diversity = _safe_str(microbiome_data.get("diversity", ""))
+        div_metrics = microbiome_data.get("diversity_metrics") or {}
+
+        summary_rows = [
+            [Paragraph("<b>Indice de dysbiose (DI)</b>", style_body), Paragraph(_safe_str(di), style_body)],
+            [Paragraph("<b>Diversité</b>", style_body), Paragraph(diversity or "Non disponible", style_body)],
+        ]
+        if isinstance(div_metrics, dict) and div_metrics:
+            sh = div_metrics.get("shannon")
+            si = div_metrics.get("simpson")
+            if sh is not None:
+                summary_rows.append([Paragraph("Shannon", style_body), Paragraph(_safe_str(sh), style_body)])
+            if si is not None:
+                summary_rows.append([Paragraph("Simpson", style_body), Paragraph(_safe_str(si), style_body)])
+
+        micro_table = Table(summary_rows, colWidths=[7*cm, 9*cm])
+        micro_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F3F7FF")),
+            ('BOX', (0, 0), (-1, -1), 1.2, ACCENT_CYAN),
+            ('INNERGRID', (0, 0), (-1, -1), 0.25, GREY_LIGHT),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(micro_table)
+        story.append(Spacer(1, 0.8*cm))
+
+        # Groupes (résumé)
+        groups = microbiome_data.get("bacteria_groups") or []
+        if isinstance(groups, list) and groups:
+            story.append(Paragraph("Résumé par groupes", style_subsection))
+            gdata = [[Paragraph("<b>Groupe</b>", style_body), Paragraph("<b>Résultat</b>", style_body)]]
+            for g in groups[:18]:
+                gname = _safe_str(g.get("group", g.get("category", "")))
+                gres = _safe_str(g.get("result", ""))
+                gdata.append([Paragraph(gname, style_body_left), Paragraph(gres, style_body_left)])
+            gtab = Table(gdata, colWidths=[12*cm, 4*cm])
+            gtab.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#E0F7FA")),
+                ('BOX', (0, 0), (-1, -1), 1.0, ACCENT_CYAN),
+                ('INNERGRID', (0, 0), (-1, -1), 0.25, GREY_LIGHT),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(gtab)
+            story.append(Spacer(1, 0.8*cm))
+
+        # Bactéries individuelles (top)
+        indiv = microbiome_data.get("bacteria_individual") or []
+        if isinstance(indiv, list) and indiv:
+            story.append(Paragraph("Bactéries individuelles (extrait)", style_subsection))
+            idata = [[Paragraph("<b>ID</b>", style_body), Paragraph("<b>Bactérie</b>", style_body), Paragraph("<b>Cat.</b>", style_body)]]
+            for b in indiv[:30]:
+                idata.append([
+                    Paragraph(_safe_str(b.get("id", "")), style_body_left),
+                    Paragraph(_safe_str(b.get("name", "")), style_body_left),
+                    Paragraph(_safe_str(b.get("category", "")), style_body_left),
+                ])
+            itab = Table(idata, colWidths=[1.5*cm, 12.5*cm, 2*cm])
+            itab.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
+                ('BOX', (0, 0), (-1, -1), 1.0, PRIMARY_BLUE),
+                ('INNERGRID', (0, 0), (-1, -1), 0.25, GREY_LIGHT),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(itab)
+
+        story.append(PageBreak())
+
+# ═════════════════════════════════════════════════════════════════
     # RECOMMANDATIONS PERSONNALISÉES
     # ═════════════════════════════════════════════════════════════════
     
