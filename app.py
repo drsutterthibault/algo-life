@@ -829,10 +829,10 @@ with tabs[0]:
                     st.rerun()
         
 
-        # ✅ NOUVEAU : Résumé Microbiote (affiché sous le tableau biologie)
+        # ✅ NOUVEAU : Résumé Microbiote
         if not st.session_state.microbiome_summary_df.empty:
             st.markdown("---")
-            st.markdown("### 🦠 Microbiote — Résumé (sous la biologie)")
+            st.markdown("### 🦠 Microbiote")
             st.dataframe(st.session_state.microbiome_summary_df, use_container_width=True, height=240)
 
         # Microbiote
@@ -992,57 +992,112 @@ with tabs[1]:
                 for bio in filtered_bio:
                     priority = bio.get('priority')
                     
-                    # Couleurs selon priorité
+                    # Couleurs selon priorité avec badges élégants
                     if priority == 'critical':
-                        color = "#ef4444"
-                        bg_color = "#fee2e2"
-                        icon = "🔴"
-                        border_width = "3px"
+                        badge_color = "#dc2626"
+                        badge_bg = "#fef2f2"
+                        badge_text = "CRITIQUE"
+                        border_color = "#ef4444"
+                        card_bg = "#fff5f5"
                     elif priority == 'high':
-                        color = "#f59e0b"
-                        bg_color = "#fff7ed"
-                        icon = "🟠"
-                        border_width = "3px"
+                        badge_color = "#ea580c"
+                        badge_bg = "#fff7ed"
+                        badge_text = "ÉLEVÉ"
+                        border_color = "#f97316"
+                        card_bg = "#fffbeb"
                     elif priority == 'medium':
-                        color = "#eab308"
-                        bg_color = "#fef9c3"
-                        icon = "🟡"
-                        border_width = "2px"
+                        badge_color = "#0891b2"
+                        badge_bg = "#ecfeff"
+                        badge_text = "MOYEN"
+                        border_color = "#06b6d4"
+                        card_bg = "#f0fdfa"
                     else:
-                        color = "#10b981"
-                        bg_color = "#d1fae5"
-                        icon = "🟢"
-                        border_width = "2px"
+                        badge_color = "#059669"
+                        badge_bg = "#f0fdf4"
+                        badge_text = "NORMAL"
+                        border_color = "#10b981"
+                        card_bg = "#f6ffed"
+                    
+                    # Titre de l'expander avec badge
+                    title_html = f"""
+                        <span style="background: {badge_bg}; 
+                                     color: {badge_color}; 
+                                     padding: 4px 12px; 
+                                     border-radius: 12px;
+                                     font-weight: 700;
+                                     font-size: 11px;
+                                     letter-spacing: 0.5px;
+                                     margin-right: 10px;">
+                            {badge_text}
+                        </span>
+                        <span style="font-weight: 600; color: #1f2937;">
+                            {bio.get('biomarker')}
+                        </span>
+                        <span style="color: {badge_color}; font-weight: 600; margin: 0 8px;">
+                            {bio.get('status')}
+                        </span>
+                        <span style="color: #6b7280; font-size: 14px;">
+                            ({bio.get('value')} {bio.get('unit')})
+                        </span>
+                    """
                     
                     with st.expander(
-                        f"{icon} {bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
+                        f"{bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
                         expanded=(priority in ['critical', 'high'])
                     ):
-                        # Référence avec style
+                        # Badge priorité en haut
                         st.markdown(f"""
-                            <div style="background: {bg_color}; 
-                                        padding: 12px; 
-                                        border-radius: 8px;
-                                        border-left: {border_width} solid {color};
-                                        margin-bottom: 15px;">
-                                <p style="margin: 0; color: {color}; font-weight: 600; font-size: 14px;">
-                                    📊 Référence : {bio.get('reference')}
+                            <div style="margin-bottom: 15px;">
+                                <span style="background: {badge_bg}; 
+                                             color: {badge_color}; 
+                                             padding: 6px 16px; 
+                                             border-radius: 20px;
+                                             font-weight: 700;
+                                             font-size: 12px;
+                                             letter-spacing: 0.5px;
+                                             display: inline-block;">
+                                    {badge_text}
+                                </span>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Référence avec style élégant
+                        st.markdown(f"""
+                            <div style="background: {card_bg}; 
+                                        padding: 15px 20px; 
+                                        border-radius: 10px;
+                                        border-left: 4px solid {border_color};
+                                        margin-bottom: 15px;
+                                        box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                                <p style="margin: 0; color: {badge_color}; font-weight: 600; font-size: 14px;">
+                                    📊 Référence : <span style="font-weight: 700;">{bio.get('reference')}</span>
                                 </p>
                             </div>
                         """, unsafe_allow_html=True)
                         
                         if bio.get('interpretation'):
                             st.markdown("""
-                                <div style="background: #f8f9fa; 
-                                            padding: 15px; 
-                                            border-radius: 8px;
-                                            border-left: 3px solid #6b7280;">
-                                    <h4 style="color: #1f2937; margin: 0 0 10px 0; font-size: 15px; font-weight: 600;">
-                                        💡 Interprétation
+                                <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); 
+                                            padding: 18px 20px; 
+                                            border-radius: 10px;
+                                            border-left: 4px solid #64748b;
+                                            box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                                    <h4 style="color: #1e293b; margin: 0 0 10px 0; font-size: 15px; font-weight: 600;">
+                                        💡 Interprétation clinique
                                     </h4>
                                 </div>
                             """, unsafe_allow_html=True)
-                            st.info(bio.get('interpretation'))
+                            st.markdown(f"""
+                                <div style="background: white; 
+                                            padding: 15px; 
+                                            border-radius: 8px;
+                                            border: 1px solid #e2e8f0;
+                                            margin-top: 10px;">
+                                    <p style="margin: 0; color: #334155; line-height: 1.6; font-size: 14px;">
+                                        {bio.get('interpretation')}
+                                    </p>
+                                </div>
+                            """, unsafe_allow_html=True)
             
             # Microbiote
             micro_details = consolidated.get("microbiome_details", [])
@@ -1072,25 +1127,99 @@ with tabs[1]:
             cross = st.session_state.cross_analysis
             if cross:
                 st.markdown("---")
-                st.markdown("### 🔄 Analyses Croisées Multimodales")
+                st.markdown("""
+                    <div style="background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%); 
+                                padding: 20px; 
+                                border-radius: 12px;
+                                border-left: 4px solid #a855f7;
+                                margin: 25px 0;">
+                        <h3 style="color: #7e22ce; margin: 0 0 10px 0; font-size: 20px; font-weight: 600;">
+                            🔄 Analyses Croisées Multimodales
+                        </h3>
+                    </div>
+                """, unsafe_allow_html=True)
                 
                 for ca in cross:
-                    severity_icon = {
-                        "critical": "🔴",
-                        "warning": "🟠",
-                        "info": "ℹ️"
-                    }.get(ca.get("severity"), "ℹ️")
+                    severity = ca.get("severity", "info")
+                    
+                    # Design selon sévérité
+                    if severity == "critical":
+                        badge_bg = "#fef2f2"
+                        badge_color = "#dc2626"
+                        badge_text = "CRITIQUE"
+                        card_bg = "#fff5f5"
+                        border_color = "#ef4444"
+                    elif severity == "warning":
+                        badge_bg = "#fff7ed"
+                        badge_color = "#ea580c"
+                        badge_text = "ATTENTION"
+                        card_bg = "#fffbeb"
+                        border_color = "#f97316"
+                    else:
+                        badge_bg = "#eff6ff"
+                        badge_color = "#2563eb"
+                        badge_text = "INFO"
+                        card_bg = "#f0f9ff"
+                        border_color = "#3b82f6"
                     
                     with st.expander(
-                        f"{severity_icon} {ca.get('title')}",
-                        expanded=(ca.get("severity") == "critical")
+                        f"{ca.get('title')}",
+                        expanded=(severity == "critical")
                     ):
-                        st.markdown(ca.get("description"))
+                        # Badge sévérité
+                        st.markdown(f"""
+                            <div style="margin-bottom: 15px;">
+                                <span style="background: {badge_bg}; 
+                                             color: {badge_color}; 
+                                             padding: 6px 16px; 
+                                             border-radius: 20px;
+                                             font-weight: 700;
+                                             font-size: 12px;
+                                             letter-spacing: 0.5px;
+                                             display: inline-block;">
+                                    {badge_text}
+                                </span>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Description dans une carte élégante
+                        st.markdown(f"""
+                            <div style="background: {card_bg}; 
+                                        padding: 18px 20px; 
+                                        border-radius: 10px;
+                                        border-left: 4px solid {border_color};
+                                        margin-bottom: 15px;
+                                        box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                                <p style="margin: 0; color: #1f2937; line-height: 1.7; font-size: 14px;">
+                                    {ca.get("description")}
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                         
                         if ca.get("recommendations"):
-                            st.markdown("**Recommandations associées:**")
+                            st.markdown("""
+                                <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); 
+                                            padding: 15px 20px; 
+                                            border-radius: 10px;
+                                            border-left: 4px solid #64748b;
+                                            margin-top: 15px;">
+                                    <h4 style="color: #1e293b; margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">
+                                        💊 Recommandations associées
+                                    </h4>
+                            """, unsafe_allow_html=True)
                             for reco in ca.get("recommendations"):
-                                st.markdown(f"- {reco}")
+                                st.markdown(f"""
+                                    <div style="background: white; 
+                                                padding: 10px 15px; 
+                                                border-radius: 8px;
+                                                margin: 6px 0;
+                                                border-left: 3px solid #94a3b8;">
+                                        <p style="margin: 0; color: #334155; font-size: 13px;">
+                                            • {reco}
+                                        </p>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                            st.markdown("</div>", unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════
 # TAB 2: RECOMMANDATIONS
