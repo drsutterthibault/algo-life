@@ -345,7 +345,7 @@ def create_biomarkers_section(biomarkers):
 # MICROBIOTE
 # ============================================================================
 def create_microbiome_section(microbiome_data):
-    """Section microbiote"""
+    """Section microbiote avec tableau récapitulatif"""
     elements = []
     styles = get_styles()
     
@@ -354,7 +354,7 @@ def create_microbiome_section(microbiome_data):
     elements.append(Paragraph("Microbiote", styles['SectionHeader']))
     elements.append(Spacer(1, 0.5*cm))
     
-    # Indices
+    # Indices globaux
     indices = [
         ['Indice de dysbiose (DI)', str(microbiome_data.get('indice_dysbiose', 'N/A'))],
         ['Diversité', microbiome_data.get('diversite', 'N/A')]
@@ -374,60 +374,133 @@ def create_microbiome_section(microbiome_data):
     elements.append(table)
     elements.append(Spacer(1, 0.8*cm))
     
-    # Groupes bactériens
-    if 'groupes_bacteriens' in microbiome_data:
+    # Groupes bactériens - Tableau récapitulatif
+    if 'groupes_bacteriens' in microbiome_data and microbiome_data['groupes_bacteriens']:
         groups = microbiome_data['groupes_bacteriens']
+        
+        # Séparer normaux et anormaux
         normal_groups = [g for g in groups if 'Normal' in g.get('statut', '')]
         abnormal_groups = [g for g in groups if 'Normal' not in g.get('statut', '')]
         
-        # Normaux
+        # TABLEAU RÉCAPITULATIF EN HAUT
+        elements.append(Paragraph("Récapitulatif des souches", styles['SubsectionHeader']))
+        elements.append(Spacer(1, 0.3*cm))
+        
+        recap_data = [
+            ['Type de souches', 'Nombre', 'État'],
+            ['Souches normales', str(len(normal_groups)), '✓ Bon'],
+            ['Souches anormales / à surveiller', str(len(abnormal_groups)), '⚠ Attention' if abnormal_groups else '✓ Bon']
+        ]
+        
+        recap_table = Table(recap_data, colWidths=[8*cm, 4*cm, 3.5*cm])
+        recap_table.setStyle(TableStyle([
+            # En-tête
+            ('BACKGROUND', (0, 0), (-1, 0), PDFConfig.COLORS['primary']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), PDFConfig.COLORS['white']),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            
+            # Lignes de données
+            ('FONT', (0, 1), (-1, -1), 'Helvetica', 10),
+            ('BACKGROUND', (0, 1), (0, 1), colors.HexColor('#f0fdf4')),
+            ('TEXTCOLOR', (0, 1), (0, 1), PDFConfig.COLORS['normal']),
+            
+            ('BACKGROUND', (0, 2), (0, 2), colors.HexColor('#fef2f2') if abnormal_groups else colors.HexColor('#f0fdf4')),
+            ('TEXTCOLOR', (0, 2), (0, 2), PDFConfig.COLORS['critical'] if abnormal_groups else PDFConfig.COLORS['normal']),
+            
+            # Colonnes nombre et état
+            ('FONT', (1, 1), (-1, -1), 'Helvetica-Bold', 11),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            
+            # Bordures
+            ('GRID', (0, 0), (-1, -1), 1, PDFConfig.COLORS['medium']),
+            ('BOX', (0, 0), (-1, -1), 2, PDFConfig.COLORS['primary']),
+            
+            # Espacement
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        
+        elements.append(recap_table)
+        elements.append(Spacer(1, 1*cm))
+        
+        # DÉTAILS DES SOUCHES NORMALES
         if normal_groups:
-            elements.append(Paragraph("Souches normales", styles['SubsectionHeader']))
+            elements.append(Paragraph(f"Souches normales ({len(normal_groups)})", styles['SubsectionHeader']))
             elements.append(Spacer(1, 0.3*cm))
             
             data = [['Groupe bactérien', 'Résultat', 'Statut']]
-            data.extend([[g['nom'], g['resultat'], '● Normal'] for g in normal_groups])
+            for g in normal_groups:
+                data.append([g['nom'], g['resultat'], '● Normal'])
             
             table = Table(data, colWidths=[9*cm, 4*cm, 2.5*cm])
             table.setStyle(TableStyle([
+                # En-tête
                 ('BACKGROUND', (0, 0), (-1, 0), PDFConfig.COLORS['normal']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), PDFConfig.COLORS['white']),
                 ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                
+                # Corps
                 ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
+                ('TEXTCOLOR', (0, 1), (-1, -1), PDFConfig.COLORS['dark']),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), 
                  [PDFConfig.COLORS['white'], colors.HexColor('#f0fdf4')]),
+                
+                # Bordures
                 ('GRID', (0, 0), (-1, -1), 0.5, PDFConfig.COLORS['medium']),
+                ('BOX', (0, 0), (-1, -1), 1.5, PDFConfig.COLORS['normal']),
+                
+                # Espacement
                 ('LEFTPADDING', (0, 0), (-1, -1), 8),
                 ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
                 ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
             
             elements.append(table)
             elements.append(Spacer(1, 0.8*cm))
         
-        # Anormaux
+        # DÉTAILS DES SOUCHES ANORMALES
         if abnormal_groups:
-            elements.append(Paragraph("Souches à surveiller / anormales", styles['SubsectionHeader']))
+            elements.append(Paragraph(f"Souches à surveiller / anormales ({len(abnormal_groups)})", styles['SubsectionHeader']))
             elements.append(Spacer(1, 0.3*cm))
             
             data = [['Groupe bactérien', 'Résultat', 'Statut']]
-            data.extend([[g['nom'], g['resultat'], g['statut']] for g in abnormal_groups])
+            for g in abnormal_groups:
+                data.append([g['nom'], g['resultat'], g['statut']])
             
             table = Table(data, colWidths=[9*cm, 4*cm, 2.5*cm])
             table.setStyle(TableStyle([
+                # En-tête
                 ('BACKGROUND', (0, 0), (-1, 0), PDFConfig.COLORS['critical']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), PDFConfig.COLORS['white']),
                 ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                
+                # Corps
                 ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
+                ('TEXTCOLOR', (0, 1), (-1, -1), PDFConfig.COLORS['dark']),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1),
                  [PDFConfig.COLORS['white'], colors.HexColor('#fef2f2')]),
+                
+                # Bordures
                 ('GRID', (0, 0), (-1, -1), 0.5, PDFConfig.COLORS['medium']),
+                ('BOX', (0, 0), (-1, -1), 1.5, PDFConfig.COLORS['critical']),
+                
+                # Espacement
                 ('LEFTPADDING', (0, 0), (-1, -1), 8),
                 ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
                 ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
             
             elements.append(table)
+    else:
+        # Aucune donnée microbiote
+        elements.append(Paragraph("Aucune donnée microbiote disponible", styles['ModernBody']))
     
     return elements
 
