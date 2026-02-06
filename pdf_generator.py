@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Module d'export PDF pour UNILABS - Point d'entrée principal
-Version: 2.0
+Version: 2.0 - Compatible avec app.py
 Auteur: Dr Thibault SUTTER, PhD
 """
 
 import os
 import sys
+import re
 from pathlib import Path
 from datetime import datetime
 from reportlab.lib import colors
@@ -31,7 +32,7 @@ class PDFConfig:
     ORGANIZATION = "UNILABS"
     
     # Chemins par défaut
-    DEFAULT_LOGO_PATH = "/home/claude/dna_logo.png"
+    DEFAULT_LOGO_PATH = "/dna_logo.png"
     OUTPUT_DIR = "/mnt/user-data/outputs"
     
     # Palette de couleurs
@@ -49,6 +50,20 @@ class PDFConfig:
         'microbiome': colors.HexColor('#8b5cf6'),
         'white': colors.white
     }
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+def _safe_float(x):
+    """Conversion sécurisée en float"""
+    try:
+        if x is None or str(x).strip() == '':
+            return None
+        s = str(x).strip().replace(',', '.').replace(' ', '')
+        s = re.sub(r'[^0-9.\-+eE]', '', s)
+        return float(s) if s else None
+    except:
+        return None
 
 # ============================================================================
 # STYLES
@@ -282,14 +297,17 @@ def create_biomarker_viz(name, value, unit, min_val, max_val, status):
                 fontSize=8, fillColor=PDFConfig.COLORS['medium'], textAnchor='end'))
     d.add(String(bar_x + bar_width + 5, bar_y + bar_height/2, str(max_val) if max_val else '',
                 fontSize=8, fillColor=PDFConfig.COLORS['medium'], textAnchor='start'))
-    d.add(String(5, 45, name, fontSize=11, fillColor=PDFConfig.COLORS['dark'],
+    d.add(String(5, 45, name,
+                fontSize=11, fillColor=PDFConfig.COLORS['dark'],
                 fontName='Helvetica-Bold', textAnchor='start'))
-    d.add(String(5, 5, f"{value} {unit}", fontSize=10, fillColor=color,
+    d.add(String(5, 5, f"{value} {unit}",
+                fontSize=10, fillColor=color,
                 fontName='Helvetica-Bold', textAnchor='start'))
     
     if min_val is not None and max_val is not None:
-        d.add(String(200, 5, f"Normes: {min_val} — {max_val}", fontSize=8,
-                    fillColor=PDFConfig.COLORS['medium'], textAnchor='start'))
+        d.add(String(200, 5, f"Normes: {min_val} — {max_val}",
+                    fontSize=8, fillColor=PDFConfig.COLORS['medium'],
+                    textAnchor='start'))
     
     return d
 
@@ -612,56 +630,161 @@ def generate_report(output_path, data, logo_path=None):
         return False
 
 # ============================================================================
+# WRAPPER POUR APP.PY - COMPATIBILITÉ
+# ============================================================================
+def generate_multimodal_report(
+    patient_data: dict,
+    biology_data: list,
+    microbiome_data: dict,
+    recommendations: dict,
+    cross_analysis: list,
+    follow_up: dict,
+    bio_age_result: dict = None,
+    output_path: str = None
+) -> str:
+    """
+    Fonction wrapper pour compatibilité avec app.py
+    Convertit les données app.py vers le format generate_report
+    """
+    
+    # Convertir biology_data (list de dicts) en format biomarqueurs
+    biomarqueurs = []
+    for bio in biology_data:
+        # Extraire les infos de référence
+        ref_str = bio.get('Référence', '')
+        min_val, max_val = None, None
+        
+        if '—' in ref_str or '-' in ref_str:
+            parts = ref_str.replace('—', '-').split('-')
+            if len(parts) == 2:
+                min_val = _safe_float(parts[0])
+                max_val = _safe_float(parts[1])
+        
+        # Déterminer le statut
+        statut_raw = bio.get('Statut', 'Normal')
+        if statut_raw in ['Bas', 'Élevé']:
+            statut = 'abnormal'
+        elif statut_raw == 'À surveiller':
+            statut = 'warning'
+        else:
+            statut = 'normal'
+        
+        biomarqueurs.append({
+            'nom': bio.get('Biomarqueur', ''),
+            'valeur': bio.get('Valeur', 0),
+            'unite': bio.get('Unité', ''),
+            'min': min_val,
+            'max': max_val,
+            'statut': statut,
+            'categorie': bio.get('Catégorie', 'Autres')
+        })
+    
+    # Calculer le résumé
+    normaux = sum(1 for b in biomarqueurs if b['statut'] == 'normal')
+    surveiller = sum(1 for b in biomarqueurs if b['statut'] == 'warning')
+    anormaux = sum(1 for b in biomarqueurs if b['statut'] == 'abnormal')
+    
+    # Convertir les recommandations
+    recos = {
+        'a_surveiller': [],
+        'micronutrition': [],
+        'nutrition': [],
+        'hygiene_de_vie': []
+    }
+    
+    if recommendations:
+        # Extraire les recommandations prioritaires
+        if 'Prioritaires' in recommendations:
+            for item in recommendations['Prioritaires']:
+                recos['a_surveiller'].append(item)
+        
+        # Extraire par catégorie
+        for key in ['Micronutrition', 'Nutrition', 'Hygiène de vie']:
+            if key in recommendations:
+                target_key = key.lower().replace(' ', '_').replace('è', 'e')
+                for item in recommendations[key]:
+                    recos[target_key].append(item)
+    
+    # Convertir microbiome
+    microbiote = {}
+    if microbiome_data:
+        microbiote = {
+            'indice_dysbiose': microbiome_data.get('dysbiosis_index', 3),
+            'diversite': microbiome_data.get('diversity', 'as expected'),
+            'groupes_bacteriens': []
+        }
+        
+        if 'bacteria' in microbiome_data:
+            for bact in microbiome_data['bacteria']:
+                microbiote['groupes_bacteriens'].append({
+                    'nom': bact.get('group', ''),
+                    'resultat': bact.get('result', 'Expected'),
+                    'statut': bact.get('status', '● Normal')
+                })
+    
+    # Convertir suivi
+    suivi_data = {
+        'examens': [],
+        'suivi': []
+    }
+    
+    if follow_up:
+        # Examens complémentaires
+        if follow_up.get('next_tests'):
+            tests = follow_up['next_tests']
+            if isinstance(tests, list):
+                suivi_data['examens'].append(f"Recontrôler: {', '.join(tests)}")
+            
+        # Plan de suivi
+        if follow_up.get('plan'):
+            suivi_data['suivi'].append(follow_up['plan'])
+        
+        if follow_up.get('objectives'):
+            suivi_data['suivi'].append(f"Objectifs: {follow_up['objectives']}")
+        
+        if follow_up.get('next_date'):
+            date_str = follow_up['next_date'].strftime('%d/%m/%Y') if hasattr(follow_up['next_date'], 'strftime') else str(follow_up['next_date'])
+            suivi_data['suivi'].append(f"Prochain contrôle: {date_str}")
+    
+    # Construire les données finales
+    data = {
+        'patient': {
+            'nom': patient_data.get('name', 'N/A'),
+            'sexe': patient_data.get('sex', 'N/A'),
+            'date_naissance': patient_data.get('birthdate', 'N/A')
+        },
+        'resume': {
+            'normaux': normaux,
+            'a_surveiller': surveiller,
+            'anormaux': anormaux
+        },
+        'biomarqueurs': biomarqueurs,
+        'recommandations': recos,
+        'suivi': suivi_data
+    }
+    
+    # Ajouter microbiote si présent
+    if microbiote.get('groupes_bacteriens'):
+        data['microbiote'] = microbiote
+    
+    # Générer le PDF
+    if output_path is None:
+        import tempfile
+        output_path = os.path.join(tempfile.gettempdir(), 'rapport_unilabs.pdf')
+    
+    success = generate_report(output_path, data)
+    
+    if success:
+        return output_path
+    else:
+        raise Exception("Échec de génération du PDF")
+
+# ============================================================================
 # POINT D'ENTRÉE
 # ============================================================================
 if __name__ == "__main__":
-    # Données de test
-    test_data = {
-        'patient': {
-            'nom': 'SUTTER Thibault',
-            'sexe': 'F',
-            'date_naissance': '01/01/1980',
-        },
-        'resume': {'normaux': 8, 'a_surveiller': 0, 'anormaux': 4},
-        'biomarqueurs': [
-            {
-                'nom': 'GLYCEMIE A JEUN',
-                'valeur': 0.84,
-                'unite': 'g/L',
-                'min': 0.70,
-                'max': 1.05,
-                'statut': 'normal',
-                'categorie': 'Métabolisme glucidique'
-            },
-            {
-                'nom': 'FERRITINE',
-                'valeur': 11.0,
-                'unite': 'µg/L',
-                'min': 15.0,
-                'max': 150.0,
-                'statut': 'abnormal',
-                'categorie': 'Fer et minéraux'
-            }
-        ],
-        'microbiote': {
-            'indice_dysbiose': 3,
-            'diversite': 'as expected',
-            'groupes_bacteriens': [
-                {'nom': 'A1. Prominent gut microbes', 'resultat': 'Expected', 'statut': '● Normal'},
-                {'nom': 'D2. Major SCFA producers', 'resultat': 'Slightly deviating', 'statut': '● Normal'}
-            ]
-        },
-        'recommandations': {
-            'a_surveiller': ['GPX: Élevé (171.0 U/g Hb)'],
-            'micronutrition': ['CoQ10 ubiquinol 200-400mg/j'],
-            'nutrition': ['Viandes organes (cœur, foie)'],
-            'hygiene_de_vie': ['Support mitochondrial']
-        },
-        'suivi': {
-            'examens': ['Bilan de suivi dans 3 mois'],
-            'suivi': ['Suivi dans 3 mois recommandé']
-        }
-    }
-    
-    success = generate_report('/home/claude/test_rapport.pdf', test_data)
-    sys.exit(0 if success else 1)
+    print("Module pdf_generator chargé avec succès")
+    print(f"Version: {PDFConfig.VERSION}")
+    print("Fonctions disponibles:")
+    print("  - generate_report() - fonction principale")
+    print("  - generate_multimodal_report() - wrapper pour app.py")
