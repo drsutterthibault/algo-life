@@ -764,7 +764,7 @@ def generate_multimodal_report(
     }
     
     # Ajouter microbiote si présent
-    if microbiote.get('groupes_bacteriens'):
+    if microbiome_data and microbiote:
         data['microbiote'] = microbiote
     
     # Générer le PDF
@@ -772,7 +772,12 @@ def generate_multimodal_report(
         import tempfile
         output_path = os.path.join(tempfile.gettempdir(), 'rapport_unilabs.pdf')
     
-    success = generate_report(output_path, data)
+    # Utiliser le logo par défaut
+    logo_path = PDFConfig.DEFAULT_LOGO_PATH
+    if not os.path.exists(logo_path):
+        logo_path = "/home/claude/dna_logo.png"
+    
+    success = generate_report(output_path, data, logo_path=logo_path)
     
     if success:
         return output_path
