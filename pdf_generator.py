@@ -139,11 +139,70 @@ def generate_multimodal_report(
         story.append(summary_table)
         story.append(Spacer(1, 1*cm))
         
-        # Liste biomarqueurs (premiers 15)
-        for bio in biology_data[:15]:
-            txt = f"{bio.get('Biomarqueur')}: {bio.get('Valeur')} {bio.get('Unité')} ({bio.get('Statut')})"
-            story.append(Paragraph(txt, styles['Normal']))
-            story.append(Spacer(1, 0.2*cm))
+        # ✅ NOUVEAU : Visualisations des biomarqueurs avec barres de progression
+        from reportlab.graphics.shapes import Drawing, Rect, String, Circle
+        
+        for bio in biology_data[:15]:  # Premiers 15
+            # Extraire les valeurs
+            name = str(bio.get('Biomarqueur', 'N/A'))
+            value = bio.get('Valeur', 0)
+            unit = str(bio.get('Unité', ''))
+            status = bio.get('Statut', 'Normal')
+            ref = str(bio.get('Référence', ''))
+            
+            # Couleur selon statut
+            if status == 'Normal':
+                color = colors.HexColor('#10b981')
+            elif status == 'Élevé':
+                color = colors.HexColor('#ef4444')
+            elif status == 'Bas':
+                color = colors.HexColor('#f59e0b')
+            else:
+                color = colors.HexColor('#6b7280')
+            
+            # Extraire min/max de la référence
+            min_val, max_val = None, None
+            if '—' in ref or '-' in ref:
+                parts = ref.replace('—', '-').split('-')
+                if len(parts) == 2:
+                    min_val = _safe_float(parts[0])
+                    max_val = _safe_float(parts[1])
+            
+            # Créer la visualisation
+            d = Drawing(500, 60)
+            
+            # Nom du biomarqueur (en gras)
+            d.add(String(5, 45, name[:40], fontSize=11, fillColor=colors.HexColor('#1f2937'), fontName='Helvetica-Bold'))
+            
+            # Valeur + unité (colorée selon statut)
+            d.add(String(5, 5, f"{value} {unit}", fontSize=10, fillColor=color, fontName='Helvetica-Bold'))
+            
+            # Référence
+            if min_val is not None and max_val is not None:
+                d.add(String(200, 5, f"Réf: {min_val} — {max_val}", fontSize=8, fillColor=colors.HexColor('#6b7280')))
+                
+                # Barre de progression
+                bar_x, bar_y, bar_width, bar_height = 50, 25, 300, 8
+                
+                # Fond de la barre (gris clair)
+                d.add(Rect(bar_x, bar_y, bar_width, bar_height, fillColor=colors.HexColor('#e5e7eb'), strokeColor=None))
+                
+                # Position du marqueur (0 à 1)
+                if max_val > min_val:
+                    position = max(0, min(1, (value - min_val) / (max_val - min_val)))
+                else:
+                    position = 0.5
+                
+                # Marqueur circulaire
+                marker_x = bar_x + (bar_width * position)
+                d.add(Circle(marker_x, bar_y + bar_height/2, 6, fillColor=color, strokeColor=colors.white, strokeWidth=2))
+                
+                # Lignes de min/max
+                d.add(String(bar_x - 5, bar_y + bar_height/2, str(min_val) if min_val else '', fontSize=8, fillColor=colors.HexColor('#9ca3af'), textAnchor='end'))
+                d.add(String(bar_x + bar_width + 5, bar_y + bar_height/2, str(max_val) if max_val else '', fontSize=8, fillColor=colors.HexColor('#9ca3af'), textAnchor='start'))
+            
+            story.append(d)
+            story.append(Spacer(1, 0.5*cm))
         
         story.append(PageBreak())
     
@@ -308,16 +367,136 @@ def generate_multimodal_report(
     
     # ==================== PAGE 4: RECOMMANDATIONS ====================
     if recommendations:
-        story.append(Paragraph("Recommandations", subtitle_style))
+        story.append(Paragraph("Recommandations Personnalisées", subtitle_style))
         story.append(Spacer(1, 0.5*cm))
         
+        # ✅ NOUVEAU : Cadres colorés pour chaque catégorie
+        
+        # 🔥 PRIORITAIRES (rouge)
+        prioritaires = recommendations.get('Prioritaires', [])
+        if prioritaires:
+            story.append(Paragraph("🔥 ACTIONS PRIORITAIRES", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            prio_data = [['⚠️  ' + item] for item in prioritaires]
+            prio_table = Table(prio_data, colWidths=[15*cm])
+            prio_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#fee2e2')),
+                ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#991b1b')),
+                ('FONT', (0,0), (-1,-1), 'Helvetica', 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 15),
+                ('RIGHTPADDING', (0,0), (-1,-1), 15),
+                ('TOPPADDING', (0,0), (-1,-1), 12),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+                ('BOX', (0,0), (-1,-1), 2, colors.HexColor('#ef4444')),
+                ('LINEBELOW', (0,0), (-1,-2), 1, colors.HexColor('#fecaca')),
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ]))
+            story.append(prio_table)
+            story.append(Spacer(1, 0.8*cm))
+        
+        # ⚠️ À SURVEILLER (orange)
+        a_surveiller = recommendations.get('À surveiller', [])
+        if a_surveiller:
+            story.append(Paragraph("⚠️ À SURVEILLER", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            surv_data = [['• ' + item] for item in a_surveiller]
+            surv_table = Table(surv_data, colWidths=[15*cm])
+            surv_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#fff7ed')),
+                ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#9a3412')),
+                ('FONT', (0,0), (-1,-1), 'Helvetica', 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 15),
+                ('RIGHTPADDING', (0,0), (-1,-1), 15),
+                ('TOPPADDING', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+                ('BOX', (0,0), (-1,-1), 2, colors.HexColor('#f59e0b')),
+                ('LINEBELOW', (0,0), (-1,-2), 0.5, colors.HexColor('#fed7aa')),
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ]))
+            story.append(surv_table)
+            story.append(Spacer(1, 0.8*cm))
+        
+        # 💊 MICRONUTRITION (bleu)
+        micronutrition = recommendations.get('Micronutrition', [])
+        if micronutrition:
+            story.append(Paragraph("💊 MICRONUTRITION", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            micro_data = [['• ' + item] for item in micronutrition]
+            micro_table = Table(micro_data, colWidths=[15*cm])
+            micro_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#eff6ff')),
+                ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#1e3a8a')),
+                ('FONT', (0,0), (-1,-1), 'Helvetica', 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 15),
+                ('RIGHTPADDING', (0,0), (-1,-1), 15),
+                ('TOPPADDING', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+                ('BOX', (0,0), (-1,-1), 2, colors.HexColor('#3b82f6')),
+                ('LINEBELOW', (0,0), (-1,-2), 0.5, colors.HexColor('#bfdbfe')),
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ]))
+            story.append(micro_table)
+            story.append(Spacer(1, 0.8*cm))
+        
+        # 🥗 NUTRITION (vert)
+        nutrition = recommendations.get('Nutrition', [])
+        if nutrition:
+            story.append(Paragraph("🥗 NUTRITION & DIÉTÉTIQUE", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            nutri_data = [['• ' + item] for item in nutrition]
+            nutri_table = Table(nutri_data, colWidths=[15*cm])
+            nutri_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0fdf4')),
+                ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#14532d')),
+                ('FONT', (0,0), (-1,-1), 'Helvetica', 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 15),
+                ('RIGHTPADDING', (0,0), (-1,-1), 15),
+                ('TOPPADDING', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+                ('BOX', (0,0), (-1,-1), 2, colors.HexColor('#22c55e')),
+                ('LINEBELOW', (0,0), (-1,-2), 0.5, colors.HexColor('#bbf7d0')),
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ]))
+            story.append(nutri_table)
+            story.append(Spacer(1, 0.8*cm))
+        
+        # 🏃 HYGIÈNE DE VIE (violet)
+        hygiene = recommendations.get('Hygiène de vie', [])
+        if hygiene:
+            story.append(Paragraph("🏃 HYGIÈNE DE VIE", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            
+            hyg_data = [['• ' + item] for item in hygiene]
+            hyg_table = Table(hyg_data, colWidths=[15*cm])
+            hyg_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#faf5ff')),
+                ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#581c87')),
+                ('FONT', (0,0), (-1,-1), 'Helvetica', 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 15),
+                ('RIGHTPADDING', (0,0), (-1,-1), 15),
+                ('TOPPADDING', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+                ('BOX', (0,0), (-1,-1), 2, colors.HexColor('#a855f7')),
+                ('LINEBELOW', (0,0), (-1,-2), 0.5, colors.HexColor('#e9d5ff')),
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ]))
+            story.append(hyg_table)
+            story.append(Spacer(1, 0.8*cm))
+        
+        # Autres catégories (gris neutre)
         for key, items in recommendations.items():
-            if items and isinstance(items, list):
-                story.append(Paragraph(key.upper(), styles['Heading3']))
-                for item in items[:5]:  # Max 5 par catégorie
-                    story.append(Paragraph(f"• {item}", styles['Normal']))
-                    story.append(Spacer(1, 0.2*cm))
-                story.append(Spacer(1, 0.5*cm))
+            if key not in ['Prioritaires', 'À surveiller', 'Micronutrition', 'Nutrition', 'Hygiène de vie']:
+                if items and isinstance(items, list):
+                    story.append(Paragraph(key.upper(), styles['Heading3']))
+                    story.append(Spacer(1, 0.3*cm))
+                    for item in items[:5]:
+                        story.append(Paragraph(f"• {item}", styles['Normal']))
+                        story.append(Spacer(1, 0.2*cm))
+                    story.append(Spacer(1, 0.5*cm))
         
         story.append(PageBreak())
     
