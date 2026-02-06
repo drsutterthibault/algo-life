@@ -409,14 +409,47 @@ st.set_page_config(
 init_session_state()
 
 # ─────────────────────────────────────────────────────────────────────
-# SIDEBAR - INFORMATIONS PATIENT
+# SIDEBAR - INFORMATIONS PATIENT (DESIGN PREMIUM)
 # ─────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://via.placeholder.com/200x80/0A4D8C/FFFFFF?text=UNILABS", use_container_width=True)
-    st.title("👤 Informations Patient")
+    # Logo UNILABS premium
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a5490 0%, #2d7ab9 100%); 
+                    padding: 25px; 
+                    border-radius: 15px; 
+                    text-align: center;
+                    margin-bottom: 25px;
+                    box-shadow: 0 4px 15px rgba(26, 84, 144, 0.3);">
+            <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: 2px;">
+                UNILABS
+            </h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0 0; font-size: 12px; letter-spacing: 1px;">
+                BIOLOGIE FONCTIONNELLE
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    patient_name = st.text_input("Nom du patient", value=st.session_state.patient_info.get("name", ""))
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); 
+                    padding: 20px; 
+                    border-radius: 12px;
+                    border-left: 4px solid #1a5490;
+                    margin-bottom: 20px;">
+            <h3 style="color: #1a5490; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+                👤 Informations Patient
+            </h3>
+        </div>
+    """, unsafe_allow_html=True)
     
+    # Nom du patient
+    patient_name = st.text_input(
+        "Nom complet",
+        value=st.session_state.patient_info.get("name", ""),
+        placeholder="Ex: Dupont Marie",
+        help="Nom et prénom du patient"
+    )
+    
+    # Sexe et Date de naissance sur 2 colonnes
     col1, col2 = st.columns(2)
     with col1:
         patient_sex = st.selectbox(
@@ -425,34 +458,87 @@ with st.sidebar:
             index=0 if st.session_state.patient_info.get("sex", "F") == "F" else 1
         )
     with col2:
+        # Date de naissance avec format dd/mm/yyyy
+        birthdate_default = st.session_state.patient_info.get("birthdate") or date(1987, 10, 3)
         birthdate = st.date_input(
             "Date de naissance",
-            value=st.session_state.patient_info.get("birthdate") or date(1980, 1, 1),
+            value=birthdate_default,
             min_value=date(1920, 1, 1),
-            max_value=date.today()
+            max_value=date.today(),
+            format="DD/MM/YYYY"
         )
     
+    # Âge calculé (affichage élégant)
     patient_age = _calc_age_from_birthdate(birthdate)
-    st.info(f"📅 Âge: {patient_age} ans")
+    st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); 
+                    padding: 12px 15px; 
+                    border-radius: 8px;
+                    margin: 10px 0;
+                    border-left: 3px solid #2196f3;">
+            <p style="margin: 0; color: #1565c0; font-weight: 600; font-size: 15px;">
+                📅 Âge : <span style="font-size: 18px;">{patient_age}</span> ans
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
     
+    # Poids et Taille
     col1, col2 = st.columns(2)
     with col1:
-        patient_weight = st.number_input("Poids (kg)", min_value=30.0, max_value=200.0, value=70.0, step=0.1)
+        patient_weight = st.number_input(
+            "Poids (kg)", 
+            min_value=30.0, 
+            max_value=200.0, 
+            value=70.0, 
+            step=0.1,
+            format="%.1f"
+        )
     with col2:
-        patient_height = st.number_input("Taille (cm)", min_value=100.0, max_value=230.0, value=170.0, step=0.1)
+        patient_height = st.number_input(
+            "Taille (cm)", 
+            min_value=100.0, 
+            max_value=230.0, 
+            value=170.0, 
+            step=0.1,
+            format="%.1f"
+        )
     
+    # IMC (affichage premium)
     patient_bmi = _calc_bmi(patient_weight, patient_height)
     if patient_bmi:
-        st.info(f"📊 IMC: {patient_bmi:.1f} kg/m²")
+        bmi_color = "#22c55e" if 18.5 <= patient_bmi <= 25 else "#f59e0b" if patient_bmi < 18.5 else "#ef4444"
+        st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); 
+                        padding: 12px 15px; 
+                        border-radius: 8px;
+                        margin: 10px 0;
+                        border-left: 3px solid {bmi_color};">
+                <p style="margin: 0; color: #334155; font-weight: 600; font-size: 15px;">
+                    📊 IMC : <span style="color: {bmi_color}; font-size: 18px;">{patient_bmi:.1f}</span> kg/m²
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Antécédents (zone de texte améliorée)
+    st.markdown("""
+        <div style="margin-top: 20px; margin-bottom: 8px;">
+            <label style="color: #1a5490; font-weight: 600; font-size: 14px;">
+                📋 Antécédents / Contexte clinique
+            </label>
+        </div>
+    """, unsafe_allow_html=True)
     
     patient_antecedents = st.text_area(
-        "Antécédents / Contexte clinique",
+        "",
         value=st.session_state.patient_info.get("antecedents", ""),
-        height=100,
-        placeholder="Ex: Fatigue chronique, troubles digestifs..."
+        height=120,
+        placeholder="Ex: Fatigue chronique, troubles digestifs, antécédents familiaux...",
+        label_visibility="collapsed"
     )
     
-    if st.button("💾 Enregistrer les informations", use_container_width=True):
+    # Bouton de sauvegarde stylisé
+    st.markdown("<div style='margin-top: 20px;'>", unsafe_allow_html=True)
+    if st.button("💾 Enregistrer les informations", use_container_width=True, type="primary"):
         st.session_state.patient_info = {
             "name": patient_name,
             "sex": patient_sex,
@@ -463,7 +549,8 @@ with st.sidebar:
             "bmi": patient_bmi,
             "antecedents": patient_antecedents
         }
-        st.success("✅ Informations sauvegardées")
+        st.success("✅ Informations sauvegardées", icon="✅")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -480,29 +567,63 @@ tabs = st.tabs([
 ])
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 0: IMPORT & DONNÉES
+# TAB 0: IMPORT & DONNÉES (DESIGN PREMIUM)
 # ═════════════════════════════════════════════════════════════════════
 with tabs[0]:
-    st.subheader("📥 Import des Données")
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); 
+                    padding: 25px; 
+                    border-radius: 15px;
+                    border-left: 5px solid #1a5490;
+                    margin-bottom: 30px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
+            <h2 style="color: #1a5490; margin: 0 0 10px 0; font-size: 24px; font-weight: 700;">
+                📥 Import des Données
+            </h2>
+            <p style="color: #64748b; margin: 0; font-size: 14px;">
+                Importez vos fichiers PDF ou Excel pour une analyse complète
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    # Instructions claires
-    st.info("""
-    **📌 Comment importer vos fichiers :**
-    1. Cliquez sur le bouton **"Browse files"** ci-dessous
-    2. Parcourez votre ordinateur (Bureau, Documents, Téléchargements, etc.)
-    3. Sélectionnez votre fichier PDF ou Excel
-    4. Le fichier sera uploadé automatiquement
-    """)
+    # Instructions améliorées
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); 
+                    padding: 20px; 
+                    border-radius: 12px;
+                    margin-bottom: 25px;
+                    border-left: 4px solid #2196f3;">
+            <h4 style="color: #1565c0; margin: 0 0 12px 0; font-size: 16px; font-weight: 600;">
+                📌 Instructions d'import
+            </h4>
+            <ul style="color: #1e40af; margin: 0; padding-left: 20px; line-height: 1.8;">
+                <li>Cliquez sur <strong>"Browse files"</strong> ci-dessous</li>
+                <li>Sélectionnez votre fichier PDF ou Excel</li>
+                <li>Le fichier sera uploadé automatiquement</li>
+            </ul>
+        </div>
+    """, unsafe_allow_html=True)
     
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2, gap="large")
     
     with col1:
-        st.markdown("### 🧪 Biologie")
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%); 
+                        padding: 20px; 
+                        border-radius: 12px;
+                        border: 2px solid #14b8a6;
+                        margin-bottom: 20px;">
+                <h3 style="color: #0f766e; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+                    🧪 Biologie
+                </h3>
+            </div>
+        """, unsafe_allow_html=True)
+        
         bio_pdf = st.file_uploader(
-            "📄 Cliquez sur 'Browse files' pour sélectionner votre PDF Biologie (SYNLAB/UNILABS)",
+            "📄 PDF Biologie (SYNLAB/UNILABS)",
             type=["pdf"],
             key="bio_pdf",
-            help="Sélectionnez un fichier PDF depuis n'importe quel dossier de votre ordinateur"
+            help="Sélectionnez un fichier PDF de biologie"
         )
         bio_excel = st.file_uploader(
             "📊 Excel Biologie (optionnel)",
@@ -511,19 +632,41 @@ with tabs[0]:
             help="Fichier Excel optionnel pour enrichir les données"
         )
         
-        # Afficher le nom du fichier uploadé
         if bio_pdf:
-            st.success(f"✅ Fichier biologie chargé : {bio_pdf.name}")
+            st.markdown(f"""
+                <div style="background: #d1fae5; padding: 12px; border-radius: 8px; border-left: 3px solid #10b981;">
+                    <p style="margin: 0; color: #065f46; font-weight: 600;">
+                        ✅ {bio_pdf.name}
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
         if bio_excel:
-            st.success(f"✅ Excel biologie chargé : {bio_excel.name}")
+            st.markdown(f"""
+                <div style="background: #d1fae5; padding: 12px; border-radius: 8px; border-left: 3px solid #10b981;">
+                    <p style="margin: 0; color: #065f46; font-weight: 600;">
+                        ✅ {bio_excel.name}
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
     
     with col2:
-        st.markdown("### 🦠 Microbiote")
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%); 
+                        padding: 20px; 
+                        border-radius: 12px;
+                        border: 2px solid #a855f7;
+                        margin-bottom: 20px;">
+                <h3 style="color: #7e22ce; margin: 0 0 15px 0; font-size: 18px; font-weight: 600;">
+                    🦠 Microbiote
+                </h3>
+            </div>
+        """, unsafe_allow_html=True)
+        
         micro_pdf = st.file_uploader(
-            "📄 Cliquez sur 'Browse files' pour sélectionner votre PDF Microbiote (IDK GutMAP)",
+            "📄 PDF Microbiote (IDK GutMAP)",
             type=["pdf"],
             key="micro_pdf",
-            help="Sélectionnez un fichier PDF depuis n'importe quel dossier de votre ordinateur"
+            help="Sélectionnez un fichier PDF de microbiote"
         )
         micro_excel = st.file_uploader(
             "📊 Excel Microbiote (optionnel)",
@@ -532,11 +675,24 @@ with tabs[0]:
             help="Fichier Excel optionnel pour enrichir les données"
         )
         
-        # Afficher le nom du fichier uploadé
         if micro_pdf:
-            st.success(f"✅ Fichier microbiote chargé : {micro_pdf.name}")
+            st.markdown(f"""
+                <div style="background: #e9d5ff; padding: 12px; border-radius: 8px; border-left: 3px solid #a855f7;">
+                    <p style="margin: 0; color: #581c87; font-weight: 600;">
+                        ✅ {micro_pdf.name}
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
         if micro_excel:
-            st.success(f"✅ Excel microbiote chargé : {micro_excel.name}")
+            st.markdown(f"""
+                <div style="background: #e9d5ff; padding: 12px; border-radius: 8px; border-left: 3px solid #a855f7;">
+                    <p style="margin: 0; color: #581c87; font-weight: 600;">
+                        ✅ {micro_excel.name}
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+    
+    st.markdown("<div style='margin: 30px 0;'>", unsafe_allow_html=True)
     
     if st.button("🚀 Extraire et Analyser", type="primary", use_container_width=True):
         if not bio_pdf and not micro_pdf:
@@ -800,39 +956,92 @@ with tabs[1]:
             # Détails biologie
             bio_details = consolidated.get("biology_details", [])
             if bio_details:
-                st.markdown("### 🧪 Biologie - Détails")
+                st.markdown("""
+                    <div style="background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%); 
+                                padding: 20px; 
+                                border-radius: 12px;
+                                border-left: 4px solid #14b8a6;
+                                margin: 25px 0;">
+                        <h3 style="color: #0f766e; margin: 0 0 10px 0; font-size: 20px; font-weight: 600;">
+                            🧪 Biologie - Détails
+                        </h3>
+                    </div>
+                """, unsafe_allow_html=True)
                 
-                # Filtres
+                # Filtres améliorés
                 filter_col1, filter_col2 = st.columns(2)
                 with filter_col1:
                     status_filter = st.multiselect(
-                        "Filtrer par statut",
+                        "🔍 Filtrer par statut",
                         options=["Bas", "Normal", "Élevé", "Inconnu"],
                         default=["Bas", "Élevé"]
                     )
                 with filter_col2:
                     priority_filter = st.multiselect(
-                        "Filtrer par priorité",
+                        "⚡ Filtrer par priorité",
                         options=["critical", "high", "medium", "normal"],
                         default=["critical", "high", "medium"]
                     )
                 
-                # Affichage cartes biomarqueurs
+                # Affichage cartes biomarqueurs avec design premium
                 filtered_bio = [
                     b for b in bio_details
                     if b.get("status") in status_filter and b.get("priority") in priority_filter
                 ]
                 
                 for bio in filtered_bio:
+                    priority = bio.get('priority')
+                    
+                    # Couleurs selon priorité
+                    if priority == 'critical':
+                        color = "#ef4444"
+                        bg_color = "#fee2e2"
+                        icon = "🔴"
+                        border_width = "3px"
+                    elif priority == 'high':
+                        color = "#f59e0b"
+                        bg_color = "#fff7ed"
+                        icon = "🟠"
+                        border_width = "3px"
+                    elif priority == 'medium':
+                        color = "#eab308"
+                        bg_color = "#fef9c3"
+                        icon = "🟡"
+                        border_width = "2px"
+                    else:
+                        color = "#10b981"
+                        bg_color = "#d1fae5"
+                        icon = "🟢"
+                        border_width = "2px"
+                    
                     with st.expander(
-                        f"{'🔴' if bio.get('priority') == 'critical' else '🟠' if bio.get('priority') == 'high' else '🟡' if bio.get('priority') == 'medium' else '🟢'} "
-                        f"{bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
-                        expanded=(bio.get('priority') in ['critical', 'high'])
+                        f"{icon} {bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
+                        expanded=(priority in ['critical', 'high'])
                     ):
-                        st.markdown(f"**Référence:** {bio.get('reference')}")
+                        # Référence avec style
+                        st.markdown(f"""
+                            <div style="background: {bg_color}; 
+                                        padding: 12px; 
+                                        border-radius: 8px;
+                                        border-left: {border_width} solid {color};
+                                        margin-bottom: 15px;">
+                                <p style="margin: 0; color: {color}; font-weight: 600; font-size: 14px;">
+                                    📊 Référence : {bio.get('reference')}
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                         
                         if bio.get('interpretation'):
-                            st.markdown("**Interprétation:**")
+                            st.markdown("""
+                                <div style="background: #f8f9fa; 
+                                            padding: 15px; 
+                                            border-radius: 8px;
+                                            border-left: 3px solid #6b7280;">
+                                    <h4 style="color: #1f2937; margin: 0 0 10px 0; font-size: 15px; font-weight: 600;">
+                                        💡 Interprétation
+                                    </h4>
+                                </div>
+                            """, unsafe_allow_html=True)
                             st.info(bio.get('interpretation'))
             
             # Microbiote
@@ -860,12 +1069,6 @@ with tabs[1]:
                                 st.info(micro.get('interpretation'))
             
             # Analyses croisées
-            # ✅ Tableau synthèse des signaux croisés
-            if isinstance(st.session_state.get("cross_table_df"), pd.DataFrame) and not st.session_state.cross_table_df.empty:
-                st.markdown("---")
-                st.markdown("### 🔗 Signaux croisés — Tableau synthèse")
-                st.dataframe(st.session_state.cross_table_df, use_container_width=True, height=260)
-
             cross = st.session_state.cross_analysis
             if cross:
                 st.markdown("---")
@@ -902,12 +1105,6 @@ with tabs[2]:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
 
-        # ✅ NOUVEAU : Focus Croisé (Biologie × Microbiote)
-        if isinstance(st.session_state.get("cross_table_df"), pd.DataFrame) and not st.session_state.cross_table_df.empty:
-            st.markdown("### 🔗 Focus Croisé (Biologie × Microbiote)")
-            st.dataframe(st.session_state.cross_table_df, use_container_width=True, height=240)
-            st.markdown("---")
-
         if st.session_state.cross_analysis:
             with st.expander("🔄 Analyses croisées détaillées", expanded=False):
                 for ca in st.session_state.cross_analysis:
@@ -926,91 +1123,137 @@ with tabs[2]:
             st.info("ℹ️ Aucune recommandation spécifique générée")
         else:
             # ─────────────────────────────────────────────────────────
-            # 🔥 PRIORITAIRES
+            # 🔥 PRIORITAIRES (Design Premium)
             # ─────────────────────────────────────────────────────────
             prioritaires = recommendations.get("Prioritaires", [])
             if prioritaires:
-                st.markdown("### 🔥 Actions Prioritaires")
-                with st.container():
-                    st.markdown(
-                        """
-                        <style>
-                        .priority-box {
-                            background-color: #ffebee;
-                            border-left: 4px solid #f44336;
-                            padding: 15px;
-                            border-radius: 5px;
-                            margin-bottom: 10px;
-                        }
-                        </style>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    for i, item in enumerate(prioritaires, 1):
-                        st.markdown(
-                            f'<div class="priority-box">🔴 <strong>{i}.</strong> {item}</div>',
-                            unsafe_allow_html=True
-                        )
+                st.markdown("""
+                    <div style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); 
+                                padding: 20px 25px; 
+                                border-radius: 12px;
+                                border-left: 5px solid #ef4444;
+                                margin: 20px 0;
+                                box-shadow: 0 4px 15px rgba(239, 68, 68, 0.2);">
+                        <h3 style="color: #991b1b; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">
+                            🔥 Actions Prioritaires
+                        </h3>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                for i, item in enumerate(prioritaires, 1):
+                    st.markdown(f"""
+                        <div style="background: white; 
+                                    padding: 15px 20px; 
+                                    border-radius: 10px;
+                                    border-left: 4px solid #ef4444;
+                                    margin: 12px 0;
+                                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                            <p style="margin: 0; color: #7f1d1d; font-weight: 600; font-size: 15px;">
+                                🔴 <strong>{i}.</strong> {item}
+                            </p>
+                        </div>
+                    """, unsafe_allow_html=True)
                 st.markdown("---")
             
             # ─────────────────────────────────────────────────────────
-            # ⚠️ À SURVEILLER
+            # ⚠️ À SURVEILLER (Design Premium)
             # ─────────────────────────────────────────────────────────
             a_surveiller = recommendations.get("À surveiller", [])
             if a_surveiller:
                 with st.expander("⚠️ **À Surveiller**", expanded=True):
+                    st.markdown("""
+                        <div style="background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%); 
+                                    padding: 15px 20px; 
+                                    border-radius: 10px;
+                                    border-left: 4px solid #f59e0b;
+                                    margin: 10px 0;">
+                    """, unsafe_allow_html=True)
                     for i, item in enumerate(a_surveiller, 1):
                         st.markdown(f"**{i}.** {item}")
+                    st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
             # ─────────────────────────────────────────────────────────
-            # 🥗 NUTRITION
+            # 🥗 NUTRITION (Design Premium)
             # ─────────────────────────────────────────────────────────
             nutrition = recommendations.get("Nutrition", [])
             if nutrition:
                 with st.expander("🥗 **Nutrition & Diététique**", expanded=True):
-                    st.markdown(
-                        """
-                        <div style="background-color: #f1f8e9; padding: 15px; border-radius: 5px; border-left: 4px solid #8bc34a;">
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    for i, item in enumerate(nutrition, 1):
-                        st.markdown(f"• {item}")
+                    st.markdown("""
+                        <div style="background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%); 
+                                    padding: 20px; 
+                                    border-radius: 10px;
+                                    border-left: 4px solid #22c55e;
+                                    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.15);">
+                    """, unsafe_allow_html=True)
+                    for item in nutrition:
+                        st.markdown(f"""
+                            <div style="background: white; 
+                                        padding: 12px 15px; 
+                                        border-radius: 8px;
+                                        margin: 8px 0;
+                                        border-left: 3px solid #22c55e;">
+                                <p style="margin: 0; color: #14532d; font-size: 14px;">
+                                    • {item}
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
             # ─────────────────────────────────────────────────────────
-            # 💊 MICRONUTRITION
+            # 💊 MICRONUTRITION (Design Premium)
             # ─────────────────────────────────────────────────────────
             micronutrition = recommendations.get("Micronutrition", [])
             if micronutrition:
                 with st.expander("💊 **Micronutrition**", expanded=True):
-                    st.markdown(
-                        """
-                        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; border-left: 4px solid #2196f3;">
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    for i, item in enumerate(micronutrition, 1):
-                        st.markdown(f"• {item}")
+                    st.markdown("""
+                        <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
+                                    padding: 20px; 
+                                    border-radius: 10px;
+                                    border-left: 4px solid #3b82f6;
+                                    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);">
+                    """, unsafe_allow_html=True)
+                    for item in micronutrition:
+                        st.markdown(f"""
+                            <div style="background: white; 
+                                        padding: 12px 15px; 
+                                        border-radius: 8px;
+                                        margin: 8px 0;
+                                        border-left: 3px solid #3b82f6;">
+                                <p style="margin: 0; color: #1e3a8a; font-size: 14px;">
+                                    • {item}
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
             # ─────────────────────────────────────────────────────────
-            # 🏃 HYGIÈNE DE VIE
+            # 🏃 HYGIÈNE DE VIE (Design Premium)
             # ─────────────────────────────────────────────────────────
             hygiene_vie = recommendations.get("Hygiène de vie", [])
             if hygiene_vie:
                 with st.expander("🏃 **Hygiène de Vie**", expanded=True):
-                    st.markdown(
-                        """
-                        <div style="background-color: #fff3e0; padding: 15px; border-radius: 5px; border-left: 4px solid #ff9800;">
-                        """,
-                        unsafe_allow_html=True
-                    )
-                    for i, item in enumerate(hygiene_vie, 1):
-                        st.markdown(f"• {item}")
+                    st.markdown("""
+                        <div style="background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%); 
+                                    padding: 20px; 
+                                    border-radius: 10px;
+                                    border-left: 4px solid #a855f7;
+                                    box-shadow: 0 2px 8px rgba(168, 85, 247, 0.15);">
+                    """, unsafe_allow_html=True)
+                    for item in hygiene_vie:
+                        st.markdown(f"""
+                            <div style="background: white; 
+                                        padding: 12px 15px; 
+                                        border-radius: 8px;
+                                        margin: 8px 0;
+                                        border-left: 3px solid #a855f7;">
+                                <p style="margin: 0; color: #581c87; font-size: 14px;">
+                                    • {item}
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
