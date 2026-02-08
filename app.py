@@ -1652,7 +1652,7 @@ st.markdown(
     <div style="text-align: center; color: #666; padding: 20px;">
         <strong> Unilabs © 2026</strong> | Powered by UNILABS Group<br>
         Dr Thibault SUTTER, PhD - Biologiste spécialisé en biologie fonctionnelle<br>
-        <em>Ce rapport est généré automatiquement par analyse multimodale IA.</em><br>
+        <em>Ce rapport est généré par analyse multimodale basé sur un système de règles.</em><br>
         <em>Il ne remplace pas un avis médical personnalisé.</em>
     </div>
     """,
