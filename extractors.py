@@ -355,8 +355,26 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     
     lines = text.splitlines()
     
-    # Extraire groupes AVEC leur result
+    # Définition manuelle des groupes GutMAP (au cas où certains n'ont pas de "Result:")
+    ALL_GUTMAP_GROUPS = {
+        "A1": "Prominent gut microbes",
+        "A2": "Diverse gut bacterial communities",
+        "B1": "Enriched on animal-based diet",
+        "C1": "Complex carbohydrate degraders",
+        "C2": "Lactic acid bacteria and probiotics",
+        "D1": "Gut epithelial integrity marker",
+        "D2": "Major SCFA producers",
+        "E1": "Inflammation indicator",
+        "E2": "Potentially virulent",
+        "E3": "Facultative anaerobes",
+        "E4": "Predominantly oral bacteria",
+        "E5": "Genital, respiratory, and skin bacteria"
+    }
+    
+    # Extraire groupes AVEC leur result (quand disponible)
     bacteria_groups = []
+    found_groups = {}  # Track quels groupes ont été trouvés
+    
     group_pattern = re.compile(r"^([A-E]\d)\.\s+(.+?)$")
     result_pattern = re.compile(r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", flags=re.IGNORECASE)
     
@@ -377,9 +395,9 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         grp_match = group_pattern.match(line_strip)
         if grp_match:
             current_group_code = grp_match.group(1).upper()
-            # Ne garder que les 50 premiers caractères pour éviter capture de description
             full_name = grp_match.group(2).strip()
             current_group_name = full_name[:50] if len(full_name) > 50 else full_name
+            found_groups[current_group_code] = True  # Marquer comme trouvé
             continue
         
         # Détecter result
@@ -392,20 +410,41 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                 "category": current_group_code,
                 "group": f"{current_group_code}. {current_group_name}",
                 "result": result_text.capitalize(),
-                "abundance": abundance  # ✅ DEPUIS TEXTE
+                "abundance": abundance,
+                "has_explicit_result": True  # ✅ Trouvé dans PDF
+            })
+            found_groups[current_group_code] = "processed"  # Marquer comme traité
+    
+    # ✅ AJOUTER LES GROUPES MANQUANTS (sans "Result:" explicite)
+    # On infère qu'ils sont "Expected" / "Normal" par défaut
+    for group_code, group_name in ALL_GUTMAP_GROUPS.items():
+        if found_groups.get(group_code) != "processed":
+            bacteria_groups.append({
+                "category": group_code,
+                "group": f"{group_code}. {group_name}",
+                "result": "Expected",  # ✅ INFÉRÉ (pas dans PDF)
+                "abundance": "Normal",  # ✅ INFÉRÉ
+                "has_explicit_result": False  # ⚠️ Inféré, pas trouvé
             })
     
-    # Dédupliquer
-    seen = set()
-    unique_groups = []
-    for g in bacteria_groups:
-        key = (g["category"], g["group"])
-        if key not in seen:
-            seen.add(key)
-            unique_groups.append(g)
+    # Trier par catégorie
+    bacteria_groups.sort(key=lambda x: x["category"])
+    
+    # ✅ Dédupliquer (garder la version avec explicit_result si doublon)
+    seen_groups = {}
+    for grp in bacteria_groups:
+        key = grp["category"]
+        if key not in seen_groups:
+            seen_groups[key] = grp
+        elif grp.get("has_explicit_result", False):
+            # Si doublon et celui-ci a un result explicite, le garder
+            seen_groups[key] = grp
+    
+    bacteria_groups = list(seen_groups.values())
+    bacteria_groups.sort(key=lambda x: x["category"])
     
     if progress:
-        progress.update(65, f"{len(unique_groups)} groupes extraits ✓")
+        progress.update(65, f"{len(bacteria_groups)} groupes extraits ✓")
     
     # ═══════════════════════════════════════════════════════════════
     # PARTIE 3: BACTÉRIES INDIVIDUELLES (MAPPING → GROUP)
@@ -452,7 +491,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             
             # ✅ Trouver l'abondance du groupe parent
             group_abundance = None
-            for grp in unique_groups:
+            for grp in bacteria_groups:
                 if grp["category"] == current_group_code:
                     group_abundance = grp["abundance"]
                     break
@@ -504,7 +543,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         "diversity": diversity,
         "diversity_metrics": diversity_metrics if diversity_metrics else None,
         "bacteria_individual": bacteria_individual,
-        "bacteria_groups": unique_groups,
+        "bacteria_groups": bacteria_groups,  # ✅ Tous les 12 groupes
         "metabolites": metabolites if metabolites else None
     }
 
