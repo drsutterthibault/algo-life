@@ -386,7 +386,8 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     found_groups = {}
     
     group_pattern = re.compile(r"^([A-E]\d)\.\s+(.+?)$")
-    result_pattern = re.compile(r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", flags=re.IGNORECASE)
+    result_pattern_en = re.compile(r"Result:\\s*(expected|slightly deviating|deviating)(?:\\s+abundance)?", flags=re.IGNORECASE)
+    result_pattern_de = re.compile(r"Ergebnis:\\s*(erwartete|leicht abweichende|abweichende)\\s+Abundanz", flags=re.IGNORECASE)
     
     current_category = None
     current_group_code = None
@@ -408,9 +409,21 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             found_groups[current_group_code] = True
             continue
         
-        res_match = result_pattern.search(line_strip)
+        # Tester EN puis DE
+        res_match = result_pattern_en.search(line_strip)
+        if not res_match:
+            res_match = result_pattern_de.search(line_strip)
+        
         if res_match and current_group_code:
             result_text = res_match.group(1).strip()
+            
+            # Mapper allemand → anglais
+            de_to_en = {
+                'erwartete': 'Expected',
+                'leicht abweichende': 'Slightly deviating',
+                'abweichende': 'Deviating'
+            }
+            result_text = de_to_en.get(result_text, result_text.capitalize())
             abundance = _map_group_result_to_abundance(result_text)
             
             bacteria_groups.append({
