@@ -395,11 +395,27 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if progress:
         progress.update(40, "Extraction dysbiose...")
     
-    # Dysbiose
+    # Dysbiose - Convertir le texte en valeur numérique pour compatibilité avec rules_engine.py
     di = None
+    di_text = None
     di_match = re.search(r"Result:\s*The microbiota is\s+(\w+)", text, flags=re.IGNORECASE)
     if di_match:
-        di = di_match.group(1)
+        di_text = di_match.group(1).lower()
+        # Mapper le texte vers une valeur numérique (échelle 1-5)
+        # normobiotic = 1-2, mildly dysbiotic = 3, severely dysbiotic = 4-5
+        if "normobiotic" in di_text:
+            di = 1
+        elif "mild" in di_text:
+            di = 3
+        elif "severe" in di_text:
+            di = 5
+        else:
+            # Fallback: essayer d'extraire un chiffre
+            num_match = re.search(r'\d+', di_text)
+            if num_match:
+                di = int(num_match.group())
+            else:
+                di = 1  # Default normobiotic
     
     # Diversité
     diversity = None
@@ -635,6 +651,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     
     return {
         "dysbiosis_index": di,
+        "dysbiosis_text": di_text,  # Texte original pour affichage
         "diversity": diversity,
         "diversity_metrics": diversity_metrics if diversity_metrics else None,
         "bacteria_individual": bacteria_individual,
