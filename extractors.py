@@ -298,9 +298,19 @@ def _extract_dots_vectorial(page):
         h = curve.get('height', 0)
         x = curve.get('x0', 0)
         y = curve.get('top', 0)
+        color = curve.get('non_stroking_color', None)  # CORRECTION: Extraire couleur
+        fill = curve.get('fill', False)  # CORRECTION: Extraire fill
         
         # Filtrer: taille entre 4 et 8 pixels (points noirs réels)
         if not (4.0 < w < 8.0 and 4.0 < h < 8.0):
+            continue
+        
+        # CORRECTION: Filtrer NOIR uniquement (exclure légende colorée)
+        if color != 0.0:
+            continue
+        
+        # CORRECTION: Doit être rempli
+        if not fill:
             continue
         
         # Filtrer: position verticale dans la zone du tableau
@@ -533,6 +543,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     bacteria_pattern = re.compile(r"^(\d{3})\s+([A-Za-z\[\]\(\)\.\-&,\s]+?)$")
     
     bacteria_order = []
+    seen_bacteria_ids = set()  # CORRECTION: Éviter doublons
     
     for line in lines:
         line_strip = line.strip()
@@ -559,6 +570,11 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             
             if len(bacteria_name) < 5:
                 continue
+            
+            # CORRECTION: Éviter doublons (page légende répète certains IDs)
+            if bacteria_id in seen_bacteria_ids:
+                continue
+            seen_bacteria_ids.add(bacteria_id)
             
             group_abundance = None
             for grp in bacteria_groups:
@@ -588,10 +604,12 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                     page_text = page.extract_text() or ""
                     
                     # Vérifier si la page contient un tableau de bactéries
-                    # (présence de "Category" ET de numéros de bactéries à 3 chiffres)
+                    # CORRECTION: Exclure pages légende/explication
                     has_bacteria_table = (
                         'Category' in page_text and
-                        re.search(r'^\d{3}\s+[A-Za-z]', page_text, re.MULTILINE)
+                        re.search(r'^\d{3}\s+[A-Za-z]', page_text, re.MULTILINE) and
+                        'REPORT FORM EXPLANATION' not in page_text and
+                        'COMMON HUMAN GUT BACTERIA' not in page_text
                     )
                     
                     if not has_bacteria_table:
@@ -612,16 +630,18 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             abundance_level = dot['abundance_level']
             status = _map_abundance_to_status(abundance_level)
         else:
+            # CORRECTION: Pas de point détecté - utiliser groupe, pas +0 par défaut
             group_abund = bact.get("group_abundance", "Normal")
-            if group_abund == "Normal":
-                abundance_level = 0
-                status = "Normal"
-            elif group_abund == "Slightly Deviating":
-                abundance_level = None
-                status = "Slightly Deviating"
+            if "Slightly Deviating" in group_abund:
+                abundance_level = 2  # Élévation modérée
+                status = "Slightly Elevated"
+            elif "Deviating" in group_abund:
+                abundance_level = 3
+                status = "Strongly Elevated"
             else:
+                # CORRECTION: None au lieu de 0
                 abundance_level = None
-                status = "Unknown"
+                status = "Not Detected"
         
         bacteria_individual.append({
             "id": bact["id"],
