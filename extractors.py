@@ -314,8 +314,13 @@ def _map_group_result_to_abundance(result_text):
         return "Unknown"
 
 
-def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection=True, 
-                          resolution=200, progress=None):
+def extract_idk_microbiome(
+    pdf_path,
+    excel_path=None,
+    enable_graphical_detection=True,
+    resolution=200,
+    progress=None
+):
     try:
         import pdfplumber
     except ImportError as e:
@@ -366,7 +371,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         progress.update(50, "Extraction bactéries...")
     
     lines = text.splitlines()
-
+    
     ALL_GUTMAP_GROUPS = {
         "A1": "Prominent gut microbes",
         "A2": "Diverse gut bacterial communities",
@@ -386,7 +391,6 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     found_groups = {}
     
     group_pattern = re.compile(r"^([A-E]\d)\.\s+(.+?)$")
-    # PATCH: tolère "slightly" + "deviating" split sur 2 lignes via buffer
     result_pattern_en = re.compile(
         r"Result:\s*(expected|deviating|slightly\s+deviating)(?:\s+abundance)?",
         flags=re.IGNORECASE
@@ -400,15 +404,11 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     current_group_code = None
     current_group_name = None
     
-    # =========================
-    # PATCH: scan avec buffer 2 lignes
-    # =========================
     for i, line in enumerate(lines):
         line_strip = (line or "").strip()
         nxt = (lines[i + 1] if i + 1 < len(lines) else "").strip()
         buf = (line_strip + " " + nxt).strip()
 
-        # PATCH: category peut être sur line ou buf
         cat_match = re.match(r"(?:Category\s+)?([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
         if not cat_match:
             cat_match = re.match(r"(?:Category\s+)?([A-E])\.\s+(.+)", buf, re.IGNORECASE)
@@ -416,18 +416,21 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             current_category = cat_match.group(1).upper()
             continue
         
-        # PATCH: groupe peut être split sur 2 lignes
         grp_match = group_pattern.match(line_strip)
         if not grp_match:
             grp_match = group_pattern.match(buf)
         if grp_match:
             current_group_code = grp_match.group(1).upper()
             full_name = grp_match.group(2).strip()
-            current_group_name = full_name[:50] if len(full_name) > 50 else full_name
+
+            # =========================
+            # PATCH: nom canonique stable (évite troncatures / variants PDF)
+            # =========================
+            current_group_name = ALL_GUTMAP_GROUPS.get(current_group_code, full_name)
+
             found_groups[current_group_code] = True
             continue
         
-        # PATCH: résultat peut être split -> on teste sur buf
         res_match = result_pattern_en.search(buf)
         if not res_match:
             res_match = result_pattern_de.search(buf)
@@ -435,7 +438,6 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         if res_match and current_group_code:
             result_text = res_match.group(1).strip()
             
-            # Mapper allemand → anglais
             de_to_en = {
                 'erwartete': 'Expected',
                 'leicht abweichende': 'Slightly deviating',
@@ -446,7 +448,8 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             
             bacteria_groups.append({
                 "category": current_group_code,
-                "group": f"{current_group_code}. {current_group_name}",
+                "group_code": current_group_code,  # PATCH: clé stable pour rules engine
+                "group": f"{current_group_code}. {ALL_GUTMAP_GROUPS.get(current_group_code, current_group_name)}",
                 "result": result_text.capitalize(),
                 "abundance": abundance,
                 "has_explicit_result": True
@@ -457,6 +460,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         if found_groups.get(group_code) != "processed":
             bacteria_groups.append({
                 "category": group_code,
+                "group_code": group_code,  # PATCH
                 "group": f"{group_code}. {group_name}",
                 "result": "Expected",
                 "abundance": "Normal",
@@ -490,9 +494,6 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     
     bacteria_order = []
     
-    # =========================
-    # PATCH: idem buffer 2 lignes pour le parsing des bactéries
-    # =========================
     for i, line in enumerate(lines):
         line_strip = (line or "").strip()
         nxt = (lines[i + 1] if i + 1 < len(lines) else "").strip()
@@ -511,7 +512,8 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         if grp_match:
             current_group_code = grp_match.group(1).upper()
             full_name = grp_match.group(2).strip()
-            current_group_name = full_name[:50] if len(full_name) > 50 else full_name
+            # PATCH: nom canonique stable
+            current_group_name = ALL_GUTMAP_GROUPS.get(current_group_code, full_name)
             continue
         
         if re.match(r"Result:\s+", line_strip, re.IGNORECASE):
@@ -536,6 +538,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                 "name": bacteria_name,
                 "category": current_group_code or current_category or "Unknown",
                 "group": current_group_name or "",
+                "group_code": current_group_code or current_category or "Unknown",  # PATCH stable
                 "group_abundance": group_abundance
             })
     
@@ -547,7 +550,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if enable_graphical_detection:
         try:
             with pdfplumber.open(pdf_path) as pdf:
-                # PATCH: scanner toutes les pages (le GutMAP peut être >5 pages)
+                # PATCH: scanner toutes les pages (GutMAP peut être > 5 pages)
                 for page_num in range(len(pdf.pages)):
                     page = pdf.pages[page_num]
                     page_dots = _extract_dots_vectorial(page)
@@ -581,6 +584,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             "name": bact["name"],
             "category": bact["category"],
             "group": bact["group"],
+            "group_code": bact.get("group_code"),  # PATCH
             "abundance_level": abundance_level,
             "status": status
         })
