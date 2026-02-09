@@ -1,16 +1,17 @@
 """
-UNILABS / ALGO-LIFE - Extractors v11.1 - SANS SCIPY
-✅ Détection graphique sans scipy (numpy pur)
-✅ Compatible avec pdfplumber + pillow + numpy seulement
-✅ Fallback gracieux si libs manquantes
+UNILABS / ALGO-LIFE - Extractors v11.2 - AVEC BARRE DE PROGRESSION
+✅ Barre de progression visuelle pour suivre l'extraction
+✅ Pourcentages et étapes détaillées
+✅ Compatible terminal et logs
 """
 
 from __future__ import annotations
 
 import os
 import re
+import sys
 import unicodedata
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Callable
 import pandas as pd
 
 # Import conditionnel pour détection graphique
@@ -21,6 +22,43 @@ try:
 except ImportError:
     GRAPHICAL_AVAILABLE = False
     np = None
+
+
+# =====================================================================
+# 🆕 SYSTÈME DE PROGRESSION
+# =====================================================================
+class ProgressTracker:
+    """Gestionnaire de barre de progression élégante"""
+    
+    def __init__(self, total_steps: int = 100, show_bar: bool = True):
+        self.total_steps = total_steps
+        self.current_step = 0
+        self.show_bar = show_bar
+        self.current_task = ""
+    
+    def update(self, step: int, task: str = ""):
+        """Met à jour la progression"""
+        self.current_step = min(step, self.total_steps)
+        self.current_task = task
+        
+        if self.show_bar:
+            self._render()
+    
+    def _render(self):
+        """Affiche la barre de progression"""
+        percent = int((self.current_step / self.total_steps) * 100)
+        bar_length = 40
+        filled = int((percent / 100) * bar_length)
+        bar = "█" * filled + "░" * (bar_length - filled)
+        
+        # Effacer la ligne précédente et afficher
+        sys.stdout.write(f"\r🔄 [{bar}] {percent}% - {self.current_task}")
+        sys.stdout.flush()
+        
+        # Nouvelle ligne si terminé
+        if self.current_step >= self.total_steps:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
 
 # =====================================================================
@@ -150,10 +188,17 @@ def _is_noise_line(line: str) -> bool:
     return False
 
 
-def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
+def extract_synlab_biology(pdf_path: str, progress: Optional[ProgressTracker] = None) -> Dict[str, Any]:
+    """Extraction biologie avec progression"""
+    if progress:
+        progress.update(5, "Lecture PDF biologie...")
+    
     text = _read_pdf_text(pdf_path)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     out: Dict[str, Any] = {}
+    
+    if progress:
+        progress.update(15, "Parsing biomarqueurs...")
 
     pat_fr = re.compile(
         r"^(?P<n>[A-ZÀ-Ÿ0-9\.\-\/\s]{3,60})\s+"
@@ -172,9 +217,15 @@ def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
         flags=re.UNICODE,
     )
 
-    for ln in lines:
+    total_lines = len(lines)
+    for idx, ln in enumerate(lines):
         if _is_noise_line(ln):
             continue
+
+        # Mise à jour progressive
+        if progress and idx % 10 == 0:
+            percent = 15 + int((idx / total_lines) * 15)  # 15% → 30%
+            progress.update(percent, f"Biomarqueur {idx}/{total_lines}...")
 
         m = pat_be.match(ln)
         if m:
@@ -200,19 +251,17 @@ def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
             out[name] = {"value": value_float, "unit": unit, "reference": ref, "status": status}
             continue
 
+    if progress:
+        progress.update(30, f"Biologie: {len(out)} biomarqueurs extraits ✓")
+    
     return out
 
 
 # =====================================================================
-# 🆕 DÉTECTION GRAPHIQUE - VERSION NUMPY PUR (SANS SCIPY)
+# DÉTECTION GRAPHIQUE (AVEC PROGRESSION)
 # =====================================================================
 def _find_connected_components(binary_image):
-    """
-    Détection de composantes connexes sans scipy
-    Algorithme simple: flood fill itératif
-    
-    Returns: labeled_image, num_labels
-    """
+    """Détection composantes connexes sans scipy"""
     if not GRAPHICAL_AVAILABLE:
         return None, 0
     
@@ -221,7 +270,6 @@ def _find_connected_components(binary_image):
     label = 0
     
     def flood_fill(y, x, current_label):
-        """Flood fill récursif optimisé"""
         stack = [(y, x)]
         while stack:
             cy, cx = stack.pop()
@@ -232,14 +280,12 @@ def _find_connected_components(binary_image):
             
             labeled[cy, cx] = current_label
             
-            # 8-connectivité
             for dy in [-1, 0, 1]:
                 for dx in [-1, 0, 1]:
                     if dy == 0 and dx == 0:
                         continue
                     stack.append((cy + dy, cx + dx))
     
-    # Scanner l'image
     for y in range(height):
         for x in range(width):
             if binary_image[y, x] and labeled[y, x] == 0:
@@ -254,22 +300,16 @@ def _detect_abundance_dots_on_page(
     table_bbox: Optional[Tuple[float, float, float, float]] = None,
     resolution: int = 200
 ) -> Dict[int, int]:
-    """
-    Détecte les points noirs sans scipy
-    """
+    """Détecte les points noirs"""
     if not GRAPHICAL_AVAILABLE:
         return {}
     
     try:
-        # Convertir page → image
         img = page.to_image(resolution=resolution)
         pil_img = img.original
-        
-        # Niveaux de gris
         gray = pil_img.convert('L')
         arr = np.array(gray)
         
-        # Zone tableau
         if table_bbox is None:
             page_width = page.width
             page_height = page.height
@@ -280,7 +320,6 @@ def _detect_abundance_dots_on_page(
         else:
             x0, top, x1, bottom = table_bbox
         
-        # Pixels
         scale = resolution / 72.0
         px0 = int(x0 * scale)
         px1 = int(x1 * scale)
@@ -288,16 +327,11 @@ def _detect_abundance_dots_on_page(
         pbottom = int(bottom * scale)
         
         table_region = arr[ptop:pbottom, px0:px1]
-        
-        # Seuil pour points noirs
         dark_threshold = 80
         dark_pixels = table_region < dark_threshold
-        
-        # Colonnes grille (-3 à +3)
         num_columns = 7
         col_width = table_region.shape[1] / num_columns
         
-        # Détection composantes connexes (SANS scipy)
         labeled, num_features = _find_connected_components(dark_pixels)
         
         if labeled is None:
@@ -306,42 +340,35 @@ def _detect_abundance_dots_on_page(
         results = {}
         
         for i in range(1, num_features + 1):
-            # Coordonnées du blob
             blob_mask = (labeled == i)
             blob_coords = np.where(blob_mask)
             
             if len(blob_coords[0]) == 0:
                 continue
             
-            # Dimensions
             y_min, y_max = blob_coords[0].min(), blob_coords[0].max()
             x_min, x_max = blob_coords[1].min(), blob_coords[1].max()
             blob_height = y_max - y_min
             blob_width = x_max - x_min
             
-            # Filtrer: points entre 3-30 pixels
             if not (3 < blob_height < 30 and 3 < blob_width < 30):
                 continue
             
-            # Test circularité simple
             blob_area = len(blob_coords[0])
             bounding_area = blob_height * blob_width
             if bounding_area == 0:
                 continue
             fill_ratio = blob_area / bounding_area
-            if fill_ratio < 0.5:  # Trop fragmenté
+            if fill_ratio < 0.5:
                 continue
             
-            # Centre du blob
             y_center = np.mean(blob_coords[0])
             x_center = np.mean(blob_coords[1])
             
-            # Map X → colonne (-3 à +3)
             col_index = int(x_center / col_width)
             col_index = max(0, min(6, col_index))
             abundance_level = col_index - 3
             
-            # Map Y → ligne
             row_index = int(y_center / 30)
             
             results[row_index] = abundance_level
@@ -349,7 +376,6 @@ def _detect_abundance_dots_on_page(
         return results
     
     except Exception as e:
-        print(f"⚠️ Détection graphique échouée: {e}")
         return {}
 
 
@@ -383,27 +409,32 @@ def _map_group_abundance(bacteria_list: List[Dict[str, Any]]) -> Optional[str]:
 
 
 # =====================================================================
-# MICROBIOTE - EXTRACTION AMÉLIORÉE
+# MICROBIOTE - EXTRACTION AVEC PROGRESSION
 # =====================================================================
 def extract_idk_microbiome(
     pdf_path: str, 
     excel_path: Optional[str] = None,
     enable_graphical_detection: bool = True,
-    resolution: int = 200
+    resolution: int = 200,
+    progress: Optional[ProgressTracker] = None
 ) -> Dict[str, Any]:
-    """
-    Extraction microbiome GutMAP avec détection graphique optionnelle
-    """
+    """Extraction microbiome GutMAP avec barre de progression"""
     try:
         import pdfplumber
     except ImportError as e:
         raise ImportError("pdfplumber manquant. pip install pdfplumber") from e
     
+    if progress:
+        progress.update(35, "Lecture PDF microbiome...")
+    
     text = _read_pdf_text(pdf_path)
     
     # ═══════════════════════════════════════════════════════════════
-    # PARTIE 1: EXTRACTION TEXTE (INCHANGÉ)
+    # PARTIE 1: EXTRACTION TEXTE
     # ═══════════════════════════════════════════════════════════════
+    
+    if progress:
+        progress.update(40, "Extraction Dysbiosis Index...")
     
     # DI
     di = None
@@ -423,6 +454,9 @@ def extract_idk_microbiome(
             elif "moderate" in label:
                 di = 3
     
+    if progress:
+        progress.update(45, "Extraction Diversity...")
+    
     # Diversity
     diversity = None
     md = re.search(r"Result:\s*The bacterial diversity is\s+([A-Za-z\- ]+)", text, flags=re.IGNORECASE)
@@ -437,6 +471,9 @@ def extract_idk_microbiome(
     if m_simpson:
         diversity_metrics["simpson"] = _safe_float(m_simpson.group(1))
     
+    if progress:
+        progress.update(50, "Extraction bactéries individuelles...")
+    
     # Bactéries individuelles
     bacteria_individual: List[Dict[str, Any]] = []
     current_category = None
@@ -446,8 +483,13 @@ def extract_idk_microbiome(
     lines = text.splitlines()
     bacteria_pattern = re.compile(r"^(\d{3})\s+([A-Za-z\[\]\(\)\.\-&,\s]+?)$")
     
-    for line in lines:
+    for idx, line in enumerate(lines):
         line_strip = line.strip()
+        
+        # Mise à jour progressive
+        if progress and idx % 20 == 0:
+            percent = 50 + int((idx / len(lines)) * 15)  # 50% → 65%
+            progress.update(percent, f"Parsing ligne {idx}/{len(lines)}...")
         
         cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
         if cat_match:
@@ -480,7 +522,13 @@ def extract_idk_microbiome(
             }
             bacteria_individual.append(bacteria_info)
     
+    if progress:
+        progress.update(65, f"{len(bacteria_individual)} bactéries extraites ✓")
+    
     # Groupes
+    if progress:
+        progress.update(68, "Extraction groupes bactériens...")
+    
     group_header = re.compile(r"(?m)^([A-Z]\d)\.\s+(.+?)\s*$")
     result_line = re.compile(
         r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", 
@@ -526,6 +574,9 @@ def extract_idk_microbiome(
         seen_groups.add(key)
         uniq_groups.append(b)
     
+    if progress:
+        progress.update(70, "Extraction métabolites...")
+    
     # Métabolites
     metabolites = {}
     m_but = re.search(r"Butyrate[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
@@ -539,21 +590,32 @@ def extract_idk_microbiome(
         metabolites["propionate"] = _safe_float(m_pro.group(1))
     
     # ═══════════════════════════════════════════════════════════════
-    # PARTIE 2: DÉTECTION GRAPHIQUE (NOUVEAU)
+    # PARTIE 2: DÉTECTION GRAPHIQUE
     # ═══════════════════════════════════════════════════════════════
     
     if enable_graphical_detection and GRAPHICAL_AVAILABLE:
         try:
+            if progress:
+                progress.update(75, "Analyse graphique des points noirs...")
+            
             with pdfplumber.open(pdf_path) as pdf:
                 all_dots = {}
+                num_pages = min(6, len(pdf.pages)) - 2
                 
-                for page_num in range(min(2, len(pdf.pages)), min(6, len(pdf.pages))):
+                for page_idx, page_num in enumerate(range(2, min(6, len(pdf.pages)))):
+                    if progress:
+                        page_percent = 75 + int((page_idx / num_pages) * 15)  # 75% → 90%
+                        progress.update(page_percent, f"Scan page {page_num + 1}...")
+                    
                     page = pdf.pages[page_num]
                     page_dots = _detect_abundance_dots_on_page(page, resolution=resolution)
                     
                     for row_idx, abundance in page_dots.items():
                         global_idx = (page_num - 2) * 50 + row_idx
                         all_dots[global_idx] = abundance
+                
+                if progress:
+                    progress.update(90, f"{len(all_dots)} points détectés, mapping...")
                 
                 sorted_dots = sorted(all_dots.items())
                 
@@ -568,13 +630,20 @@ def extract_idk_microbiome(
                     group_bacteria = [b for b in bacteria_individual if b["category"] == group_code]
                     group["abundance"] = _map_group_abundance(group_bacteria)
                 
-                print(f"✅ Détection graphique: {len(all_dots)} points détectés")
+                if progress:
+                    progress.update(95, "Analyse graphique terminée ✓")
         
         except Exception as e:
-            print(f"⚠️ Détection graphique échouée: {e}")
+            if progress:
+                progress.update(95, f"⚠️ Analyse graphique échouée")
+            print(f"\n⚠️ Détection graphique échouée: {e}")
     
     elif enable_graphical_detection and not GRAPHICAL_AVAILABLE:
-        print("⚠️ Détection graphique désactivée: numpy/pillow manquants")
+        if progress:
+            progress.update(95, "Détection graphique désactivée (libs manquantes)")
+    
+    if progress:
+        progress.update(100, "Extraction microbiome terminée ✓")
     
     return {
         "dysbiosis_index": di,
@@ -587,10 +656,14 @@ def extract_idk_microbiome(
 
 
 # =====================================================================
-# EXCEL (INCHANGÉ)
+# EXCEL (AVEC PROGRESSION)
 # =====================================================================
-def extract_biology_from_excel(excel_path: str) -> Dict[str, Any]:
+def extract_biology_from_excel(excel_path: str, progress: Optional[ProgressTracker] = None) -> Dict[str, Any]:
+    """Extraction Excel avec progression"""
     try:
+        if progress:
+            progress.update(10, "Lecture fichier Excel...")
+        
         df = pd.read_excel(excel_path)
         col_name = None
         col_value = None
@@ -612,7 +685,13 @@ def extract_biology_from_excel(excel_path: str) -> Dict[str, Any]:
             return {}
         
         out = {}
-        for _, row in df.iterrows():
+        total_rows = len(df)
+        
+        for idx, row in df.iterrows():
+            if progress and idx % 5 == 0:
+                percent = 10 + int((idx / total_rows) * 20)  # 10% → 30%
+                progress.update(percent, f"Excel: ligne {idx}/{total_rows}...")
+            
             name = str(row.get(col_name, "")).strip()
             if not name or name.lower() == "nan":
                 continue
@@ -629,6 +708,9 @@ def extract_biology_from_excel(excel_path: str) -> Dict[str, Any]:
                 "reference": ref,
                 "status": status
             }
+        
+        if progress:
+            progress.update(30, f"Excel: {len(out)} entrées extraites ✓")
         
         return out
     
@@ -653,28 +735,49 @@ def biology_dict_to_list(biology: Dict[str, Any], default_category: str = "Autre
     return out
 
 
+# =====================================================================
+# ORCHESTRATEUR PRINCIPAL AVEC PROGRESSION
+# =====================================================================
 def extract_all_data(
     bio_pdf_path: Optional[str] = None,
     bio_excel_path: Optional[str] = None,
     micro_pdf_path: Optional[str] = None,
     micro_excel_path: Optional[str] = None,
-    enable_graphical_detection: bool = True
+    enable_graphical_detection: bool = True,
+    show_progress: bool = True
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Extraction orchestrée avec barre de progression
+    
+    Args:
+        show_progress: Affiche la barre de progression (défaut: True)
+    """
+    progress = ProgressTracker(total_steps=100, show_bar=show_progress) if show_progress else None
+    
     biology = {}
     microbiome = {}
     
+    if progress:
+        progress.update(0, "Démarrage de l'extraction...")
+    
+    # Biologie
     if bio_pdf_path:
-        biology.update(extract_synlab_biology(bio_pdf_path))
+        biology.update(extract_synlab_biology(bio_pdf_path, progress))
     
     if bio_excel_path:
-        biology.update(extract_biology_from_excel(bio_excel_path))
+        biology.update(extract_biology_from_excel(bio_excel_path, progress))
     
+    # Microbiote
     if micro_pdf_path:
         microbiome = extract_idk_microbiome(
             micro_pdf_path, 
             micro_excel_path,
-            enable_graphical_detection=enable_graphical_detection
+            enable_graphical_detection=enable_graphical_detection,
+            progress=progress
         )
+    
+    if progress:
+        progress.update(100, "✅ Extraction complète terminée!")
     
     return biology, microbiome
 
@@ -686,18 +789,18 @@ if __name__ == "__main__":
     import json
     
     print("="*80)
-    print("🧪 TEST v11.1 - SANS SCIPY")
+    print("🧪 TEST v11.2 - AVEC BARRE DE PROGRESSION")
     print("="*80)
+    print()
     
     pdf_path = "/mnt/user-data/uploads/IDK_GutMAP_Sample_report_DI-1_EN.pdf"
     
     if os.path.exists(pdf_path):
-        print(f"\n📄 Extraction: {pdf_path}")
-        
         result = extract_idk_microbiome(
             pdf_path,
             enable_graphical_detection=True,
-            resolution=200
+            resolution=200,
+            progress=ProgressTracker(total_steps=100, show_bar=True)
         )
         
         print(f"\n📊 RÉSULTATS:")
@@ -709,16 +812,4 @@ if __name__ == "__main__":
         print(f"  • Avec abondance: {with_abundance}/{len(result['bacteria_individual'])}")
         
         if result['bacteria_individual']:
-            print(f"\n🦠 Exemples:")
-            for i, b in enumerate(result['bacteria_individual'][:5], 1):
-                level = b['abundance_level']
-                level_str = f"{level:+d}" if level is not None else "N/A"
-                print(f"  {i}. [{b['id']}] {b['name']} | {level_str} | {b['status']}")
-        
-        output = "/mnt/user-data/outputs/microbiome_v11_1.json"
-        with open(output, 'w', encoding='utf-8') as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        
-        print(f"\n💾 Sauvegardé: {output}")
-    else:
-        print(f"\n❌ Fichier non trouvé")
+            print(f"\n
