@@ -1,10 +1,8 @@
 """
-UNILABS / ALGO-LIFE - Extractors v11.0 - GRAPHICAL ABUNDANCE DETECTION
-✅ Extraction texte conservée (inchangée)
-✅ Détection graphique des points noirs via analyse d'image
-✅ Mapping -3 à +3 automatique sur la grille
-✅ Injection abundance_level + status dans bacteria_individual
-✅ Injection abundance dans bacteria_groups (pour ton UI)
+UNILABS / ALGO-LIFE - Extractors v11.1 - SANS SCIPY
+✅ Détection graphique sans scipy (numpy pur)
+✅ Compatible avec pdfplumber + pillow + numpy seulement
+✅ Fallback gracieux si libs manquantes
 """
 
 from __future__ import annotations
@@ -14,15 +12,21 @@ import re
 import unicodedata
 from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
-import numpy as np
-from PIL import Image
+
+# Import conditionnel pour détection graphique
+try:
+    import numpy as np
+    from PIL import Image
+    GRAPHICAL_AVAILABLE = True
+except ImportError:
+    GRAPHICAL_AVAILABLE = False
+    np = None
 
 
 # =====================================================================
-# NORMALISATION ROBUSTE POUR MATCHING (INCHANGÉ)
+# NORMALISATION ROBUSTE (INCHANGÉ)
 # =====================================================================
 def normalize_biomarker_name(name: str) -> str:
-    """Normalisation robuste pour matcher Excel"""
     if name is None:
         return ""
     s = str(name).strip()
@@ -49,7 +53,6 @@ def normalize_biomarker_name(name: str) -> str:
 
 
 def _safe_float(x) -> Optional[float]:
-    """Conversion sécurisée en float"""
     try:
         if x is None:
             return None
@@ -61,7 +64,6 @@ def _safe_float(x) -> Optional[float]:
 
 
 def _clean_ref(ref: str) -> str:
-    """Nettoie une référence"""
     if ref is None:
         return ""
     r = str(ref).strip()
@@ -71,7 +73,6 @@ def _clean_ref(ref: str) -> str:
 
 
 def determine_biomarker_status(value, reference, biomarker_name=None) -> str:
-    """Détermine le statut d'un biomarqueur"""
     v = _safe_float(value)
     if v is None:
         return "Inconnu"
@@ -106,7 +107,6 @@ def determine_biomarker_status(value, reference, biomarker_name=None) -> str:
 # PDF TEXT LOADER (INCHANGÉ)
 # =====================================================================
 def _read_pdf_text(pdf_path: str) -> str:
-    """Lit le texte complet d'un PDF"""
     try:
         import pdfplumber
     except ImportError as e:
@@ -119,7 +119,7 @@ def _read_pdf_text(pdf_path: str) -> str:
 
 
 # =====================================================================
-# BIOLOGIE - EXTRACTION PDF (INCHANGÉ)
+# BIOLOGIE (INCHANGÉ)
 # =====================================================================
 _IGNORE_PATTERNS = [
     r"^Édition\s*:",
@@ -139,7 +139,6 @@ _IGNORE_PATTERNS = [
 
 
 def _is_noise_line(line: str) -> bool:
-    """Détecte les lignes de bruit"""
     if not line:
         return True
     s = line.strip()
@@ -152,7 +151,6 @@ def _is_noise_line(line: str) -> bool:
 
 
 def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
-    """Extraction biologie depuis PDF SYNLAB/UNILABS (INCHANGÉ)"""
     text = _read_pdf_text(pdf_path)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     out: Dict[str, Any] = {}
@@ -206,119 +204,156 @@ def extract_synlab_biology(pdf_path: str) -> Dict[str, Any]:
 
 
 # =====================================================================
-# 🆕 DÉTECTION GRAPHIQUE DES POINTS NOIRS (NOUVELLE SECTION)
+# 🆕 DÉTECTION GRAPHIQUE - VERSION NUMPY PUR (SANS SCIPY)
 # =====================================================================
+def _find_connected_components(binary_image):
+    """
+    Détection de composantes connexes sans scipy
+    Algorithme simple: flood fill itératif
+    
+    Returns: labeled_image, num_labels
+    """
+    if not GRAPHICAL_AVAILABLE:
+        return None, 0
+    
+    height, width = binary_image.shape
+    labeled = np.zeros_like(binary_image, dtype=int)
+    label = 0
+    
+    def flood_fill(y, x, current_label):
+        """Flood fill récursif optimisé"""
+        stack = [(y, x)]
+        while stack:
+            cy, cx = stack.pop()
+            if cy < 0 or cy >= height or cx < 0 or cx >= width:
+                continue
+            if labeled[cy, cx] != 0 or not binary_image[cy, cx]:
+                continue
+            
+            labeled[cy, cx] = current_label
+            
+            # 8-connectivité
+            for dy in [-1, 0, 1]:
+                for dx in [-1, 0, 1]:
+                    if dy == 0 and dx == 0:
+                        continue
+                    stack.append((cy + dy, cx + dx))
+    
+    # Scanner l'image
+    for y in range(height):
+        for x in range(width):
+            if binary_image[y, x] and labeled[y, x] == 0:
+                label += 1
+                flood_fill(y, x, label)
+    
+    return labeled, label
+
+
 def _detect_abundance_dots_on_page(
     page,
     table_bbox: Optional[Tuple[float, float, float, float]] = None,
     resolution: int = 200
 ) -> Dict[int, int]:
     """
-    Détecte les points noirs (●) sur une page et map leur position sur la grille -3 à +3
-    
-    Args:
-        page: pdfplumber page object
-        table_bbox: (x0, top, x1, bottom) de la zone du tableau (optionnel, sinon auto-detect)
-        resolution: DPI pour le rendu image
-    
-    Returns:
-        Dict[row_index, abundance_level]
-        row_index = ligne approximative (basé sur Y)
-        abundance_level = -3 à +3 (basé sur X)
+    Détecte les points noirs sans scipy
     """
+    if not GRAPHICAL_AVAILABLE:
+        return {}
+    
     try:
-        # Convertir la page en image
+        # Convertir page → image
         img = page.to_image(resolution=resolution)
         pil_img = img.original
         
-        # Convertir en niveaux de gris
+        # Niveaux de gris
         gray = pil_img.convert('L')
         arr = np.array(gray)
         
-        # Déterminer la zone du tableau si non fournie
+        # Zone tableau
         if table_bbox is None:
-            # Zone centrale typique pour les tableaux GutMAP (pages 2-5)
-            # Ajuster selon ton PDF réel
             page_width = page.width
             page_height = page.height
-            x0 = page_width * 0.15  # 15% du bord gauche
-            x1 = page_width * 0.85  # 85% du bord gauche
-            top = page_height * 0.20  # 20% du haut
-            bottom = page_height * 0.80  # 80% du haut
+            x0 = page_width * 0.15
+            x1 = page_width * 0.85
+            top = page_height * 0.20
+            bottom = page_height * 0.80
         else:
             x0, top, x1, bottom = table_bbox
         
-        # Convertir coordonnées PDF → pixels
+        # Pixels
         scale = resolution / 72.0
         px0 = int(x0 * scale)
         px1 = int(x1 * scale)
         ptop = int(top * scale)
         pbottom = int(bottom * scale)
         
-        # Extraire la zone du tableau
         table_region = arr[ptop:pbottom, px0:px1]
         
-        # Détecter les pixels sombres (points noirs)
-        # Les points noirs sont généralement < 100 en niveaux de gris
+        # Seuil pour points noirs
         dark_threshold = 80
         dark_pixels = table_region < dark_threshold
         
-        # Définir les colonnes de la grille (-3 à +3)
-        # GutMAP a 7 colonnes équidistantes
+        # Colonnes grille (-3 à +3)
         num_columns = 7
         col_width = table_region.shape[1] / num_columns
         
-        # Trouver les blobs (groupes de pixels sombres)
-        from scipy import ndimage
-        labeled, num_features = ndimage.label(dark_pixels)
+        # Détection composantes connexes (SANS scipy)
+        labeled, num_features = _find_connected_components(dark_pixels)
+        
+        if labeled is None:
+            return {}
         
         results = {}
         
         for i in range(1, num_features + 1):
             # Coordonnées du blob
-            blob_coords = np.where(labeled == i)
+            blob_mask = (labeled == i)
+            blob_coords = np.where(blob_mask)
             
-            # Vérifier que c'est un point (pas une ligne)
-            blob_height = blob_coords[0].max() - blob_coords[0].min()
-            blob_width = blob_coords[1].max() - blob_coords[1].min()
+            if len(blob_coords[0]) == 0:
+                continue
             
-            # Filtrer: les points font généralement 5-20 pixels
+            # Dimensions
+            y_min, y_max = blob_coords[0].min(), blob_coords[0].max()
+            x_min, x_max = blob_coords[1].min(), blob_coords[1].max()
+            blob_height = y_max - y_min
+            blob_width = x_max - x_min
+            
+            # Filtrer: points entre 3-30 pixels
             if not (3 < blob_height < 30 and 3 < blob_width < 30):
                 continue
             
-            # Vérifier qu'il est assez dense (circulaire)
+            # Test circularité simple
             blob_area = len(blob_coords[0])
-            expected_area = np.pi * (blob_width / 2) ** 2
-            if blob_area < expected_area * 0.5:  # Au moins 50% de circularité
+            bounding_area = blob_height * blob_width
+            if bounding_area == 0:
+                continue
+            fill_ratio = blob_area / bounding_area
+            if fill_ratio < 0.5:  # Trop fragmenté
                 continue
             
-            # Position du centre du blob
+            # Centre du blob
             y_center = np.mean(blob_coords[0])
             x_center = np.mean(blob_coords[1])
             
-            # Mapper X sur colonne (-3 à +3)
+            # Map X → colonne (-3 à +3)
             col_index = int(x_center / col_width)
-            col_index = max(0, min(6, col_index))  # Clamp 0-6
-            abundance_level = col_index - 3  # -3 à +3
+            col_index = max(0, min(6, col_index))
+            abundance_level = col_index - 3
             
-            # Mapper Y sur ligne (approximatif)
-            row_index = int(y_center / 30)  # ~30 pixels par ligne (ajuster selon PDF)
+            # Map Y → ligne
+            row_index = int(y_center / 30)
             
             results[row_index] = abundance_level
         
         return results
     
     except Exception as e:
-        print(f"⚠️ Erreur détection graphique: {e}")
+        print(f"⚠️ Détection graphique échouée: {e}")
         return {}
 
 
 def _map_abundance_to_status(abundance_level: int) -> str:
-    """
-    Convertit un niveau d'abondance (-3 à +3) en statut textuel
-    
-    Returns: "Reduced" | "Normal" | "Elevated"
-    """
     if abundance_level is None:
         return "Unknown"
     if abundance_level < -1:
@@ -330,11 +365,6 @@ def _map_abundance_to_status(abundance_level: int) -> str:
 
 
 def _map_group_abundance(bacteria_list: List[Dict[str, Any]]) -> Optional[str]:
-    """
-    Calcule l'abondance globale d'un groupe à partir de ses bactéries
-    
-    Returns: "Reduced" | "Normal" | "Elevated" | None
-    """
     if not bacteria_list:
         return None
     
@@ -353,7 +383,7 @@ def _map_group_abundance(bacteria_list: List[Dict[str, Any]]) -> Optional[str]:
 
 
 # =====================================================================
-# MICROBIOTE - EXTRACTION AMÉLIORÉE AVEC DÉTECTION GRAPHIQUE
+# MICROBIOTE - EXTRACTION AMÉLIORÉE
 # =====================================================================
 def extract_idk_microbiome(
     pdf_path: str, 
@@ -362,55 +392,20 @@ def extract_idk_microbiome(
     resolution: int = 200
 ) -> Dict[str, Any]:
     """
-    Extraction microbiome IDK GutMAP AVEC DÉTECTION GRAPHIQUE
-    
-    Args:
-        pdf_path: Chemin vers le PDF GutMAP
-        excel_path: Optionnel, données Excel supplémentaires
-        enable_graphical_detection: Active la détection des points noirs (défaut: True)
-        resolution: DPI pour l'analyse d'image (défaut: 200, augmenter si imprécis)
-    
-    Output:
-    {
-        "dysbiosis_index": int | None,
-        "diversity": str | None,
-        "bacteria_individual": [
-            {
-                "id": "701",
-                "name": "Akkermansia muciniphila",
-                "category": "D1",
-                "group": "Gut epithelial integrity marker",
-                "abundance_level": 0,  # ✅ -3 à +3 (graphique)
-                "status": "Normal"  # ✅ Reduced/Normal/Elevated
-            },
-            ...
-        ],
-        "bacteria_groups": [
-            {
-                "category": "A1",
-                "group": "A1. Prominent gut microbes",
-                "result": "Expected",
-                "abundance": "Normal"  # ✅ NOUVEAU pour ton UI
-            },
-            ...
-        ],
-        "diversity_metrics": {...},
-        "metabolites": {...}
-    }
+    Extraction microbiome GutMAP avec détection graphique optionnelle
     """
     try:
         import pdfplumber
-        from scipy import ndimage  # Pour détection de blobs
     except ImportError as e:
-        raise ImportError("Dépendances manquantes: pip install pdfplumber scipy pillow numpy") from e
+        raise ImportError("pdfplumber manquant. pip install pdfplumber") from e
     
     text = _read_pdf_text(pdf_path)
     
     # ═══════════════════════════════════════════════════════════════
-    # PARTIE 1: EXTRACTION TEXTE (TON CODE ORIGINAL, INCHANGÉ)
+    # PARTIE 1: EXTRACTION TEXTE (INCHANGÉ)
     # ═══════════════════════════════════════════════════════════════
     
-    # 1. DYSBIOSIS INDEX
+    # DI
     di = None
     m_di = re.search(r"(?:DI|Dysbiosis\s+index)\s*[:\-]?\s*([1-5])", text, flags=re.IGNORECASE)
     if m_di:
@@ -428,7 +423,7 @@ def extract_idk_microbiome(
             elif "moderate" in label:
                 di = 3
     
-    # 2. DIVERSITY
+    # Diversity
     diversity = None
     md = re.search(r"Result:\s*The bacterial diversity is\s+([A-Za-z\- ]+)", text, flags=re.IGNORECASE)
     if md:
@@ -442,7 +437,7 @@ def extract_idk_microbiome(
     if m_simpson:
         diversity_metrics["simpson"] = _safe_float(m_simpson.group(1))
     
-    # 3. BACTÉRIES INDIVIDUELLES (extraction texte)
+    # Bactéries individuelles
     bacteria_individual: List[Dict[str, Any]] = []
     current_category = None
     current_group = None
@@ -454,29 +449,24 @@ def extract_idk_microbiome(
     for line in lines:
         line_strip = line.strip()
         
-        # Headers catégorie
         cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
         if cat_match:
             current_category = cat_match.group(1).upper()
             continue
         
-        # Headers groupe
         group_match = re.match(r"([A-E]\d)\.\s+(.+)", line_strip)
         if group_match:
             current_group_code = group_match.group(1).upper()
             current_group = group_match.group(2).strip()
         
-        # Lignes "Result: ..." → skip (pas des bactéries)
         if re.match(r"Result:\s+", line_strip, re.IGNORECASE):
             continue
         
-        # Bactéries
         bacteria_match = bacteria_pattern.match(line_strip)
         if bacteria_match:
             bacteria_id = bacteria_match.group(1)
             bacteria_name = bacteria_match.group(2).strip()
             
-            # Filtrer lignes trop courtes (probablement pas une bactérie)
             if len(bacteria_name) < 5:
                 continue
             
@@ -485,12 +475,12 @@ def extract_idk_microbiome(
                 "name": bacteria_name,
                 "category": current_group_code or current_category or "Unknown",
                 "group": current_group or "",
-                "abundance_level": None,  # ✅ Sera enrichi en partie 2
-                "status": "Unknown"  # ✅ Sera enrichi en partie 2
+                "abundance_level": None,
+                "status": "Unknown"
             }
             bacteria_individual.append(bacteria_info)
     
-    # 4. GROUPES (extraction texte)
+    # Groupes
     group_header = re.compile(r"(?m)^([A-Z]\d)\.\s+(.+?)\s*$")
     result_line = re.compile(
         r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", 
@@ -523,7 +513,7 @@ def extract_idk_microbiome(
                 "category": current_code,
                 "group": current_grp,
                 "result": res,
-                "abundance": None  # ✅ Sera enrichi en partie 2
+                "abundance": None
             })
     
     # Dédupliquer
@@ -536,7 +526,7 @@ def extract_idk_microbiome(
         seen_groups.add(key)
         uniq_groups.append(b)
     
-    # 5. MÉTABOLITES
+    # Métabolites
     metabolites = {}
     m_but = re.search(r"Butyrate[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
     if m_but:
@@ -549,49 +539,42 @@ def extract_idk_microbiome(
         metabolites["propionate"] = _safe_float(m_pro.group(1))
     
     # ═══════════════════════════════════════════════════════════════
-    # PARTIE 2: DÉTECTION GRAPHIQUE DES POINTS NOIRS (NOUVEAU)
+    # PARTIE 2: DÉTECTION GRAPHIQUE (NOUVEAU)
     # ═══════════════════════════════════════════════════════════════
     
-    if enable_graphical_detection:
+    if enable_graphical_detection and GRAPHICAL_AVAILABLE:
         try:
             with pdfplumber.open(pdf_path) as pdf:
-                # Scanner pages 2-5 (tableaux de bactéries)
                 all_dots = {}
                 
                 for page_num in range(min(2, len(pdf.pages)), min(6, len(pdf.pages))):
                     page = pdf.pages[page_num]
                     page_dots = _detect_abundance_dots_on_page(page, resolution=resolution)
                     
-                    # Stocker avec offset de page
                     for row_idx, abundance in page_dots.items():
-                        global_idx = (page_num - 2) * 50 + row_idx  # ~50 lignes/page
+                        global_idx = (page_num - 2) * 50 + row_idx
                         all_dots[global_idx] = abundance
                 
-                # Mapper les dots sur les bactéries
-                # Stratégie: associer par ordre d'apparition (row_index proche)
                 sorted_dots = sorted(all_dots.items())
                 
                 for i, bacteria in enumerate(bacteria_individual):
-                    # Chercher le dot le plus proche de cet index
                     if i < len(sorted_dots):
                         _, abundance_level = sorted_dots[i]
                         bacteria["abundance_level"] = abundance_level
                         bacteria["status"] = _map_abundance_to_status(abundance_level)
                 
-                # Enrichir les groupes avec abondance moyenne
                 for group in uniq_groups:
                     group_code = group["category"]
                     group_bacteria = [b for b in bacteria_individual if b["category"] == group_code]
                     group["abundance"] = _map_group_abundance(group_bacteria)
                 
-                print(f"✅ Détection graphique: {len(all_dots)} points noirs détectés")
+                print(f"✅ Détection graphique: {len(all_dots)} points détectés")
         
         except Exception as e:
-            print(f"⚠️ Détection graphique échouée, fallback sur texte seul: {e}")
+            print(f"⚠️ Détection graphique échouée: {e}")
     
-    # ═══════════════════════════════════════════════════════════════
-    # PARTIE 3: RETOUR (STRUCTURE INCHANGÉE)
-    # ═══════════════════════════════════════════════════════════════
+    elif enable_graphical_detection and not GRAPHICAL_AVAILABLE:
+        print("⚠️ Détection graphique désactivée: numpy/pillow manquants")
     
     return {
         "dysbiosis_index": di,
@@ -604,10 +587,9 @@ def extract_idk_microbiome(
 
 
 # =====================================================================
-# EXTRACTION DEPUIS EXCEL (INCHANGÉ)
+# EXCEL (INCHANGÉ)
 # =====================================================================
 def extract_biology_from_excel(excel_path: str) -> Dict[str, Any]:
-    """Extraction biologie depuis Excel (INCHANGÉ)"""
     try:
         df = pd.read_excel(excel_path)
         col_name = None
@@ -655,11 +637,7 @@ def extract_biology_from_excel(excel_path: str) -> Dict[str, Any]:
         return {}
 
 
-# =====================================================================
-# HELPERS (INCHANGÉ)
-# =====================================================================
 def biology_dict_to_list(biology: Dict[str, Any], default_category: str = "Autres") -> List[Dict[str, Any]]:
-    """Convertit dict → liste pour PDF/UI (INCHANGÉ)"""
     out: List[Dict[str, Any]] = []
     for name, d in (biology or {}).items():
         if not isinstance(d, dict):
@@ -682,7 +660,6 @@ def extract_all_data(
     micro_excel_path: Optional[str] = None,
     enable_graphical_detection: bool = True
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Extraction orchestrée (SIGNATURE ÉTENDUE)"""
     biology = {}
     microbiome = {}
     
@@ -703,19 +680,19 @@ def extract_all_data(
 
 
 # =====================================================================
-# SCRIPT DE TEST
+# TEST
 # =====================================================================
 if __name__ == "__main__":
     import json
     
     print("="*80)
-    print("🧪 TEST EXTRACTION MICROBIOTE GUTMAP v11.0 - AVEC DÉTECTION GRAPHIQUE")
+    print("🧪 TEST v11.1 - SANS SCIPY")
     print("="*80)
     
     pdf_path = "/mnt/user-data/uploads/IDK_GutMAP_Sample_report_DI-1_EN.pdf"
     
     if os.path.exists(pdf_path):
-        print(f"\n📄 Extraction depuis: {pdf_path}")
+        print(f"\n📄 Extraction: {pdf_path}")
         
         result = extract_idk_microbiome(
             pdf_path,
@@ -724,35 +701,24 @@ if __name__ == "__main__":
         )
         
         print(f"\n📊 RÉSULTATS:")
-        print(f"  • Dysbiosis Index: {result['dysbiosis_index']}")
+        print(f"  • DI: {result['dysbiosis_index']}")
         print(f"  • Diversity: {result['diversity']}")
-        print(f"  • Bactéries extraites: {len(result['bacteria_individual'])}")
-        print(f"  • Groupes: {len(result['bacteria_groups'])}")
+        print(f"  • Bactéries: {len(result['bacteria_individual'])}")
         
-        # Statistiques abondance
         with_abundance = sum(1 for b in result['bacteria_individual'] if b['abundance_level'] is not None)
-        print(f"  • Bactéries avec abondance détectée: {with_abundance}/{len(result['bacteria_individual'])}")
+        print(f"  • Avec abondance: {with_abundance}/{len(result['bacteria_individual'])}")
         
         if result['bacteria_individual']:
-            print(f"\n🦠 Exemples (5 premières bactéries):")
-            for i, bact in enumerate(result['bacteria_individual'][:5], 1):
-                level = bact['abundance_level']
-                status = bact['status']
+            print(f"\n🦠 Exemples:")
+            for i, b in enumerate(result['bacteria_individual'][:5], 1):
+                level = b['abundance_level']
                 level_str = f"{level:+d}" if level is not None else "N/A"
-                print(f"  {i}. [{bact['id']}] {bact['name']}")
-                print(f"     Catégorie: {bact['category']} | Niveau: {level_str} | Statut: {status}")
+                print(f"  {i}. [{b['id']}] {b['name']} | {level_str} | {b['status']}")
         
-        if result['bacteria_groups']:
-            print(f"\n📋 Groupes avec abondance:")
-            for grp in result['bacteria_groups'][:3]:
-                abund = grp.get('abundance', 'N/A')
-                print(f"  • {grp['category']}: {grp['result']} (Abondance: {abund})")
-        
-        # Sauvegarder
-        output_json = "/mnt/user-data/outputs/microbiome_v11_graphical.json"
-        with open(output_json, 'w', encoding='utf-8') as f:
+        output = "/mnt/user-data/outputs/microbiome_v11_1.json"
+        with open(output, 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2, ensure_ascii=False)
         
-        print(f"\n💾 Résultats sauvegardés: {output_json}")
+        print(f"\n💾 Sauvegardé: {output}")
     else:
-        print(f"\n❌ Fichier non trouvé: {pdf_path}")
+        print(f"\n❌ Fichier non trouvé")
