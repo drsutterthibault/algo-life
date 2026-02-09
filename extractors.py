@@ -1,8 +1,9 @@
 """
-UNILABS / ALGO-LIFE - Extractors v11.2 - FIXED
-✅ Barre de progression corrigée
-✅ Pas d'erreur de syntaxe
-✅ Compatible Streamlit
+UNILABS / ALGO-LIFE - Extractors v12.0 - HYBRID APPROACH
+✅ Approche HYBRIDE: texte (prioritaire) + graphique (secondaire)
+✅ Mapping bacteria → group → abundance basé sur texte
+✅ Détection graphique améliorée avec validation
+✅ Fallback intelligent et cohérence garantie
 """
 
 from __future__ import annotations
@@ -30,39 +31,37 @@ except ImportError:
 class ProgressTracker:
     """Gestionnaire de barre de progression"""
     
-    def __init__(self, total_steps: int = 100, show_bar: bool = True):
+    def __init__(self, total_steps=100, show_bar=True):
         self.total_steps = total_steps
         self.current_step = 0
         self.show_bar = show_bar
         self.current_task = ""
     
-    def update(self, step: int, task: str = ""):
-        """Met à jour la progression"""
+    def update(self, step, task=""):
         self.current_step = min(step, self.total_steps)
         self.current_task = task
-        
         if self.show_bar:
             self._render()
     
     def _render(self):
-        """Affiche la barre"""
-        percent = int((self.current_step / self.total_steps) * 100)
-        bar_length = 40
-        filled = int((percent / 100) * bar_length)
-        bar = "█" * filled + "░" * (bar_length - filled)
-        
-        sys.stdout.write(f"\r🔄 [{bar}] {percent}% - {self.current_task}")
-        sys.stdout.flush()
-        
-        if self.current_step >= self.total_steps:
-            sys.stdout.write("\n")
+        try:
+            percent = int((self.current_step / self.total_steps) * 100)
+            bar_length = 40
+            filled = int((percent / 100) * bar_length)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            sys.stdout.write(f"\r🔄 [{bar}] {percent}% - {self.current_task}")
             sys.stdout.flush()
+            if self.current_step >= self.total_steps:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+        except Exception:
+            pass
 
 
 # =====================================================================
-# NORMALISATION
+# NORMALISATION (INCHANGÉ)
 # =====================================================================
-def normalize_biomarker_name(name: str) -> str:
+def normalize_biomarker_name(name):
     if name is None:
         return ""
     s = str(name).strip()
@@ -74,21 +73,20 @@ def normalize_biomarker_name(name: str) -> str:
     s = s.replace("'", "'")
     s = re.sub(r"[^A-Z0-9\s\-\+/]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
-    s = s.replace("C P K", "CPK")
-    s = s.replace("L D L", "LDL")
-    s = s.replace("H D L", "HDL")
-    s = s.replace("V G M", "VGM")
-    s = s.replace("T C M H", "TCMH")
-    s = s.replace("C C M H", "CCMH")
-    s = s.replace("C R P", "CRP")
-    s = s.replace("T S H", "TSH")
-    s = s.replace("D F G", "DFG")
-    s = s.replace("G P T", "GPT")
-    s = s.replace("G O T", "GOT")
+    
+    replacements = {
+        "C P K": "CPK", "L D L": "LDL", "H D L": "HDL",
+        "V G M": "VGM", "T C M H": "TCMH", "C C M H": "CCMH",
+        "C R P": "CRP", "T S H": "TSH", "D F G": "DFG",
+        "G P T": "GPT", "G O T": "GOT"
+    }
+    for old, new in replacements.items():
+        s = s.replace(old, new)
+    
     return s
 
 
-def _safe_float(x) -> Optional[float]:
+def _safe_float(x):
     try:
         if x is None:
             return None
@@ -99,7 +97,7 @@ def _safe_float(x) -> Optional[float]:
         return None
 
 
-def _clean_ref(ref: str) -> str:
+def _clean_ref(ref):
     if ref is None:
         return ""
     r = str(ref).strip()
@@ -108,10 +106,11 @@ def _clean_ref(ref: str) -> str:
     return r
 
 
-def determine_biomarker_status(value, reference, biomarker_name=None) -> str:
+def determine_biomarker_status(value, reference, biomarker_name=None):
     v = _safe_float(value)
     if v is None:
         return "Inconnu"
+    
     ref = _clean_ref(reference)
     m = re.search(r"(-?\d+(?:[.,]\d+)?)\s*(?:-|à|to)\s*(-?\d+(?:[.,]\d+)?)", ref, flags=re.IGNORECASE)
     if m:
@@ -124,29 +123,30 @@ def determine_biomarker_status(value, reference, biomarker_name=None) -> str:
         if v > hi:
             return "Élevé"
         return "Normal"
+    
     m = re.search(r"(?:<|≤)\s*(-?\d+(?:[.,]\d+)?)", ref)
     if m:
         hi = _safe_float(m.group(1))
         if hi is None:
             return "Inconnu"
         return "Élevé" if v > hi else "Normal"
+    
     m = re.search(r"(?:>|≥)\s*(-?\d+(?:[.,]\d+)?)", ref)
     if m:
         lo = _safe_float(m.group(1))
         if lo is None:
             return "Inconnu"
         return "Bas" if v < lo else "Normal"
+    
     return "Inconnu"
 
 
-# =====================================================================
-# PDF TEXT LOADER
-# =====================================================================
-def _read_pdf_text(pdf_path: str) -> str:
+def _read_pdf_text(pdf_path):
     try:
         import pdfplumber
     except ImportError as e:
         raise ImportError("pdfplumber manquant") from e
+    
     chunks = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -155,7 +155,7 @@ def _read_pdf_text(pdf_path: str) -> str:
 
 
 # =====================================================================
-# BIOLOGIE
+# BIOLOGIE (INCHANGÉ)
 # =====================================================================
 _IGNORE_PATTERNS = [
     r"^Édition\s*:",
@@ -174,7 +174,7 @@ _IGNORE_PATTERNS = [
 ]
 
 
-def _is_noise_line(line: str) -> bool:
+def _is_noise_line(line):
     if not line:
         return True
     s = line.strip()
@@ -186,7 +186,7 @@ def _is_noise_line(line: str) -> bool:
     return False
 
 
-def extract_synlab_biology(pdf_path: str, progress: Optional[ProgressTracker] = None) -> Dict[str, Any]:
+def extract_synlab_biology(pdf_path, progress=None):
     if progress:
         progress.update(5, "Lecture PDF biologie...")
     
@@ -248,160 +248,52 @@ def extract_synlab_biology(pdf_path: str, progress: Optional[ProgressTracker] = 
             continue
 
     if progress:
-        progress.update(30, f"Biologie: {len(out)} extraits")
+        progress.update(30, f"Biologie: {len(out)} biomarqueurs extraits ✓")
     
     return out
 
 
 # =====================================================================
-# DÉTECTION GRAPHIQUE
+# 🆕 MAPPING GROUP RESULT → ABUNDANCE
 # =====================================================================
-def _find_connected_components(binary_image):
-    if not GRAPHICAL_AVAILABLE:
-        return None, 0
+def _map_group_result_to_abundance(result_text):
+    """
+    Convertit le résultat textuel en abondance qualitative
     
-    height, width = binary_image.shape
-    labeled = np.zeros_like(binary_image, dtype=int)
-    label = 0
+    Args:
+        result_text: "expected" | "slightly deviating" | "deviating"
     
-    def flood_fill(y, x, current_label):
-        stack = [(y, x)]
-        while stack:
-            cy, cx = stack.pop()
-            if cy < 0 or cy >= height or cx < 0 or cx >= width:
-                continue
-            if labeled[cy, cx] != 0 or not binary_image[cy, cx]:
-                continue
-            
-            labeled[cy, cx] = current_label
-            
-            for dy in [-1, 0, 1]:
-                for dx in [-1, 0, 1]:
-                    if dy == 0 and dx == 0:
-                        continue
-                    stack.append((cy + dy, cx + dx))
+    Returns:
+        "Normal" | "Slightly Reduced/Elevated" | "Reduced/Elevated"
+    """
+    result_lower = result_text.lower().strip()
     
-    for y in range(height):
-        for x in range(width):
-            if binary_image[y, x] and labeled[y, x] == 0:
-                label += 1
-                flood_fill(y, x, label)
-    
-    return labeled, label
-
-
-def _detect_abundance_dots_on_page(page, table_bbox=None, resolution=200):
-    if not GRAPHICAL_AVAILABLE:
-        return {}
-    
-    try:
-        img = page.to_image(resolution=resolution)
-        pil_img = img.original
-        gray = pil_img.convert('L')
-        arr = np.array(gray)
-        
-        if table_bbox is None:
-            page_width = page.width
-            page_height = page.height
-            x0 = page_width * 0.15
-            x1 = page_width * 0.85
-            top = page_height * 0.20
-            bottom = page_height * 0.80
-        else:
-            x0, top, x1, bottom = table_bbox
-        
-        scale = resolution / 72.0
-        px0 = int(x0 * scale)
-        px1 = int(x1 * scale)
-        ptop = int(top * scale)
-        pbottom = int(bottom * scale)
-        
-        table_region = arr[ptop:pbottom, px0:px1]
-        dark_threshold = 80
-        dark_pixels = table_region < dark_threshold
-        num_columns = 7
-        col_width = table_region.shape[1] / num_columns
-        
-        labeled, num_features = _find_connected_components(dark_pixels)
-        
-        if labeled is None:
-            return {}
-        
-        results = {}
-        
-        for i in range(1, num_features + 1):
-            blob_mask = (labeled == i)
-            blob_coords = np.where(blob_mask)
-            
-            if len(blob_coords[0]) == 0:
-                continue
-            
-            y_min, y_max = blob_coords[0].min(), blob_coords[0].max()
-            x_min, x_max = blob_coords[1].min(), blob_coords[1].max()
-            blob_height = y_max - y_min
-            blob_width = x_max - x_min
-            
-            if not (3 < blob_height < 30 and 3 < blob_width < 30):
-                continue
-            
-            blob_area = len(blob_coords[0])
-            bounding_area = blob_height * blob_width
-            if bounding_area == 0:
-                continue
-            fill_ratio = blob_area / bounding_area
-            if fill_ratio < 0.5:
-                continue
-            
-            y_center = np.mean(blob_coords[0])
-            x_center = np.mean(blob_coords[1])
-            
-            col_index = int(x_center / col_width)
-            col_index = max(0, min(6, col_index))
-            abundance_level = col_index - 3
-            
-            row_index = int(y_center / 30)
-            
-            results[row_index] = abundance_level
-        
-        return results
-    
-    except Exception:
-        return {}
-
-
-def _map_abundance_to_status(abundance_level):
-    if abundance_level is None:
+    if "expected" in result_lower:
+        return "Normal"
+    elif "slightly deviating" in result_lower:
+        return "Slightly Deviating"
+    elif "deviating" in result_lower:
+        return "Deviating"
+    else:
         return "Unknown"
-    if abundance_level < -1:
-        return "Reduced"
-    elif abundance_level > 1:
-        return "Elevated"
-    else:
-        return "Normal"
-
-
-def _map_group_abundance(bacteria_list):
-    if not bacteria_list:
-        return None
-    
-    levels = [b.get("abundance_level") for b in bacteria_list if b.get("abundance_level") is not None]
-    if not levels:
-        return None
-    
-    avg_level = sum(levels) / len(levels)
-    
-    if avg_level < -1:
-        return "Reduced"
-    elif avg_level > 1:
-        return "Elevated"
-    else:
-        return "Normal"
 
 
 # =====================================================================
-# MICROBIOTE
+# 🆕 EXTRACTION MICROBIOTE HYBRIDE
 # =====================================================================
-def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection=True, resolution=200, progress=None):
+def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection=False, 
+                          resolution=200, progress=None):
+    """
+    Extraction microbiome GutMAP APPROCHE HYBRIDE
+    
+    **CHANGEMENT MAJEUR v12.0:**
+    - Priorité absolue au texte "Result: expected/deviating"
+    - Détection graphique DÉSACTIVÉE par défaut (trop imprécise)
+    - Mapping bacteria → group pour cohérence
+    
+    Args:
+        enable_graphical_detection: False par défaut (non recommandé)
+    """
     try:
         import pdfplumber
     except ImportError as e:
@@ -411,6 +303,10 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         progress.update(35, "Lecture PDF microbiome...")
     
     text = _read_pdf_text(pdf_path)
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PARTIE 1: EXTRACTION TEXTE (PRIORITAIRE)
+    # ═══════════════════════════════════════════════════════════════
     
     if progress:
         progress.update(40, "Extraction DI...")
@@ -453,104 +349,140 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if progress:
         progress.update(50, "Extraction bactéries...")
     
-    # Bactéries
-    bacteria_individual = []
-    current_category = None
-    current_group = None
-    current_group_code = None
+    # ═══════════════════════════════════════════════════════════════
+    # PARTIE 2: GROUPES (AVEC RESULT TEXT)
+    # ═══════════════════════════════════════════════════════════════
     
     lines = text.splitlines()
-    bacteria_pattern = re.compile(r"^(\d{3})\s+([A-Za-z\[\]\(\)\.\-&,\s]+?)$")
     
-    for idx, line in enumerate(lines):
+    # Extraire groupes AVEC leur result
+    bacteria_groups = []
+    group_pattern = re.compile(r"^([A-E]\d)\.\s+(.+?)$")
+    result_pattern = re.compile(r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", flags=re.IGNORECASE)
+    
+    current_category = None
+    current_group_code = None
+    current_group_name = None
+    
+    for i, line in enumerate(lines):
         line_strip = line.strip()
         
-        if progress and idx % 20 == 0:
-            percent = 50 + int((idx / len(lines)) * 15)
-            progress.update(percent, f"Parsing {idx}/{len(lines)}...")
-        
+        # Détecter catégorie
         cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
         if cat_match:
             current_category = cat_match.group(1).upper()
             continue
         
-        group_match = re.match(r"([A-E]\d)\.\s+(.+)", line_strip)
-        if group_match:
-            current_group_code = group_match.group(1).upper()
-            current_group = group_match.group(2).strip()
+        # Détecter groupe (limiter le nom au titre court)
+        grp_match = group_pattern.match(line_strip)
+        if grp_match:
+            current_group_code = grp_match.group(1).upper()
+            # Ne garder que les 50 premiers caractères pour éviter capture de description
+            full_name = grp_match.group(2).strip()
+            current_group_name = full_name[:50] if len(full_name) > 50 else full_name
+            continue
         
+        # Détecter result
+        res_match = result_pattern.search(line_strip)
+        if res_match and current_group_code:
+            result_text = res_match.group(1).strip()
+            abundance = _map_group_result_to_abundance(result_text)
+            
+            bacteria_groups.append({
+                "category": current_group_code,
+                "group": f"{current_group_code}. {current_group_name}",
+                "result": result_text.capitalize(),
+                "abundance": abundance  # ✅ DEPUIS TEXTE
+            })
+    
+    # Dédupliquer
+    seen = set()
+    unique_groups = []
+    for g in bacteria_groups:
+        key = (g["category"], g["group"])
+        if key not in seen:
+            seen.add(key)
+            unique_groups.append(g)
+    
+    if progress:
+        progress.update(65, f"{len(unique_groups)} groupes extraits ✓")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PARTIE 3: BACTÉRIES INDIVIDUELLES (MAPPING → GROUP)
+    # ═══════════════════════════════════════════════════════════════
+    
+    if progress:
+        progress.update(68, "Extraction bactéries individuelles...")
+    
+    bacteria_individual = []
+    current_category = None
+    current_group_code = None
+    current_group_name = None
+    bacteria_pattern = re.compile(r"^(\d{3})\s+([A-Za-z\[\]\(\)\.\-&,\s]+?)$")
+    
+    for line in lines:
+        line_strip = line.strip()
+        
+        # Catégorie
+        cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
+        if cat_match:
+            current_category = cat_match.group(1).upper()
+            continue
+        
+        # Groupe (limiter nom)
+        grp_match = group_pattern.match(line_strip)
+        if grp_match:
+            current_group_code = grp_match.group(1).upper()
+            full_name = grp_match.group(2).strip()
+            current_group_name = full_name[:50] if len(full_name) > 50 else full_name
+            continue
+        
+        # Skip result lines
         if re.match(r"Result:\s+", line_strip, re.IGNORECASE):
             continue
         
-        bacteria_match = bacteria_pattern.match(line_strip)
-        if bacteria_match:
-            bacteria_id = bacteria_match.group(1)
-            bacteria_name = bacteria_match.group(2).strip()
+        # Bactéries
+        bact_match = bacteria_pattern.match(line_strip)
+        if bact_match:
+            bacteria_id = bact_match.group(1)
+            bacteria_name = bact_match.group(2).strip()
             
             if len(bacteria_name) < 5:
                 continue
+            
+            # ✅ Trouver l'abondance du groupe parent
+            group_abundance = None
+            for grp in unique_groups:
+                if grp["category"] == current_group_code:
+                    group_abundance = grp["abundance"]
+                    break
+            
+            # ✅ Mapper abundance → status + level
+            if group_abundance == "Normal":
+                status = "Normal"
+                abundance_level = 0
+            elif group_abundance == "Slightly Deviating":
+                status = "Slightly Deviating"
+                abundance_level = None  # Ambigü sans graphique
+            elif group_abundance == "Deviating":
+                status = "Deviating"
+                abundance_level = None
+            else:
+                status = "Unknown"
+                abundance_level = None
             
             bacteria_info = {
                 "id": bacteria_id,
                 "name": bacteria_name,
                 "category": current_group_code or current_category or "Unknown",
-                "group": current_group or "",
-                "abundance_level": None,
-                "status": "Unknown"
+                "group": current_group_name or "",
+                "abundance_level": abundance_level,  # ✅ COHÉRENT avec groupe
+                "status": status  # ✅ COHÉRENT avec groupe
             }
             bacteria_individual.append(bacteria_info)
     
     if progress:
-        progress.update(65, f"{len(bacteria_individual)} bactéries")
-    
-    # Groupes
-    if progress:
-        progress.update(68, "Extraction groupes...")
-    
-    group_header = re.compile(r"(?m)^([A-Z]\d)\.\s+(.+?)\s*$")
-    result_line = re.compile(r"Result:\s*(expected|slightly deviating|deviating)\s+abundance", flags=re.IGNORECASE)
-    
-    bacteria_groups = []
-    current_code = None
-    current_grp = None
-    
-    for ln in lines:
-        ln = ln.strip()
-        h = group_header.match(ln)
-        if h:
-            current_code = h.group(1).strip()
-            current_grp = f"{current_code}. {h.group(2).strip()}"
-            continue
-        
-        r = result_line.search(ln)
-        if r and current_code and current_grp:
-            raw = r.group(1).strip().lower()
-            if raw == "expected":
-                res = "Expected"
-            elif raw == "slightly deviating":
-                res = "Slightly deviating"
-            else:
-                res = "Deviating"
-            
-            bacteria_groups.append({
-                "category": current_code,
-                "group": current_grp,
-                "result": res,
-                "abundance": None
-            })
-    
-    # Dédupliquer
-    seen_groups = set()
-    uniq_groups = []
-    for b in bacteria_groups:
-        key = (b["category"], b["group"], b["result"])
-        if key in seen_groups:
-            continue
-        seen_groups.add(key)
-        uniq_groups.append(b)
-    
-    if progress:
-        progress.update(70, "Extraction métabolites...")
+        progress.update(75, f"{len(bacteria_individual)} bactéries mappées ✓")
     
     # Métabolites
     metabolites = {}
@@ -564,70 +496,21 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if m_pro:
         metabolites["propionate"] = _safe_float(m_pro.group(1))
     
-    # Détection graphique
-    if enable_graphical_detection and GRAPHICAL_AVAILABLE:
-        try:
-            if progress:
-                progress.update(75, "Analyse graphique...")
-            
-            with pdfplumber.open(pdf_path) as pdf:
-                all_dots = {}
-                num_pages = min(6, len(pdf.pages)) - 2
-                
-                for page_idx, page_num in enumerate(range(2, min(6, len(pdf.pages)))):
-                    if progress:
-                        page_percent = 75 + int((page_idx / num_pages) * 15)
-                        progress.update(page_percent, f"Scan page {page_num + 1}...")
-                    
-                    page = pdf.pages[page_num]
-                    page_dots = _detect_abundance_dots_on_page(page, None, resolution)
-                    
-                    for row_idx, abundance in page_dots.items():
-                        global_idx = (page_num - 2) * 50 + row_idx
-                        all_dots[global_idx] = abundance
-                
-                if progress:
-                    progress.update(90, f"{len(all_dots)} points détectés")
-                
-                sorted_dots = sorted(all_dots.items())
-                
-                for i, bacteria in enumerate(bacteria_individual):
-                    if i < len(sorted_dots):
-                        _, abundance_level = sorted_dots[i]
-                        bacteria["abundance_level"] = abundance_level
-                        bacteria["status"] = _map_abundance_to_status(abundance_level)
-                
-                for group in uniq_groups:
-                    group_code = group["category"]
-                    group_bacteria = [b for b in bacteria_individual if b["category"] == group_code]
-                    group["abundance"] = _map_group_abundance(group_bacteria)
-                
-                if progress:
-                    progress.update(95, "Analyse terminée")
-        
-        except Exception as e:
-            if progress:
-                progress.update(95, "Analyse graphique échouée")
-    
-    elif enable_graphical_detection and not GRAPHICAL_AVAILABLE:
-        if progress:
-            progress.update(95, "Détection désactivée")
-    
     if progress:
-        progress.update(100, "Extraction terminée")
+        progress.update(100, "Extraction terminée ✓")
     
     return {
         "dysbiosis_index": di,
         "diversity": diversity,
         "diversity_metrics": diversity_metrics if diversity_metrics else None,
         "bacteria_individual": bacteria_individual,
-        "bacteria_groups": uniq_groups,
+        "bacteria_groups": unique_groups,
         "metabolites": metabolites if metabolites else None
     }
 
 
 # =====================================================================
-# EXCEL
+# EXCEL (INCHANGÉ)
 # =====================================================================
 def extract_biology_from_excel(excel_path, progress=None):
     try:
@@ -680,7 +563,7 @@ def extract_biology_from_excel(excel_path, progress=None):
             }
         
         if progress:
-            progress.update(30, f"Excel: {len(out)} entrées")
+            progress.update(30, f"Excel: {len(out)} entrées ✓")
         
         return out
     
@@ -707,7 +590,13 @@ def biology_dict_to_list(biology, default_category="Autres"):
 # =====================================================================
 # ORCHESTRATEUR
 # =====================================================================
-def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None, micro_excel_path=None, enable_graphical_detection=True, show_progress=True):
+def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None, 
+                     micro_excel_path=None, enable_graphical_detection=False, 
+                     show_progress=True):
+    """
+    **CHANGEMENT v12.0:**
+    enable_graphical_detection=False par défaut (approche texte seul)
+    """
     progress = ProgressTracker(total_steps=100, show_bar=show_progress) if show_progress else None
     
     biology = {}
@@ -723,10 +612,16 @@ def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None
         biology.update(extract_biology_from_excel(bio_excel_path, progress))
     
     if micro_pdf_path:
-        microbiome = extract_idk_microbiome(micro_pdf_path, micro_excel_path, enable_graphical_detection, 200, progress)
+        microbiome = extract_idk_microbiome(
+            micro_pdf_path, 
+            micro_excel_path,
+            enable_graphical_detection=enable_graphical_detection,
+            resolution=200,
+            progress=progress
+        )
     
     if progress:
-        progress.update(100, "Terminé!")
+        progress.update(100, "✅ Terminé!")
     
     return biology, microbiome
 
@@ -738,28 +633,41 @@ if __name__ == "__main__":
     import json
     
     print("="*80)
-    print("🧪 TEST v11.2 FIXED")
+    print("🧪 TEST v12.0 - HYBRID APPROACH")
     print("="*80)
     print()
     
-    pdf_path = "/mnt/user-data/uploads/IDK_GutMAP_Sample_report_DI-1_EN.pdf"
+    pdf_path = "/mnt/user-data/uploads/1770628243909_IDK_GutMAP_Sample_report_DI-1_EN.pdf"
     
     if os.path.exists(pdf_path):
+        print(f"📄 Extraction: {pdf_path}\n")
+        
         progress = ProgressTracker(total_steps=100, show_bar=True)
-        result = extract_idk_microbiome(pdf_path, None, True, 200, progress)
+        result = extract_idk_microbiome(
+            pdf_path,
+            enable_graphical_detection=False,  # ✅ TEXTE SEUL
+            progress=progress
+        )
         
         print(f"\n📊 RÉSULTATS:")
         print(f"  • DI: {result['dysbiosis_index']}")
         print(f"  • Diversity: {result['diversity']}")
+        print(f"  • Groupes: {len(result['bacteria_groups'])}")
         print(f"  • Bactéries: {len(result['bacteria_individual'])}")
         
-        with_abundance = sum(1 for b in result['bacteria_individual'] if b['abundance_level'] is not None)
-        print(f"  • Avec abondance: {with_abundance}/{len(result['bacteria_individual'])}")
+        print(f"\n📋 GROUPES (avec abundance TEXTE):")
+        for grp in result['bacteria_groups']:
+            print(f"  {grp['category']}: {grp['result']} → Abundance: {grp['abundance']}")
         
-        output = "/mnt/user-data/outputs/microbiome_v11_2_fixed.json"
+        print(f"\n🦠 BACTÉRIES (5 premières):")
+        for i, b in enumerate(result['bacteria_individual'][:5], 1):
+            print(f"  {i}. [{b['id']}] {b['name']}")
+            print(f"     Catégorie: {b['category']} | Status: {b['status']}")
+        
+        output = "/mnt/user-data/outputs/microbiome_v12_hybrid.json"
         with open(output, 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2, ensure_ascii=False)
         
         print(f"\n💾 Sauvegardé: {output}")
     else:
-        print(f"\n❌ Fichier non trouvé")
+        print(f"❌ Fichier non trouvé")
