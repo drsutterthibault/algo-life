@@ -366,7 +366,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         progress.update(50, "Extraction bactéries...")
     
     lines = text.splitlines()
-    
+
     ALL_GUTMAP_GROUPS = {
         "A1": "Prominent gut microbes",
         "A2": "Diverse gut bacterial communities",
@@ -386,22 +386,40 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     found_groups = {}
     
     group_pattern = re.compile(r"^([A-E]\d)\.\s+(.+?)$")
-    result_pattern_en = re.compile(r"Result:\\s*(expected|slightly deviating|deviating)(?:\\s+abundance)?", flags=re.IGNORECASE)
-    result_pattern_de = re.compile(r"Ergebnis:\\s*(erwartete|leicht abweichende|abweichende)\\s+Abundanz", flags=re.IGNORECASE)
+    # PATCH: tolère "slightly" + "deviating" split sur 2 lignes via buffer
+    result_pattern_en = re.compile(
+        r"Result:\s*(expected|deviating|slightly\s+deviating)(?:\s+abundance)?",
+        flags=re.IGNORECASE
+    )
+    result_pattern_de = re.compile(
+        r"Ergebnis:\s*(erwartete|leicht\s+abweichende|abweichende)\s+Abundanz",
+        flags=re.IGNORECASE
+    )
     
     current_category = None
     current_group_code = None
     current_group_name = None
     
+    # =========================
+    # PATCH: scan avec buffer 2 lignes
+    # =========================
     for i, line in enumerate(lines):
-        line_strip = line.strip()
-        
-        cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
+        line_strip = (line or "").strip()
+        nxt = (lines[i + 1] if i + 1 < len(lines) else "").strip()
+        buf = (line_strip + " " + nxt).strip()
+
+        # PATCH: category peut être sur line ou buf
+        cat_match = re.match(r"(?:Category\s+)?([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
+        if not cat_match:
+            cat_match = re.match(r"(?:Category\s+)?([A-E])\.\s+(.+)", buf, re.IGNORECASE)
         if cat_match:
             current_category = cat_match.group(1).upper()
             continue
         
+        # PATCH: groupe peut être split sur 2 lignes
         grp_match = group_pattern.match(line_strip)
+        if not grp_match:
+            grp_match = group_pattern.match(buf)
         if grp_match:
             current_group_code = grp_match.group(1).upper()
             full_name = grp_match.group(2).strip()
@@ -409,10 +427,10 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             found_groups[current_group_code] = True
             continue
         
-        # Tester EN puis DE
-        res_match = result_pattern_en.search(line_strip)
+        # PATCH: résultat peut être split -> on teste sur buf
+        res_match = result_pattern_en.search(buf)
         if not res_match:
-            res_match = result_pattern_de.search(line_strip)
+            res_match = result_pattern_de.search(buf)
         
         if res_match and current_group_code:
             result_text = res_match.group(1).strip()
@@ -472,15 +490,24 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     
     bacteria_order = []
     
-    for line in lines:
-        line_strip = line.strip()
-        
-        cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
+    # =========================
+    # PATCH: idem buffer 2 lignes pour le parsing des bactéries
+    # =========================
+    for i, line in enumerate(lines):
+        line_strip = (line or "").strip()
+        nxt = (lines[i + 1] if i + 1 < len(lines) else "").strip()
+        buf = (line_strip + " " + nxt).strip()
+
+        cat_match = re.match(r"(?:Category\s+)?([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
+        if not cat_match:
+            cat_match = re.match(r"(?:Category\s+)?([A-E])\.\s+(.+)", buf, re.IGNORECASE)
         if cat_match:
             current_category = cat_match.group(1).upper()
             continue
         
         grp_match = group_pattern.match(line_strip)
+        if not grp_match:
+            grp_match = group_pattern.match(buf)
         if grp_match:
             current_group_code = grp_match.group(1).upper()
             full_name = grp_match.group(2).strip()
@@ -520,14 +547,15 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if enable_graphical_detection:
         try:
             with pdfplumber.open(pdf_path) as pdf:
-                for page_num in range(1, min(5, len(pdf.pages))):
+                # PATCH: scanner toutes les pages (le GutMAP peut être >5 pages)
+                for page_num in range(len(pdf.pages)):
                     page = pdf.pages[page_num]
                     page_dots = _extract_dots_vectorial(page)
                     all_dots.extend(page_dots)
                 
                 if progress:
                     progress.update(75, f"{len(all_dots)} points détectés")
-        except Exception as e:
+        except Exception:
             if progress:
                 progress.update(75, f"Détection échouée")
     
