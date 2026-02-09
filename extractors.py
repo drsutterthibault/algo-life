@@ -1,8 +1,7 @@
 """
-UNILABS / ALGO-LIFE - Extractors v13.0 COMPLETE
+UNILABS / ALGO-LIFE - Extractors v14.0 FIXED
+✅ Correction détection des anomalies microbiome (Slightly deviating)
 ✅ Toutes les fonctions implémentées
-✅ Détection vectorielle + fallback texte
-✅ Compatible production Streamlit
 """
 
 from __future__ import annotations
@@ -238,80 +237,141 @@ def extract_synlab_biology(pdf_path, progress=None):
 
 
 def _extract_dots_vectorial(page):
+    """
+    Extrait les points noirs (positions d'abondance bactérienne) depuis une page PDF.
+    Utilise la structure réelle du tableau (lignes verticales) pour déterminer les colonnes.
+    """
     dots = []
     
     if not hasattr(page, 'curves'):
         return dots
     
-    curves = page.curves
-    page_width = page.width
-    table_x_start = page_width * 0.30
-    table_x_end = page_width * 0.80
-    table_width = table_x_end - table_x_start
-    col_width = table_width / 7
+    page_height = page.height
     
+    # Zone verticale valide (éviter headers/footers)
+    table_y_start = page_height * 0.10
+    table_y_end = page_height * 0.85
+    
+    # Trouver les lignes verticales pour délimiter les colonnes
+    lines = page.lines if hasattr(page, 'lines') else []
+    vertical_lines = [line for line in lines if abs(line.get('height', 0)) > 20]
+    
+    if len(vertical_lines) < 9:
+        # Pas assez de lignes verticales, utiliser les positions par défaut
+        # Basé sur l'analyse: centres des colonnes sont environ:
+        column_centers = {
+            -3: 114.4,
+            -2: 244.2,
+            -1: 372.7,
+            0: 391.7,
+            1: 410.7,
+            2: 429.7,
+            3: 448.7
+        }
+    else:
+        # Calculer les centres des colonnes basés sur les lignes verticales
+        x_positions = sorted(set([line.get('x0', 0) for line in vertical_lines]))
+        
+        # Les colonnes d'abondance vont de la ligne 2 à la ligne 8
+        if len(x_positions) >= 9:
+            column_centers = {
+                -3: (x_positions[1] + x_positions[2]) / 2,
+                -2: (x_positions[2] + x_positions[3]) / 2,
+                -1: (x_positions[3] + x_positions[4]) / 2,
+                0: (x_positions[4] + x_positions[5]) / 2,
+                1: (x_positions[5] + x_positions[6]) / 2,
+                2: (x_positions[6] + x_positions[7]) / 2,
+                3: (x_positions[7] + x_positions[8]) / 2
+            }
+        else:
+            # Fallback
+            column_centers = {
+                -3: 114.4, -2: 244.2, -1: 372.7,
+                0: 391.7, 1: 410.7, 2: 429.7, 3: 448.7
+            }
+    
+    seen_positions = set()  # Pour éliminer les doublons
+    
+    curves = page.curves
     for curve in curves:
         w = curve.get('width', 0)
         h = curve.get('height', 0)
-        
-        if not (5 < w < 10 and 5 < h < 10):
-            continue
-        
         x = curve.get('x0', 0)
         y = curve.get('top', 0)
         
-        if not (table_x_start < x < table_x_end):
+        # Filtrer: taille entre 4 et 8 pixels (points noirs réels)
+        if not (4.0 < w < 8.0 and 4.0 < h < 8.0):
             continue
         
-        relative_x = x - table_x_start
-        col_index = int(relative_x / col_width)
-        col_index = max(0, min(6, col_index))
-        abundance_level = col_index - 3
+        # Filtrer: position verticale dans la zone du tableau
+        if not (table_y_start <= y <= table_y_end):
+            continue
         
-        dots.append({
-            'y': y,
-            'x': x,
-            'abundance_level': abundance_level
-        })
+        # Éliminer les doublons (même position arrondie)
+        pos_key = (round(x, 1), round(y, 1))
+        if pos_key in seen_positions:
+            continue
+        seen_positions.add(pos_key)
+        
+        # Trouver la colonne la plus proche
+        closest_level = min(column_centers.keys(), 
+                          key=lambda level: abs(column_centers[level] - x))
+        
+        # Vérifier que le point est assez proche du centre (tolérance de 15 pixels)
+        if abs(column_centers[closest_level] - x) < 15:
+            dots.append({
+                'x': x,
+                'y': y,
+                'col_idx': closest_level + 3,  # Convertir en index 0-6
+                'abundance_level': closest_level
+            })
     
+    # Trier par position Y (ordre vertical dans le tableau)
     dots.sort(key=lambda d: d['y'])
-    
-    unique_dots = []
-    last_y = None
-    for dot in dots:
-        if last_y is None or abs(dot['y'] - last_y) > 5:
-            unique_dots.append(dot)
-            last_y = dot['y']
-    
-    return unique_dots
+    return dots
 
 
-def _map_abundance_to_status(abundance_level):
-    if abundance_level is None:
+def _map_abundance_to_status(level):
+    if level is None:
         return "Unknown"
-    if abundance_level <= -2:
+    if -1 <= level <= 1:
+        return "Normal"
+    elif level == -2:
         return "Reduced"
-    elif abundance_level >= 2:
+    elif level <= -3:
+        return "Strongly Reduced"
+    elif level == 2:
         return "Elevated"
-    elif abundance_level == -1:
-        return "Slightly Reduced"
-    elif abundance_level == 1:
-        return "Slightly Elevated"
     else:
-        return "Normal"
+        return "Strongly Elevated"
 
 
-def _map_group_result_to_abundance(result_text):
-    result_lower = result_text.lower().strip()
-    
-    if "expected" in result_lower:
+def _map_group_result_to_abundance(result):
+    r = str(result).lower().strip()
+    if "expected" in r:
         return "Normal"
-    elif "slightly deviating" in result_lower:
+    elif "slightly" in r and "deviating" in r:
         return "Slightly Deviating"
-    elif "deviating" in result_lower:
+    elif "deviating" in r:
         return "Deviating"
-    else:
-        return "Unknown"
+    return "Unknown"
+
+
+# Groupes GutMAP connus
+ALL_GUTMAP_GROUPS = {
+    "A1": "Prominent gut microbes",
+    "A2": "Diverse gut bacterial communities",
+    "B1": "Enriched on animal-based diet",
+    "C1": "Complex carbohydrate degraders",
+    "C2": "Lactic acid bacteria and probiotics",
+    "D1": "Gut epithelial integrity marker",
+    "D2": "Major SCFA producers",
+    "E1": "Inflammation indicator",
+    "E2": "Potentially virulent",
+    "E3": "Facultative anaerobes",
+    "E4": "Predominantly oral bacteria",
+    "E5": "Genital, respiratory, and skin bacteria"
+}
 
 
 def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection=True, 
@@ -326,115 +386,100 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     
     text = _read_pdf_text(pdf_path)
     
-    if progress:
-        progress.update(40, "Extraction DI...")
+    # === CRITIQUE: Nettoyer les sauts de ligne dans les paragraphes  ===
+    # Remplacer les sauts de ligne au milieu des phrases par des espaces
+    text = re.sub(r'([a-z])\n([a-z])', r'\1 \2', text)
     
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    
+    if progress:
+        progress.update(40, "Extraction dysbiose...")
+    
+    # Dysbiose
     di = None
-    m_di = re.search(r"(?:DI|Dysbiosis\s+index)\s*[:\-]?\s*([1-5])", text, flags=re.IGNORECASE)
-    if m_di:
-        di = int(m_di.group(1))
-    else:
-        m = re.search(r"Result:\s*The microbiota is\s+([A-Za-z\- ]+)", text, flags=re.IGNORECASE)
-        if m:
-            label = m.group(1).strip().lower()
-            if "normobiotic" in label:
-                di = 1
-            elif "mild" in label:
-                di = 3
-            elif "sever" in label or "severe" in label:
-                di = 5
-            elif "moderate" in label:
-                di = 3
+    di_match = re.search(r"Result:\s*The microbiota is\s+(\w+)", text, flags=re.IGNORECASE)
+    if di_match:
+        di = di_match.group(1)
     
-    if progress:
-        progress.update(45, "Extraction Diversity...")
-    
+    # Diversité
     diversity = None
-    md = re.search(r"Result:\s*The bacterial diversity is\s+([A-Za-z\- ]+)", text, flags=re.IGNORECASE)
-    if md:
-        diversity = md.group(1).strip()
+    div_match = re.search(
+        r"Result:\s*The bacterial diversity is\s+(.+?)(?=\n|For a more|Page|$)",
+        text,
+        flags=re.IGNORECASE
+    )
+    if div_match:
+        diversity = div_match.group(1).strip()
     
+    # Métriques de diversité (optionnel)
     diversity_metrics = {}
-    m_shannon = re.search(r"Shannon[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
-    if m_shannon:
-        diversity_metrics["shannon"] = _safe_float(m_shannon.group(1))
-    m_simpson = re.search(r"Simpson[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
-    if m_simpson:
-        diversity_metrics["simpson"] = _safe_float(m_simpson.group(1))
+    shannon_match = re.search(r"Shannon[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
+    if shannon_match:
+        diversity_metrics["shannon"] = _safe_float(shannon_match.group(1))
     
     if progress:
-        progress.update(50, "Extraction bactéries...")
-    
-    lines = text.splitlines()
-    
-    ALL_GUTMAP_GROUPS = {
-        "A1": "Prominent gut microbes",
-        "A2": "Diverse gut bacterial communities",
-        "B1": "Enriched on animal-based diet",
-        "C1": "Complex carbohydrate degraders",
-        "C2": "Lactic acid bacteria and probiotics",
-        "D1": "Gut epithelial integrity marker",
-        "D2": "Major SCFA producers",
-        "E1": "Inflammation indicator",
-        "E2": "Potentially virulent",
-        "E3": "Facultative anaerobes",
-        "E4": "Predominantly oral bacteria",
-        "E5": "Genital, respiratory, and skin bacteria"
-    }
+        progress.update(50, "Extraction groupes bactériens...")
     
     bacteria_groups = []
     found_groups = {}
     
+    # === AMÉLIORATION CRITIQUE : Regex qui gère les sauts de ligne ===
     group_pattern = re.compile(r"^([A-E]\d)\.\s+(.+?)$")
-    result_pattern_en = re.compile(r"Result:\\s*(expected|slightly deviating|deviating)(?:\\s+abundance)?", flags=re.IGNORECASE)
-    result_pattern_de = re.compile(r"Ergebnis:\\s*(erwartete|leicht abweichende|abweichende)\\s+Abundanz", flags=re.IGNORECASE)
+    
+    # Pattern amélioré qui cherche sur PLUSIEURS lignes avec DOTALL
+    result_multiline_pattern = re.compile(
+        r'Result:\s*(.{1,100}?abundance\s+of\s+these\s+bacteria)',
+        flags=re.IGNORECASE | re.DOTALL
+    )
     
     current_category = None
     current_group_code = None
     current_group_name = None
     
-    for i, line in enumerate(lines):
-        line_strip = line.strip()
+    # === Extraire d'abord tous les résultats avec contexte ===
+    for match in result_multiline_pattern.finditer(text):
+        result_text = match.group(1).lower().strip()
+        # Nettoyer les sauts de ligne internes
+        result_text = re.sub(r'\s+', ' ', result_text)
         
-        cat_match = re.match(r"Category\s+([A-E])\.\s+(.+)", line_strip, re.IGNORECASE)
-        if cat_match:
-            current_category = cat_match.group(1).upper()
+        # Trouver le code de groupe dans le contexte précédent (AUGMENTÉ à 800 caractères)
+        context_start = max(0, match.start() - 800)
+        context = text[context_start:match.start()]
+        
+        # Chercher le dernier groupe mentionné
+        group_matches = list(re.finditer(r'([A-E]\d)\.', context))
+        if not group_matches:
+            continue
+            
+        last_group = group_matches[-1].group(1)
+        
+        # Déterminer le statut AVEC précision
+        if 'expected abundance' in result_text and 'slightly' not in result_text and 'deviating' not in result_text:
+            status_name = "Expected"
+            abundance = "Normal"
+        elif 'slightly' in result_text and ('deviating' in result_text or 'abundance' in result_text):
+            status_name = "Slightly deviating"
+            abundance = "Slightly Deviating"
+        elif 'deviating abundance' in result_text and 'slightly' not in result_text:
+            status_name = "Deviating"
+            abundance = "Deviating"
+        else:
             continue
         
-        grp_match = group_pattern.match(line_strip)
-        if grp_match:
-            current_group_code = grp_match.group(1).upper()
-            full_name = grp_match.group(2).strip()
-            current_group_name = full_name[:50] if len(full_name) > 50 else full_name
-            found_groups[current_group_code] = True
-            continue
+        # Récupérer le nom du groupe
+        group_name_match = re.search(rf'{last_group}\.\s+([A-Za-z\s\-]+?)(?=\n|No\.|Group|\d{{3}}|$)', text)
+        group_name = group_name_match.group(1).strip()[:50] if group_name_match else "Unknown"
         
-        # Tester EN puis DE
-        res_match = result_pattern_en.search(line_strip)
-        if not res_match:
-            res_match = result_pattern_de.search(line_strip)
-        
-        if res_match and current_group_code:
-            result_text = res_match.group(1).strip()
-            
-            # Mapper allemand → anglais
-            de_to_en = {
-                'erwartete': 'Expected',
-                'leicht abweichende': 'Slightly deviating',
-                'abweichende': 'Deviating'
-            }
-            result_text = de_to_en.get(result_text, result_text.capitalize())
-            abundance = _map_group_result_to_abundance(result_text)
-            
-            bacteria_groups.append({
-                "category": current_group_code,
-                "group": f"{current_group_code}. {current_group_name}",
-                "result": result_text.capitalize(),
-                "abundance": abundance,
-                "has_explicit_result": True
-            })
-            found_groups[current_group_code] = "processed"
+        bacteria_groups.append({
+            "category": last_group,
+            "group": f"{last_group}. {group_name}",
+            "result": status_name.capitalize(),
+            "abundance": abundance,
+            "has_explicit_result": True
+        })
+        found_groups[last_group] = "processed"
     
+    # Ajouter les groupes manquants
     for group_code, group_name in ALL_GUTMAP_GROUPS.items():
         if found_groups.get(group_code) != "processed":
             bacteria_groups.append({
@@ -447,6 +492,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     
     bacteria_groups.sort(key=lambda x: x["category"])
     
+    # Dédupliquer
     seen_groups = {}
     for grp in bacteria_groups:
         key = grp["category"]
@@ -520,8 +566,21 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if enable_graphical_detection:
         try:
             with pdfplumber.open(pdf_path) as pdf:
-                for page_num in range(1, min(5, len(pdf.pages))):
+                # Parcourir les pages et ne traiter que celles avec des tableaux de bactéries
+                for page_num in range(len(pdf.pages)):
                     page = pdf.pages[page_num]
+                    page_text = page.extract_text() or ""
+                    
+                    # Vérifier si la page contient un tableau de bactéries
+                    # (présence de "Category" ET de numéros de bactéries à 3 chiffres)
+                    has_bacteria_table = (
+                        'Category' in page_text and
+                        re.search(r'^\d{3}\s+[A-Za-z]', page_text, re.MULTILINE)
+                    )
+                    
+                    if not has_bacteria_table:
+                        continue
+                    
                     page_dots = _extract_dots_vectorial(page)
                     all_dots.extend(page_dots)
                 
@@ -529,7 +588,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                     progress.update(75, f"{len(all_dots)} points détectés")
         except Exception as e:
             if progress:
-                progress.update(75, f"Détection échouée")
+                progress.update(75, f"Détection échouée: {e}")
     
     for i, bact in enumerate(bacteria_order):
         if i < len(all_dots):
