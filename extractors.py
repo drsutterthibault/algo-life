@@ -3,6 +3,13 @@ UNILABS / ALGO-LIFE - Extractors v13.0 COMPLETE
 ✅ Toutes les fonctions implémentées
 ✅ Détection vectorielle + fallback texte
 ✅ Compatible production Streamlit
+
+PATCHES inclus:
+- Parsing microbiome robuste aux retours à la ligne (buffer 2 lignes)
+- Group names stables via ALL_GUTMAP_GROUPS (évite troncatures/variants)
+- group_code ajouté (clé stable côté rules engine)
+- Détection "points noirs" améliorée: curves + circles + rects (CRITIQUE)
+- Scan de toutes les pages pour la détection des points noirs
 """
 
 from __future__ import annotations
@@ -237,52 +244,116 @@ def extract_synlab_biology(pdf_path, progress=None):
     return out
 
 
+# =============================================================================
+# CRITIQUE: DETECTION POINTS NOIRS (curves + circles + rects)
+# =============================================================================
 def _extract_dots_vectorial(page):
+    """
+    Patch CRITIQUE:
+    Les points noirs du GutMAP sont souvent des 'circles' (ou petits rects),
+    pas uniquement des 'curves'. On conserve ton mapping en colonnes (x_start/x_end/7),
+    mais on collecte curves + circles + rects.
+    """
     dots = []
-    
-    if not hasattr(page, 'curves'):
-        return dots
-    
-    curves = page.curves
+
+    # --- paramètres table (inchangés) ---
     page_width = page.width
     table_x_start = page_width * 0.30
     table_x_end = page_width * 0.80
     table_width = table_x_end - table_x_start
     col_width = table_width / 7
-    
-    for curve in curves:
-        w = curve.get('width', 0)
-        h = curve.get('height', 0)
-        
-        if not (5 < w < 10 and 5 < h < 10):
-            continue
-        
-        x = curve.get('x0', 0)
-        y = curve.get('top', 0)
-        
+
+    def _add_dot_bbox(x0, x1, top, bottom):
+        x = (x0 + x1) / 2.0
+        y = (top + bottom) / 2.0
+
         if not (table_x_start < x < table_x_end):
-            continue
-        
+            return
+
         relative_x = x - table_x_start
         col_index = int(relative_x / col_width)
         col_index = max(0, min(6, col_index))
         abundance_level = col_index - 3
-        
-        dots.append({
-            'y': y,
-            'x': x,
-            'abundance_level': abundance_level
-        })
-    
-    dots.sort(key=lambda d: d['y'])
-    
+
+        dots.append({"y": y, "x": x, "abundance_level": abundance_level})
+
+    # 1) CURVES
+    curves = getattr(page, "curves", None) or []
+    for curve in curves:
+        x0 = curve.get("x0", None)
+        x1 = curve.get("x1", None)
+        top = curve.get("top", None)
+        bottom = curve.get("bottom", None)
+
+        if None in (x0, x1, top, bottom):
+            # fallback anciennes clés
+            x0 = curve.get("x0", curve.get("x", None))
+            top = curve.get("top", curve.get("y", None))
+            w = curve.get("width", None)
+            h = curve.get("height", None)
+            if None in (x0, top, w, h):
+                continue
+            x1 = x0 + w
+            bottom = top + h
+
+        w = abs(x1 - x0)
+        h = abs(bottom - top)
+        if not (3 < w < 14 and 3 < h < 14):
+            continue
+
+        _add_dot_bbox(x0, x1, top, bottom)
+
+    # 2) CIRCLES
+    circles = getattr(page, "circles", None) or []
+    for c in circles:
+        x0 = c.get("x0", None)
+        x1 = c.get("x1", None)
+        top = c.get("top", None)
+        bottom = c.get("bottom", None)
+
+        if None in (x0, x1, top, bottom):
+            cx = c.get("x", None)
+            cy = c.get("y", None)
+            r = c.get("r", None)
+            if None in (cx, cy, r):
+                continue
+            x0, x1 = cx - r, cx + r
+            top, bottom = cy - r, cy + r
+
+        w = abs(x1 - x0)
+        h = abs(bottom - top)
+        if not (3 < w < 14 and 3 < h < 14):
+            continue
+
+        _add_dot_bbox(x0, x1, top, bottom)
+
+    # 3) RECTS
+    rects = getattr(page, "rects", None) or []
+    for r in rects:
+        x0 = r.get("x0", None)
+        x1 = r.get("x1", None)
+        top = r.get("top", None)
+        bottom = r.get("bottom", None)
+        if None in (x0, x1, top, bottom):
+            continue
+
+        w = abs(x1 - x0)
+        h = abs(bottom - top)
+        if not (3 < w < 14 and 3 < h < 14):
+            continue
+
+        _add_dot_bbox(x0, x1, top, bottom)
+
+    # --- tri + dédoublonnage ---
+    dots.sort(key=lambda d: d["y"])
+
     unique_dots = []
     last_y = None
     for dot in dots:
-        if last_y is None or abs(dot['y'] - last_y) > 5:
+        if last_y is None or abs(dot["y"] - last_y) > 5:
             unique_dots.append(dot)
-            last_y = dot['y']
-    
+            last_y = dot["y"]
+
     return unique_dots
 
 
@@ -404,6 +475,9 @@ def extract_idk_microbiome(
     current_group_code = None
     current_group_name = None
     
+    # ---------------------------
+    # GROUPS (buffer 2 lignes)
+    # ---------------------------
     for i, line in enumerate(lines):
         line_strip = (line or "").strip()
         nxt = (lines[i + 1] if i + 1 < len(lines) else "").strip()
@@ -422,33 +496,25 @@ def extract_idk_microbiome(
         if grp_match:
             current_group_code = grp_match.group(1).upper()
             full_name = grp_match.group(2).strip()
-
-            # =========================
-            # PATCH: nom canonique stable (évite troncatures / variants PDF)
-            # =========================
             current_group_name = ALL_GUTMAP_GROUPS.get(current_group_code, full_name)
-
             found_groups[current_group_code] = True
             continue
         
-        res_match = result_pattern_en.search(buf)
-        if not res_match:
-            res_match = result_pattern_de.search(buf)
-        
+        res_match = result_pattern_en.search(buf) or result_pattern_de.search(buf)
         if res_match and current_group_code:
             result_text = res_match.group(1).strip()
             
             de_to_en = {
-                'erwartete': 'Expected',
-                'leicht abweichende': 'Slightly deviating',
-                'abweichende': 'Deviating'
+                "erwartete": "Expected",
+                "leicht abweichende": "Slightly deviating",
+                "abweichende": "Deviating",
             }
             result_text = de_to_en.get(result_text, result_text.capitalize())
             abundance = _map_group_result_to_abundance(result_text)
             
             bacteria_groups.append({
                 "category": current_group_code,
-                "group_code": current_group_code,  # PATCH: clé stable pour rules engine
+                "group_code": current_group_code,  # clé stable
                 "group": f"{current_group_code}. {ALL_GUTMAP_GROUPS.get(current_group_code, current_group_name)}",
                 "result": result_text.capitalize(),
                 "abundance": abundance,
@@ -456,11 +522,12 @@ def extract_idk_microbiome(
             })
             found_groups[current_group_code] = "processed"
     
+    # fallback groups
     for group_code, group_name in ALL_GUTMAP_GROUPS.items():
         if found_groups.get(group_code) != "processed":
             bacteria_groups.append({
                 "category": group_code,
-                "group_code": group_code,  # PATCH
+                "group_code": group_code,
                 "group": f"{group_code}. {group_name}",
                 "result": "Expected",
                 "abundance": "Normal",
@@ -494,6 +561,9 @@ def extract_idk_microbiome(
     
     bacteria_order = []
     
+    # ---------------------------
+    # INDIVIDUALS (buffer 2 lignes)
+    # ---------------------------
     for i, line in enumerate(lines):
         line_strip = (line or "").strip()
         nxt = (lines[i + 1] if i + 1 < len(lines) else "").strip()
@@ -512,7 +582,6 @@ def extract_idk_microbiome(
         if grp_match:
             current_group_code = grp_match.group(1).upper()
             full_name = grp_match.group(2).strip()
-            # PATCH: nom canonique stable
             current_group_name = ALL_GUTMAP_GROUPS.get(current_group_code, full_name)
             continue
         
@@ -538,7 +607,7 @@ def extract_idk_microbiome(
                 "name": bacteria_name,
                 "category": current_group_code or current_category or "Unknown",
                 "group": current_group_name or "",
-                "group_code": current_group_code or current_category or "Unknown",  # PATCH stable
+                "group_code": current_group_code or current_category or "Unknown",
                 "group_abundance": group_abundance
             })
     
@@ -550,7 +619,7 @@ def extract_idk_microbiome(
     if enable_graphical_detection:
         try:
             with pdfplumber.open(pdf_path) as pdf:
-                # PATCH: scanner toutes les pages (GutMAP peut être > 5 pages)
+                # PATCH: scanner toutes les pages
                 for page_num in range(len(pdf.pages)):
                     page = pdf.pages[page_num]
                     page_dots = _extract_dots_vectorial(page)
@@ -560,12 +629,12 @@ def extract_idk_microbiome(
                     progress.update(75, f"{len(all_dots)} points détectés")
         except Exception:
             if progress:
-                progress.update(75, f"Détection échouée")
+                progress.update(75, "Détection échouée")
     
     for i, bact in enumerate(bacteria_order):
         if i < len(all_dots):
             dot = all_dots[i]
-            abundance_level = dot['abundance_level']
+            abundance_level = dot["abundance_level"]
             status = _map_abundance_to_status(abundance_level)
         else:
             group_abund = bact.get("group_abundance", "Normal")
@@ -584,7 +653,7 @@ def extract_idk_microbiome(
             "name": bact["name"],
             "category": bact["category"],
             "group": bact["group"],
-            "group_code": bact.get("group_code"),  # PATCH
+            "group_code": bact.get("group_code"),
             "abundance_level": abundance_level,
             "status": status
         })
@@ -691,9 +760,14 @@ def biology_dict_to_list(biology, default_category="Autres"):
     return out
 
 
-def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None, 
-                     micro_excel_path=None, enable_graphical_detection=True, 
-                     show_progress=True):
+def extract_all_data(
+    bio_pdf_path=None,
+    bio_excel_path=None,
+    micro_pdf_path=None,
+    micro_excel_path=None,
+    enable_graphical_detection=True,
+    show_progress=True
+):
     progress = ProgressTracker(total_steps=100, show_bar=show_progress) if show_progress else None
     
     biology = {}
@@ -710,7 +784,7 @@ def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None
     
     if micro_pdf_path:
         microbiome = extract_idk_microbiome(
-            micro_pdf_path, 
+            micro_pdf_path,
             micro_excel_path,
             enable_graphical_detection=enable_graphical_detection,
             resolution=200,
