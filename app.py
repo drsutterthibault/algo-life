@@ -200,17 +200,19 @@ def _dict_bio_to_dataframe(bio_dict: Dict[str, Any]) -> pd.DataFrame:
 
 
 def _microbiome_to_dataframe(bacteria: List[Dict]) -> pd.DataFrame:
-    """✅ NOUVEAU : Convertit les données bactériennes en DataFrame éditable"""
+    """✅ Convertit les données bactériennes en DataFrame éditable"""
     if not bacteria:
         return pd.DataFrame()
     
     rows = []
     for b in bacteria:
+        # Support des champs 'result' OU 'abundance' (compatibilité PDF et Excel)
+        result_value = b.get("result") or b.get("abundance", "")
         rows.append({
             "Catégorie": b.get("category", ""),
-            "Groupe": b.get("group", "")[:100],  # Tronquer si trop long
-            "Résultat": b.get("result", ""),
-            "Abondance": b.get("abundance", "")
+            "Groupe": b.get("group", "")[:100] if b.get("group") else b.get("name", "")[:100],  # Fallback sur name
+            "Résultat": result_value,
+            "Abondance": result_value  # Même valeur pour compatibilité
         })
     
     return pd.DataFrame(rows)
@@ -247,12 +249,14 @@ def _microbiome_summary_dataframe(microbiome_dict: Dict[str, Any]) -> pd.DataFra
     diversity = microbiome_dict.get("diversity")
 
     groups = _microbiome_get_groups(microbiome_dict)
-    expected = len([g for g in groups if str(g.get("result","")).lower().startswith("expected")])
-    slight = len([g for g in groups if "slightly" in str(g.get("result","")).lower()])
-    deviating = len([g for g in groups if "deviating" in str(g.get("result","")).lower() and "slightly" not in str(g.get("result","")).lower()])
+    
+    # Support des champs 'result' OU 'abundance' (compatibilité PDF et Excel)
+    expected = len([g for g in groups if str(g.get("result") or g.get("abundance", "")).lower().startswith("expected")])
+    slight = len([g for g in groups if "slightly" in str(g.get("result") or g.get("abundance", "")).lower()])
+    deviating = len([g for g in groups if "deviating" in str(g.get("result") or g.get("abundance", "")).lower() and "slightly" not in str(g.get("result") or g.get("abundance", "")).lower()])
 
     # Top 5 groupes non attendus
-    non_ok = [g for g in groups if str(g.get("result","")).lower() != "expected"]
+    non_ok = [g for g in groups if str(g.get("result") or g.get("abundance", "")).lower() != "expected"]
     top_non_ok = ", ".join([f"{g.get('category','')}" for g in non_ok[:5]]) if non_ok else ""
 
     rows = [
