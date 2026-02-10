@@ -35,7 +35,7 @@ import numpy as np
 
 import json as _json
 
-_DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+_DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # ✅ Modèle corrigé
 
 _AI_SYSTEM_PROMPT = """Tu es un assistant d'aide à la rédaction clinique NON médicale.
 Tu dois STRICTEMENT respecter ces règles :
@@ -59,14 +59,10 @@ def _build_ai_user_prompt(payload: Dict[str, Any]) -> str:
             "Hygiène de vie": ["string"],
             "Examens complémentaires": ["string"],
             "Suivi": ["string"]
-        },
-        "dedup_notes": ["string (optionnel: mentionne fusions/suppressions de doublons)"]
+        }
     }
-
-    payload_json = _json.dumps(payload, ensure_ascii=False)
-    schema_json = _json.dumps(schema, ensure_ascii=False)
-
-    # ✅ FIX: string multi-ligne correctement fermée (plus de SyntaxError)
+    payload_json = _json.dumps(payload, ensure_ascii=False, indent=2)
+    schema_json = _json.dumps(schema, ensure_ascii=False, indent=2)
     return f"""TÂCHE: Re-ranker + dédupliquer + synthétiser des recommandations EXISTANTES.
 CONTRAINTE CRITIQUE: output JSON strict uniquement.
 
@@ -75,69 +71,73 @@ ENTRÉE (JSON):
 
 SCHÉMA DE SORTIE (respecte les clés, JSON strict):
 {schema_json}
+
+IMPORTANT: Retourne UNIQUEMENT un objet JSON valide, sans texte avant ou après.
 """
 
 def _openai_call_json(system_prompt: str, user_prompt: str, model: str) -> Dict[str, Any]:
+    api_key = None
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY manquant (variable d'environnement).")
+        try:
+            api_key = st.secrets.get("OPENAI_API_KEY")
+        except Exception:
+            pass
+    if not api_key:
+        try:
+            api_key = st.secrets["OPENAI_API_KEY"]
+        except Exception:
+            pass
+    
+    if not api_key:
+        raise RuntimeError(
+            "❌ OPENAI_API_KEY manquant.\n\n"
+            "Créez `.streamlit/secrets.toml` avec :\n"
+            'OPENAI_API_KEY = "sk-proj-..."\n\n'
+            "Ou : export OPENAI_API_KEY='sk-proj-...'"
+        )
+    
+    api_key = api_key.strip()
+    if not (api_key.startswith('sk-proj-') or api_key.startswith('sk-')):
+        raise ValueError("Format clé invalide. Doit commencer par 'sk-proj-' ou 'sk-'")
 
-    # 1) SDK OpenAI (si dispo)
     try:
-        from openai import OpenAI  # type: ignore
+        from openai import OpenAI
         client = OpenAI(api_key=api_key)
-
-        # responses API (recommandée)
-        resp = client.responses.create(
+        response = client.chat.completions.create(
             model=model,
-            input=[
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=2000
         )
-
-        out_text = getattr(resp, "output_text", None)
-        if not out_text:
-            # fallback: concaténer segments texte si nécessaire
-            try:
-                out_text = "".join([c.text for c in resp.output[0].content if hasattr(c, "text")])
-            except Exception:
-                out_text = None
-
-        if not out_text:
-            raise RuntimeError("Réponse OpenAI vide.")
-
-        return _json.loads(out_text)
-
-    except Exception:
-        # 2) Fallback HTTP (si SDK absent / incompatible)
-        import requests  # type: ignore
-
+        content = response.choices[0].message.content
+        return _json.loads(content)
+    except ImportError:
+        import requests
         url = "https://api.openai.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         body = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            # Forcer la sortie JSON strict quand supporté
             "response_format": {"type": "json_object"},
             "temperature": 0.2,
+            "max_tokens": 2000
         }
-        r = requests.post(url, headers=headers, data=_json.dumps(body), timeout=60)
+        r = requests.post(url, headers=headers, json=body, timeout=60)
+        if r.status_code == 401:
+            raise RuntimeError("❌ Clé API invalide (401). Vérifiez sur platform.openai.com")
         r.raise_for_status()
-        data = r.json()
-        content = data["choices"][0]["message"]["content"]
-        return _json.loads(content)
+        return _json.loads(r.json()["choices"][0]["message"]["content"])
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def ai_rerank_recommendations(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Appel IA caché (évite les reruns Streamlit trop coûteux)."""
     user_prompt = _build_ai_user_prompt(payload)
     return _openai_call_json(_AI_SYSTEM_PROMPT, user_prompt, _DEFAULT_OPENAI_MODEL)
 
