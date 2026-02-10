@@ -2,6 +2,8 @@
 """
 PDF Generator COMPATIBLE avec app.py v11.0
 Structure: microbiome_data contient 'bacteria' directement
+
+✅ FIX: Tous les biomarqueurs utilisent le MÊME template avec barres de progression
 """
 
 import os
@@ -15,6 +17,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
+from reportlab.graphics.shapes import Drawing, Rect, String, Circle
 
 # LOGO
 DEFAULT_LOGO = "/dna_logo.png"
@@ -123,8 +126,8 @@ def generate_multimodal_report(
         anormaux = sum(1 for b in biology_data if b.get('Statut') in ['Élevé', 'Bas'])
         
         summary_table = Table([
-            ['✅ Normaux', str(normaux)],
-            ['⚠ Anormaux', str(anormaux)]
+            ['■ Normaux', str(normaux)],
+            ['■ Anormaux', str(anormaux)]
         ], colWidths=[8*cm, 4*cm])
         
         summary_table.setStyle(TableStyle([
@@ -139,10 +142,8 @@ def generate_multimodal_report(
         story.append(summary_table)
         story.append(Spacer(1, 1*cm))
         
-        # ✅ NOUVEAU : Visualisations des biomarqueurs avec barres de progression
-        from reportlab.graphics.shapes import Drawing, Rect, String, Circle
-        
-        for bio in biology_data[:15]:  # Premiers 15
+        # ✅ VISUALISATIONS DES BIOMARQUEURS - TEMPLATE UNIFIÉ POUR TOUS
+        for bio in biology_data:
             # Extraire les valeurs
             name = str(bio.get('Biomarqueur', 'N/A'))
             value = bio.get('Valeur', 0)
@@ -171,197 +172,129 @@ def generate_multimodal_report(
             # Créer la visualisation
             d = Drawing(500, 60)
             
-            # Nom du biomarqueur (en gras)
-            d.add(String(5, 45, name[:40], fontSize=11, fillColor=colors.HexColor('#1f2937'), fontName='Helvetica-Bold'))
+            # Nom du biomarqueur (en gras, première ligne)
+            d.add(String(5, 45, name[:50], fontSize=11, fillColor=colors.HexColor('#1f2937'), fontName='Helvetica-Bold'))
             
-            # Valeur + unité (colorée selon statut)
+            # Valeur + unité (colorée selon statut, deuxième ligne)
             d.add(String(5, 5, f"{value} {unit}", fontSize=10, fillColor=color, fontName='Helvetica-Bold'))
             
-            # Référence
+            # Référence (si disponible)
             if min_val is not None and max_val is not None:
                 d.add(String(200, 5, f"Réf: {min_val} — {max_val}", fontSize=8, fillColor=colors.HexColor('#6b7280')))
                 
-                # Barre de progression
+                # Barre de progression horizontale
                 bar_x, bar_y, bar_width, bar_height = 50, 25, 300, 8
                 
                 # Fond de la barre (gris clair)
                 d.add(Rect(bar_x, bar_y, bar_width, bar_height, fillColor=colors.HexColor('#e5e7eb'), strokeColor=None))
                 
                 # Position du marqueur (0 à 1)
-                if max_val > min_val:
-                    position = max(0, min(1, (value - min_val) / (max_val - min_val)))
-                else:
+                try:
+                    value_float = _safe_float(value)
+                    if value_float is not None and max_val > min_val:
+                        position = max(0, min(1, (value_float - min_val) / (max_val - min_val)))
+                    else:
+                        position = 0.5
+                except:
                     position = 0.5
                 
-                # Marqueur circulaire
+                # Marqueur circulaire (valeur du patient)
                 marker_x = bar_x + (bar_width * position)
                 d.add(Circle(marker_x, bar_y + bar_height/2, 6, fillColor=color, strokeColor=colors.white, strokeWidth=2))
-                
-                # Lignes de min/max
-                d.add(String(bar_x - 5, bar_y + bar_height/2, str(min_val) if min_val else '', fontSize=8, fillColor=colors.HexColor('#9ca3af'), textAnchor='end'))
-                d.add(String(bar_x + bar_width + 5, bar_y + bar_height/2, str(max_val) if max_val else '', fontSize=8, fillColor=colors.HexColor('#9ca3af'), textAnchor='start'))
             
             story.append(d)
-            story.append(Spacer(1, 0.5*cm))
+            story.append(Spacer(1, 0.4*cm))
         
         story.append(PageBreak())
     
-    # ==================== PAGE 3: MICROBIOTE ====================
-    # ✅ IMPORTANT : Détecter 'bacteria' directement (structure app.py)
-    bacteria_list = None
-    
+    # ==================== PAGE 3: MICROBIOME ====================
     if microbiome_data:
-        # Essayer différentes clés possibles
-        if 'bacteria' in microbiome_data and isinstance(microbiome_data['bacteria'], list):
-            bacteria_list = microbiome_data['bacteria']
-            print(f"✓ Microbiome trouvé : {len(bacteria_list)} bactéries dans 'bacteria'")
-        elif 'bacteria_groups' in microbiome_data and isinstance(microbiome_data['bacteria_groups'], list):
-            bacteria_list = microbiome_data['bacteria_groups']
-            print(f"✓ Microbiome trouvé : {len(bacteria_list)} bactéries dans 'bacteria_groups'")
-    
-    if bacteria_list:
         story.append(Paragraph("Analyse Microbiote", subtitle_style))
         story.append(Spacer(1, 0.5*cm))
         
-        # Indices
+        # Indice de dysbiose
         di = microbiome_data.get('dysbiosis_index', 'N/A')
-        div = microbiome_data.get('diversity', 'N/A')
+        diversity = microbiome_data.get('diversity', 'N/A')
         
-        indices_table = Table([
+        microbiome_summary = Table([
             ['Indice de dysbiose (DI)', str(di)],
-            ['Diversité', str(div)]
+            ['Diversité', str(diversity)]
         ], colWidths=[8*cm, 7*cm])
         
-        indices_table.setStyle(TableStyle([
-            ('FONT', (0,0), (0,-1), 'Helvetica-Bold', 10),
-            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f3f4f6')),
+        microbiome_summary.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f9fafb')),
+            ('FONT', (0,0), (0,-1), 'Helvetica-Bold', 11),
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('PADDING', (0,0), (-1,-1), 10)
+            ('PADDING', (0,0), (-1,-1), 12)
         ]))
         
-        story.append(indices_table)
+        story.append(microbiome_summary)
         story.append(Spacer(1, 0.8*cm))
         
-        # Séparer normaux et anormaux
-        # ✅ Chercher dans 'status' OU 'result' car structure peut varier
-        normal_bact = []
-        abnormal_bact = []
+        # Récapitulatif des souches
+        bacteria_list = microbiome_data.get('bacteria', [])
         
-        for b in bacteria_list:
-            # Récupérer le statut (peut être 'status' ou dedans 'result')
-            status = b.get('status', '')
-            result = b.get('result', '')
+        if bacteria_list:
+            normal_count = sum(1 for b in bacteria_list if 'Normal' in b.get('status', ''))
+            abnormal_count = sum(1 for b in bacteria_list if 'Anormal' in b.get('status', ''))
             
-            # Normaliser pour détecter
-            is_normal = ('● Normal' in status) or ('Normal' in status) or (result == 'Expected')
-            
-            if is_normal:
-                normal_bact.append(b)
-            else:
-                abnormal_bact.append(b)
-        
-        print(f"✓ Répartition : {len(normal_bact)} normaux, {len(abnormal_bact)} anormaux")
-        
-        # ===== TABLEAU RÉCAPITULATIF =====
-        story.append(Paragraph("RÉCAPITULATIF DES SOUCHES", styles['Heading3']))
-        story.append(Spacer(1, 0.3*cm))
-        
-        recap_data = [
-            ['Type de souches', 'Nombre', 'État'],
-            ['Souches normales', str(len(normal_bact)), '✓ Bon'],
-            ['Souches anormales / à surveiller', str(len(abnormal_bact)), '⚠ Attention' if abnormal_bact else '✓ Bon']
-        ]
-        
-        recap_table = Table(recap_data, colWidths=[8*cm, 3*cm, 4*cm])
-        recap_table.setStyle(TableStyle([
-            # En-tête bleu
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a5490')),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('FONT', (0,0), (-1,0), 'Helvetica-Bold', 12),
-            # Ligne normales
-            ('BACKGROUND', (0,1), (0,1), colors.HexColor('#d1fae5')),
-            ('TEXTCOLOR', (0,1), (0,1), colors.HexColor('#059669')),
-            # Ligne anormales
-            ('BACKGROUND', (0,2), (0,2), colors.HexColor('#fee2e2') if abnormal_bact else colors.HexColor('#d1fae5')),
-            ('TEXTCOLOR', (0,2), (0,2), colors.red if abnormal_bact else colors.HexColor('#059669')),
-            # Style général
-            ('FONT', (0,1), (-1,-1), 'Helvetica', 11),
-            ('FONT', (1,1), (-1,-1), 'Helvetica-Bold', 14),
-            ('GRID', (0,0), (-1,-1), 1.5, colors.grey),
-            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('PADDING', (0,0), (-1,-1), 12),
-            ('BOX', (0,0), (-1,-1), 2, colors.HexColor('#1a5490'))
-        ]))
-        
-        story.append(recap_table)
-        story.append(Spacer(1, 1*cm))
-        
-        print("✓ Tableau récapitulatif microbiote ajouté")
-        
-        # ===== DÉTAILS NORMAUX =====
-        if normal_bact:
-            story.append(Paragraph(f"Souches normales ({len(normal_bact)})", styles['Heading3']))
+            story.append(Paragraph("RÉCAPITULATIF DES SOUCHES", styles['Heading3']))
             story.append(Spacer(1, 0.3*cm))
             
-            normal_data = [['Groupe bactérien', 'Résultat', 'Statut']]
-            for b in normal_bact[:20]:  # Max 20
-                group_name = b.get('group', b.get('category', 'N/A'))
-                result = b.get('result', 'Expected')
-                normal_data.append([
-                    group_name[:80],  # Tronquer
-                    result,
-                    '● Normal'
-                ])
+            recap_data = [
+                ['Type de souches', 'Nombre', 'État'],
+                ['Souches normales', str(normal_count), '✓ Bon' if normal_count > 0 else '-'],
+                ['Souches anormales / à surveiller', str(abnormal_count), '■ Attention' if abnormal_count > 0 else '-']
+            ]
             
-            normal_table = Table(normal_data, colWidths=[10*cm, 3*cm, 2.5*cm])
-            normal_table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.green),
+            recap_table = Table(recap_data, colWidths=[8*cm, 4*cm, 3.5*cm])
+            recap_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a5490')),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.white),
                 ('FONT', (0,0), (-1,0), 'Helvetica-Bold', 10),
-                ('FONT', (0,1), (-1,-1), 'Helvetica', 8),
+                ('FONT', (0,1), (-1,-1), 'Helvetica', 9),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f0fdf4')]),
                 ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-                ('PADDING', (0,0), (-1,-1), 8),
-                ('BOX', (0,0), (-1,-1), 1.5, colors.green)
+                ('PADDING', (0,0), (-1,-1), 10)
             ]))
             
-            story.append(normal_table)
-            story.append(Spacer(1, 1*cm))
-            print(f"✓ Tableau détails normaux ajouté ({len(normal_bact)} souches)")
-        
-        # ===== DÉTAILS ANORMAUX =====
-        if abnormal_bact:
-            story.append(Paragraph(f"Souches anormales / à surveiller ({len(abnormal_bact)})", styles['Heading3']))
-            story.append(Spacer(1, 0.3*cm))
+            story.append(recap_table)
+            story.append(Spacer(1, 0.8*cm))
             
-            abnormal_data = [['Groupe bactérien', 'Résultat', 'Statut']]
-            for b in abnormal_bact:
-                group_name = b.get('group', b.get('category', 'N/A'))
-                result = b.get('result', 'Deviating')
-                status = b.get('status', '⚠ Anormal')
-                abnormal_data.append([
-                    group_name[:80],
-                    result,
-                    status[:20]
-                ])
+            # Tableau détaillé des souches anormales
+            abnormal_bact = [b for b in bacteria_list if 'Anormal' in b.get('status', '')]
             
-            abnormal_table = Table(abnormal_data, colWidths=[10*cm, 3*cm, 2.5*cm])
-            abnormal_table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.red),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                ('FONT', (0,0), (-1,0), 'Helvetica-Bold', 10),
-                ('FONT', (0,1), (-1,-1), 'Helvetica', 8),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fee2e2')]),
-                ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-                ('PADDING', (0,0), (-1,-1), 8),
-                ('BOX', (0,0), (-1,-1), 1.5, colors.red)
-            ]))
-            
-            story.append(abnormal_table)
-            print(f"✓ Tableau détails anormaux ajouté ({len(abnormal_bact)} souches)")
+            if abnormal_bact:
+                story.append(Paragraph(f"Souches anormales / à surveiller ({len(abnormal_bact)})", styles['Heading3']))
+                story.append(Spacer(1, 0.3*cm))
+                
+                abnormal_data = [['Groupe bactérien', 'Résultat', 'Statut']]
+                
+                for b in abnormal_bact:
+                    group_name = b.get('group', b.get('category', 'N/A'))
+                    result = b.get('result', 'N/A')
+                    status = b.get('status', '⚠ Anormal')
+                    abnormal_data.append([
+                        group_name[:80],
+                        result,
+                        status[:20]
+                    ])
+                
+                abnormal_table = Table(abnormal_data, colWidths=[10*cm, 3*cm, 2.5*cm])
+                abnormal_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.red),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                    ('FONT', (0,0), (-1,0), 'Helvetica-Bold', 10),
+                    ('FONT', (0,1), (-1,-1), 'Helvetica', 8),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fee2e2')]),
+                    ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+                    ('PADDING', (0,0), (-1,-1), 8),
+                    ('BOX', (0,0), (-1,-1), 1.5, colors.red)
+                ]))
+                
+                story.append(abnormal_table)
+                print(f"✓ Tableau détails anormaux ajouté ({len(abnormal_bact)} souches)")
         
         story.append(PageBreak())
     
@@ -370,7 +303,7 @@ def generate_multimodal_report(
         story.append(Paragraph("Recommandations Personnalisées", subtitle_style))
         story.append(Spacer(1, 0.5*cm))
         
-        # ✅ NOUVEAU : Cadres colorés pour chaque catégorie
+        # ✅ CADRES COLORÉS POUR CHAQUE CATÉGORIE
         
         # 🔥 PRIORITAIRES (rouge)
         prioritaires = recommendations.get('Prioritaires', [])
@@ -487,9 +420,29 @@ def generate_multimodal_report(
             story.append(hyg_table)
             story.append(Spacer(1, 0.8*cm))
         
+        # 🔬 EXAMENS COMPLÉMENTAIRES (si présent)
+        examens = recommendations.get('Examens complémentaires', [])
+        if examens:
+            story.append(Paragraph("EXAMENS COMPLÉMENTAIRES", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            for item in examens:
+                story.append(Paragraph(f"• {item}", styles['Normal']))
+                story.append(Spacer(1, 0.2*cm))
+            story.append(Spacer(1, 0.5*cm))
+        
+        # 📅 SUIVI (si présent)
+        suivi = recommendations.get('Suivi', [])
+        if suivi:
+            story.append(Paragraph("SUIVI", styles['Heading3']))
+            story.append(Spacer(1, 0.3*cm))
+            for item in suivi:
+                story.append(Paragraph(f"• {item}", styles['Normal']))
+                story.append(Spacer(1, 0.2*cm))
+            story.append(Spacer(1, 0.5*cm))
+        
         # Autres catégories (gris neutre)
         for key, items in recommendations.items():
-            if key not in ['Prioritaires', 'À surveiller', 'Micronutrition', 'Nutrition', 'Hygiène de vie']:
+            if key not in ['Prioritaires', 'À surveiller', 'Micronutrition', 'Nutrition', 'Hygiène de vie', 'Examens complémentaires', 'Suivi']:
                 if items and isinstance(items, list):
                     story.append(Paragraph(key.upper(), styles['Heading3']))
                     story.append(Spacer(1, 0.3*cm))
@@ -536,4 +489,4 @@ generate_report = generate_multimodal_report
 
 if __name__ == "__main__":
     print("Module PDF chargé - Compatible app.py v11.0")
-    print("Structure microbiome: {'bacteria': [...]}")
+    print("✅ FIX: Tous les biomarqueurs utilisent le même template avec barres")
