@@ -87,13 +87,17 @@ DEFAULT_REFERENCES = {
     "glycemie": "0.70 — 1.05",
     "glucose": "0.70 — 1.05",
     "cpk": "30 — 200",
+    "c.p.k": "30 — 200",  # ← AJOUTÉ avec points
+    "c p k": "30 — 200",  # ← AJOUTÉ avec espaces
     "ck": "30 — 200",
     "creatine kinase": "30 — 200",
+    "creatinine kinase": "30 — 200",
     "ferritine": "15 — 150",
     "ferritin": "15 — 150",
     "crp": "0 — 5",
     "c-reactive protein": "0 — 5",
     "crp ultrasensible": "0 — 3",
+    "crp ultra": "0 — 3",  # ← AJOUTÉ variante
     "hs-crp": "0 — 3",
     "cholesterol total": "0 — 2.00",
     "ldl": "0 — 1.60",
