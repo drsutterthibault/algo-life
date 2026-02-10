@@ -1,9 +1,11 @@
 """
-UNILABS / ALGO-LIFE - Extractors v16.0 PRODUCTION-READY
+UNILABS / ALGO-LIFE - Extractors v17.0 PRODUCTION-READY FINAL
 ✅ Extraction parfaite des 12 groupes bactériens (A1, A2, B1, C1, C2, D1, D2, E1-E5)
-✅ Détection robuste des statuts Expected / Slightly deviating / Deviating
+✅ Détection robuste des statuts Expected / Slightly Deviating / Deviating
+✅ Détection séquentielle pour gérer les variations de mise en page
 ✅ Mapping correct bactéries ↔ positions
 ✅ Support format positif et négatif
+✅ Testé sur rapports réels et exemples
 """
 
 from __future__ import annotations
@@ -253,74 +255,90 @@ def extract_synlab_biology(pdf_path, progress=None):
 
 def _extract_bacterial_groups_v2(text):
     """
-    EXTRACTION OPTIMALE DES GROUPES - v2
+    EXTRACTION OPTIMALE DES GROUPES - v2.2
     
-    Stratégie:
-    1. Identifier les 12 groupes standards (A1, A2, B1, C1, C2, D1, D2, E1-E5)
-    2. Pour chaque groupe, chercher son statut dans le texte
-    3. Utiliser des noms standards pour éviter confusion
+    Stratégie améliorée avec détection séquentielle:
+    1. Les groupes apparaissent dans l'ordre A1, A2, B1, C1, C2, D1, D2, E1-E5
+    2. Extraire tous les "Result: ..." du texte
+    3. Mapper séquentiellement aux groupes
     """
     
     # Définition des 12 groupes standards
-    STANDARD_GROUPS = {
-        'A1': 'Prominent gut microbes',
-        'A2': 'Diverse gut bacterial communities',
-        'B1': 'Enriched on animal-based diet',
-        'C1': 'Complex carbohydrate degraders',
-        'C2': 'Lactic acid bacteria and probiotics',
-        'D1': 'Gut epithelial integrity marker',
-        'D2': 'Major SCFA producers',
-        'E1': 'Inflammation indicator',
-        'E2': 'Potentially virulent',
-        'E3': 'Facultative anaerobes',
-        'E4': 'Predominantly oral bacteria',
-        'E5': 'Genital, respiratory, and skin bacteria'
-    }
+    STANDARD_GROUPS = [
+        ('A1', 'Prominent gut microbes'),
+        ('A2', 'Diverse gut bacterial communities'),
+        ('B1', 'Enriched on animal-based diet'),
+        ('C1', 'Complex carbohydrate degraders'),
+        ('C2', 'Lactic acid bacteria and probiotics'),
+        ('D1', 'Gut epithelial integrity marker'),
+        ('D2', 'Major SCFA producers'),
+        ('E1', 'Inflammation indicator'),
+        ('E2', 'Potentially virulent'),
+        ('E3', 'Facultative anaerobes'),
+        ('E4', 'Predominantly oral bacteria'),
+        ('E5', 'Genital, respiratory, and skin bacteria')
+    ]
     
     groups = []
     
-    for group_code, group_name in STANDARD_GROUPS.items():
-        # Chercher le statut de ce groupe dans le texte
-        # Les statuts sont généralement indiqués par des symboles ou du texte
-        
-        group_status = 'Expected'  # Par défaut
-        
-        # Pattern pour trouver ce groupe avec son résultat
-        # Format: "A1. Prominent ... Expected" ou "A1. Prominent ... Slightly deviating"
-        
-        # Méthode 1: Chercher "Result: ..." après ce groupe
-        pattern_with_result = rf'{group_code}\.\s+.{{0,200}}?Result:\s*(expected|slightly\s+deviating|deviating)'
-        match = re.search(pattern_with_result, text, re.IGNORECASE | re.DOTALL)
-        
-        if match:
-            result_text = match.group(1).lower()
-            if 'slightly' in result_text:
+    # STRATÉGIE 1: Extraction séquentielle des "Result: ..."
+    # Les résultats apparaissent dans le même ordre que les groupes
+    result_pattern = r'Result:\s*(expected|slightly\s+deviating|deviating)\s+abundance'
+    result_matches = list(re.finditer(result_pattern, text, re.IGNORECASE))
+    
+    if len(result_matches) == len(STANDARD_GROUPS):
+        # Cas idéal : autant de résultats que de groupes
+        for i, (group_code, group_name) in enumerate(STANDARD_GROUPS):
+            result_text = result_matches[i].group(1).lower()
+            
+            if 'slightly' in result_text and 'deviating' in result_text:
                 group_status = 'Slightly Deviating'
-            elif 'deviating' in result_text:
+            elif 'deviating' in result_text and 'slightly' not in result_text:
                 group_status = 'Deviating'
             else:
                 group_status = 'Expected'
-        
-        # Méthode 2: Chercher dans le tableau visuel (icônes/symboles)
-        # Les lignes de résultats sont formatées comme:
-        # "A1. Prominent ... ✓" ou "D1. Gut epithelial ... ⚠"
-        if group_status == 'Expected':  # Si pas trouvé par méthode 1
-            # Chercher une ligne qui contient le groupe + un indicateur visuel
-            visual_pattern = rf'{group_code}\.\s+.{{0,80}}?(?:Expected|Slightly\s+deviating|Deviating)'
-            match_visual = re.search(visual_pattern, text, re.IGNORECASE)
             
-            if match_visual:
-                line_content = match_visual.group(0)
-                if re.search(r'Slightly\s+deviating', line_content, re.IGNORECASE):
+            groups.append({
+                'category': group_code,
+                'name': group_name,
+                'abundance': group_status
+            })
+    
+    else:
+        # STRATÉGIE 2: Recherche individuelle pour chaque groupe
+        for group_code, group_name in STANDARD_GROUPS:
+            group_status = 'Expected'  # Par défaut
+            
+            # Méthode 2.1: Pattern élargi avec "Result:"
+            pattern_result = rf'{group_code}[\.\s]+.{{0,600}}?Result:\s*(expected|slightly\s+deviating|deviating)'
+            match = re.search(pattern_result, text, re.IGNORECASE | re.DOTALL)
+            
+            if match:
+                result_text = match.group(1).lower()
+                if 'slightly' in result_text and 'deviating' in result_text:
                     group_status = 'Slightly Deviating'
-                elif re.search(r'(?<!Slightly\s)Deviating', line_content, re.IGNORECASE):
+                elif 'deviating' in result_text and 'slightly' not in result_text:
                     group_status = 'Deviating'
-        
-        groups.append({
-            'category': group_code,
-            'name': group_name,
-            'abundance': group_status
-        })
+                else:
+                    group_status = 'Expected'
+            
+            # Méthode 2.2: Chercher "slightly deviating abundance" dans le contexte
+            if group_status == 'Expected':
+                slightly_pattern = rf'{group_code}[\.\s]+.{{0,700}}?slightly\s+deviating\s+abundance'
+                if re.search(slightly_pattern, text, re.IGNORECASE | re.DOTALL):
+                    group_status = 'Slightly Deviating'
+            
+            # Méthode 2.3: Chercher "deviating abundance" (sans "slightly")
+            if group_status == 'Expected':
+                deviating_pattern = rf'{group_code}[\.\s]+.{{0,700}}?(?<!slightly\s)deviating\s+abundance'
+                if re.search(deviating_pattern, text, re.IGNORECASE | re.DOTALL):
+                    group_status = 'Deviating'
+            
+            groups.append({
+                'category': group_code,
+                'name': group_name,
+                'abundance': group_status
+            })
     
     return groups
 
