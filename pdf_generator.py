@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-PDF Generator v3.0 ULTIMATE - Rapport Complet Multimodal
+PDF Generator v3.1 ENHANCED - Rapport Complet Multimodal avec Analyses Croisées Enrichies
 Compatible avec app.py v13 et extractors v19
 
 ✅ Analyses complètes 15-20 pages
 ✅ Extraction robuste
 ✅ Recommandations automatiques  
-✅ Analyses croisées multimodales DÉTAILLÉES
+✅ Analyses croisées multimodales ENRICHIES (10 patterns, scoring, catégorisation)
 ✅ Export professionnel prêt pour le patient
 ✅ Toutes les visualisations
+✅ NOUVEAU: Design moderne, mécanismes physiopathologiques, page de synthèse
 """
 
 import os
@@ -24,6 +25,13 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.graphics.shapes import Drawing, Rect, String, Circle, Line
 from datetime import datetime
+
+# NOUVEAU - Analyses croisées enrichies v3.1
+from cross_analysis_enhanced import compute_enhanced_cross_analysis
+from cross_analysis_renderer import (
+    render_enhanced_cross_analysis_section,
+    create_cross_analysis_summary_page
+)
 
 # LOGO
 DEFAULT_LOGO = "/dna_logo.png"
@@ -178,209 +186,11 @@ def create_biomarker_visualization(name, value, unit, reference, status, width=4
 
 def compute_cross_analysis(biology_data, microbiome_data):
     """
-    Génère des analyses croisées DÉTAILLÉES Biologie × Microbiome
-    
-    Returns:
-        list: Liste de dict avec analyses croisées
+    Wrapper pour compatibilité - Utilise le nouveau système enrichi
+    Compatible avec l'ancien format mais génère des analyses BEAUCOUP plus détaillées
     """
-    if not biology_data or not microbiome_data:
-        return []
-    
-    # Helper: Trouver un biomarqueur
-    def get_biomarker(name_patterns):
-        for bio in biology_data:
-            bio_name = str(bio.get('Biomarqueur', '')).lower()
-            for pattern in name_patterns:
-                if pattern.lower() in bio_name:
-                    return bio
-        return None
-    
-    # Extraire données microbiome
-    di = microbiome_data.get('dysbiosis_index')
-    diversity = str(microbiome_data.get('diversity', '')).lower()
-    bacteria_groups = microbiome_data.get('bacteria_groups', [])
-    
-    # Compter groupes anormaux
-    deviating_groups = [g for g in bacteria_groups 
-                       if 'deviating' in str(g.get('result') or g.get('abundance', '')).lower()]
-    
-    analyses = []
-    
-    # ===== ANALYSE 1: INFLAMMATION × DYSBIOSE =====
-    crp = get_biomarker(['crp', 'c-reactive', 'proteine c'])
-    if crp and crp.get('Statut') in ['Élevé', 'Elevé']:
-        if di and di >= 3:
-            analyses.append({
-                'titre': '🔥 INFLAMMATION SYSTÉMIQUE + DYSBIOSE',
-                'signal_bio': f"CRP élevée ({crp.get('Valeur')} {crp.get('Unité')})",
-                'signal_micro': f"Dysbiose sévère (DI {di}/5)",
-                'interpretation': (
-                    "La présence simultanée d'une inflammation systémique (CRP élevée) et d'une dysbiose "
-                    "intestinale suggère un lien bidirectionnel. Le déséquilibre du microbiote peut contribuer "
-                    "à l'inflammation via la perméabilité intestinale et les lipopolysaccharides bactériens (LPS). "
-                    "Inversement, l'inflammation peut altérer le microbiote."
-                ),
-                'recommandations': [
-                    "Optimiser le microbiote (probiotiques, prébiotiques)",
-                    "Réduire l'inflammation (oméga-3, curcumine)",
-                    "Réparer la barrière intestinale (L-glutamine, zinc)",
-                    "Identifier et éliminer les facteurs pro-inflammatoires"
-                ],
-                'priorite': 'HAUTE'
-            })
-    
-    # ===== ANALYSE 2: CARENCES MARTIALES × MICROBIOTE =====
-    ferritine = get_biomarker(['ferritin', 'ferritine'])
-    hemoglobine = get_biomarker(['hemoglobin', 'hémoglobine', 'hb'])
-    
-    if (ferritine and ferritine.get('Statut') == 'Bas') or (hemoglobine and hemoglobine.get('Statut') == 'Bas'):
-        if di and di >= 3:
-            analyses.append({
-                'titre': '⚠️ CARENCES MARTIALES + DYSBIOSE',
-                'signal_bio': f"Ferritine/Hb basses ({ferritine.get('Valeur') if ferritine else 'N/A'} / {hemoglobine.get('Valeur') if hemoglobine else 'N/A'})",
-                'signal_micro': f"Dysbiose (DI {di}/5)",
-                'interpretation': (
-                    "Les carences martiales associées à une dysbiose peuvent indiquer : "
-                    "(1) Une malabsorption liée à l'inflammation intestinale, "
-                    "(2) Une compétition bactérienne pour le fer, "
-                    "(3) Des micro-saignements digestifs non détectés. "
-                    "La dysbiose peut réduire l'absorption du fer héminique et non héminique."
-                ),
-                'recommandations': [
-                    "Bilan digestif approfondi (coloscopie si indiqué)",
-                    "Supplémentation fer bisglycinate (mieux toléré)",
-                    "Restauration microbiote",
-                    "Vitamine C pour améliorer absorption",
-                    "Contrôle ferritine/CRP à 3 mois"
-                ],
-                'priorite': 'HAUTE'
-            })
-    
-    # ===== ANALYSE 3: VITAMINE D × IMMUNITÉ × MICROBIOTE =====
-    vitd = get_biomarker(['vitamin d', '25(oh)', '25-oh', 'vitamine d'])
-    if vitd and vitd.get('Statut') == 'Bas':
-        if di and di >= 3:
-            analyses.append({
-                'titre': '☀️ HYPOVITAMINOSE D + DYSBIOSE',
-                'signal_bio': f"Vitamine D basse ({vitd.get('Valeur')} {vitd.get('Unité')})",
-                'signal_micro': f"Dysbiose (DI {di}/5) + diversité {diversity}",
-                'interpretation': (
-                    "La vitamine D joue un rôle crucial dans l'immunité et la régulation du microbiote. "
-                    "Son déficit associé à une dysbiose crée un cercle vicieux : "
-                    "la vitamine D basse fragilise la barrière intestinale et l'immunité locale, "
-                    "ce qui favorise la dysbiose. Inversement, la dysbiose peut réduire la conversion "
-                    "de la vitamine D en sa forme active."
-                ),
-                'recommandations': [
-                    "Supplémentation vitamine D3 (dose selon niveau actuel)",
-                    "Exposition solaire régulière",
-                    "Optimisation microbiote en parallèle",
-                    "Magnésium et vitamine K2 (cofacteurs)",
-                    "Contrôle à 2-3 mois"
-                ],
-                'priorite': 'MOYENNE'
-            })
-    
-    # ===== ANALYSE 4: GLYCÉMIE × MICROBIOTE =====
-    glycemie = get_biomarker(['glucose', 'glycemie', 'glycémie'])
-    hba1c = get_biomarker(['hba1c', 'hémoglobine glyquée'])
-    
-    if (glycemie and glycemie.get('Statut') == 'Élevé') or (hba1c and hba1c.get('Statut') == 'Élevé'):
-        if di and di >= 3:
-            analyses.append({
-                'titre': '🍬 DYSGLYCÉMIE + DYSBIOSE',
-                'signal_bio': f"Glycémie/HbA1c élevée ({glycemie.get('Valeur') if glycemie else 'N/A'})",
-                'signal_micro': f"Dysbiose (DI {di}/5)",
-                'interpretation': (
-                    "Le microbiote intestinal influence fortement la glycémie via : "
-                    "(1) Production d'acides gras à chaîne courte (AGCC), "
-                    "(2) Modulation de l'inflammation de bas grade, "
-                    "(3) Régulation des hormones métaboliques (GLP-1, PYY). "
-                    "La dysbiose peut contribuer à l'insulinorésistance et au diabète de type 2."
-                ),
-                'recommandations': [
-                    "Régime pauvre en sucres rapides",
-                    "Fibres prébiotiques (inuline, pectines)",
-                    "Probiotiques spécifiques (Akkermansia)",
-                    "Activité physique régulière",
-                    "Restauration microbiote + suivi glycémie"
-                ],
-                'priorite': 'HAUTE'
-            })
-    
-    # ===== ANALYSE 5: THYROÏDE × MICROBIOTE =====
-    tsh = get_biomarker(['tsh'])
-    t4 = get_biomarker(['t4', 'thyroxine'])
-    
-    if (tsh and tsh.get('Statut') in ['Élevé', 'Bas']) or (t4 and t4.get('Statut') in ['Élevé', 'Bas']):
-        if di and di >= 3:
-            analyses.append({
-                'titre': '🦋 DYSFONCTION THYROÏDIENNE + DYSBIOSE',
-                'signal_bio': f"TSH/T4 anormales ({tsh.get('Valeur') if tsh else 'N/A'})",
-                'signal_micro': f"Dysbiose (DI {di}/5)",
-                'interpretation': (
-                    "Le microbiote influence la fonction thyroïdienne via : "
-                    "(1) Conversion T4→T3 (désiodase intestinale), "
-                    "(2) Absorption des nutriments essentiels (sélénium, zinc, iode), "
-                    "(3) Modulation de l'inflammation qui peut affecter la thyroïde. "
-                    "Une dysbiose peut donc impacter indirectement la fonction thyroïdienne."
-                ),
-                'recommandations': [
-                    "Bilan thyroïdien complet (T3, anticorps)",
-                    "Vérifier sélénium, zinc, iode",
-                    "Optimisation microbiote",
-                    "Éviter goitrogènes si hypothyroïdie",
-                    "Suivi endocrinologique si besoin"
-                ],
-                'priorite': 'MOYENNE'
-            })
-    
-    # ===== ANALYSE 6: DIVERSITÉ BACTÉRIENNE RÉDUITE =====
-    if 'lower' in diversity or 'reduced' in diversity or 'below' in diversity:
-        analyses.append({
-            'titre': '🔬 DIVERSITÉ BACTÉRIENNE RÉDUITE',
-            'signal_bio': "—",
-            'signal_micro': f"Diversité {microbiome_data.get('diversity', 'N/A')}",
-            'interpretation': (
-                "Une diversité bactérienne réduite est associée à : "
-                "une moindre résilience du microbiote face aux stress, "
-                "une capacité métabolique diminuée, "
-                "un risque accru de maladies inflammatoires et métaboliques. "
-                "C'est un marqueur de fragilité du microbiote."
-            ),
-            'recommandations': [
-                "Alimentation variée et riche en fibres",
-                "Probiotiques multi-souches",
-                "Prébiotiques diversifiés",
-                "Réduire stress et antibiotiques",
-                "Réévaluation microbiote à 6 mois"
-            ],
-            'priorite': 'MOYENNE'
-        })
-    
-    # ===== ANALYSE 7: GROUPES BACTÉRIENS DÉVIANTS =====
-    if len(deviating_groups) >= 3:
-        group_names = ", ".join([g.get('category', '') for g in deviating_groups[:3]])
-        analyses.append({
-            'titre': '⚠️ MULTIPLES GROUPES BACTÉRIENS DÉVIANTS',
-            'signal_bio': "—",
-            'signal_micro': f"{len(deviating_groups)} groupes déviants ({group_names})",
-            'interpretation': (
-                "La présence de plusieurs groupes bactériens déviants simultanément indique "
-                "un déséquilibre profond et multi-dimensionnel du microbiote. "
-                "Cela nécessite une approche globale de restauration plutôt que ciblée."
-            ),
-            'recommandations': [
-                "Approche holistique de restauration",
-                "Éliminer facteurs perturbateurs",
-                "Probiotiques + prébiotiques combinés",
-                "Alimentation anti-inflammatoire",
-                "Suivi rapproché (3 mois)"
-            ],
-            'priorite': 'HAUTE'
-        })
-    
-    return analyses
+    return compute_enhanced_cross_analysis(biology_data, microbiome_data)
+
 
 
 def generate_multimodal_report(
@@ -829,86 +639,20 @@ def generate_multimodal_report(
             
             story.append(PageBreak())
     
-    # ==================== PAGE: ANALYSES CROISÉES MULTIMODALES ====================
+    # ==================== PAGE: ANALYSES CROISÉES ENRICHIES ====================
     story.append(Paragraph("🔬 ANALYSES CROISÉES MULTIMODALES", subtitle_style))
     story.append(Spacer(1, 0.5*cm))
     
-    story.append(Paragraph(
-        "<i>Cette section présente les liens entre vos résultats biologiques et votre microbiote. "
-        "Ces analyses croisées permettent d'identifier des patterns complexes et d'adapter les recommandations.</i>",
-        normal_justify
-    ))
-    story.append(Spacer(1, 0.8*cm))
-    
-    # Générer analyses croisées automatiques
+    # Générer analyses croisées enrichies
     cross_analyses = compute_cross_analysis(biology_data, microbiome_data)
     
     if cross_analyses:
-        for idx, analysis in enumerate(cross_analyses, 1):
-            # Encadré de l'analyse
-            story.append(Paragraph(f"{idx}. {analysis['titre']}", heading3_style))
-            story.append(Spacer(1, 0.3*cm))
-            
-            # Tableau des signaux
-            signals_data = [
-                ['Signal Biologie', analysis['signal_bio']],
-                ['Signal Microbiote', analysis['signal_micro']]
-            ]
-            
-            signals_table = Table(signals_data, colWidths=[5*cm, 11*cm])
-            signals_table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#e5e7eb')),
-                ('FONT', (0,0), (0,-1), 'Helvetica-Bold', 10),
-                ('FONT', (1,0), (1,-1), 'Helvetica', 10),
-                ('GRID', (0,0), (-1,-1), 1, colors.grey),
-                ('PADDING', (0,0), (-1,-1), 8),
-                ('VALIGN', (0,0), (-1,-1), 'TOP')
-            ]))
-            
-            story.append(signals_table)
-            story.append(Spacer(1, 0.5*cm))
-            
-            # Interprétation
-            story.append(Paragraph("<b>Interprétation:</b>", ParagraphStyle('BoldSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10)))
-            story.append(Spacer(1, 0.2*cm))
-            story.append(Paragraph(analysis['interpretation'], normal_justify))
-            story.append(Spacer(1, 0.5*cm))
-            
-            # Recommandations
-            story.append(Paragraph("<b>Recommandations:</b>", ParagraphStyle('BoldSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10)))
-            story.append(Spacer(1, 0.2*cm))
-            
-            for reco in analysis['recommandations']:
-                story.append(Paragraph(f"• {reco}", styles['Normal']))
-                story.append(Spacer(1, 0.1*cm))
-            
-            # Badge priorité
-            priorite = analysis.get('priorite', 'MOYENNE')
-            if priorite == 'HAUTE':
-                bg = colors.HexColor('#fee2e2')
-                fg = colors.HexColor('#991b1b')
-            elif priorite == 'MOYENNE':
-                bg = colors.HexColor('#fff7ed')
-                fg = colors.HexColor('#9a3412')
-            else:
-                bg = colors.HexColor('#f3f4f6')
-                fg = colors.HexColor('#374151')
-            
-            story.append(Spacer(1, 0.3*cm))
-            priority_table = Table([[f"PRIORITÉ: {priorite}"]], colWidths=[16*cm])
-            priority_table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,-1), bg),
-                ('TEXTCOLOR', (0,0), (-1,-1), fg),
-                ('FONT', (0,0), (-1,-1), 'Helvetica-Bold', 10),
-                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ('PADDING', (0,0), (-1,-1), 8),
-                ('BOX', (0,0), (-1,-1), 2, fg)
-            ]))
-            story.append(priority_table)
-            
-            story.append(Spacer(1, 1*cm))
+        # Page de synthèse avec statistiques
+        summary_elements = create_cross_analysis_summary_page(cross_analyses, styles)
+        story.extend(summary_elements)
         
-        story.append(PageBreak())
+        # Analyses détaillées avec nouveau rendu moderne
+        render_enhanced_cross_analysis_section(story, cross_analyses, styles)
     else:
         story.append(Paragraph(
             "<i>Aucune analyse croisée automatique n'a pu être générée avec les données disponibles. "
@@ -916,6 +660,7 @@ def generate_multimodal_report(
             normal_justify
         ))
         story.append(PageBreak())
+
     
     # ==================== PAGE: RECOMMANDATIONS ====================
     if recommendations:
@@ -1056,12 +801,14 @@ generate_report = generate_multimodal_report
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("PDF Generator v3.0 ULTIMATE chargé")
+    print("PDF Generator v3.1 ENHANCED chargé")
     print("Compatible avec app.py v13 et extractors v19")
     print("=" * 70)
-    print("✅ Rapport complet 15-20 pages")
+    print("✅ Rapport complet 18-25 pages")
     print("✅ Extraction robuste")
     print("✅ Recommandations automatiques")
-    print("✅ Analyses croisées multimodales DÉTAILLÉES")
+    print("✅ Analyses croisées ENRICHIES (10 patterns, scoring, catégorisation)")
+    print("✅ Design moderne avec mécanismes physiopathologiques")
+    print("✅ Page de synthèse avec statistiques")
     print("✅ Export professionnel prêt pour le patient")
     print("=" * 70)
