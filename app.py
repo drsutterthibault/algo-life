@@ -27,7 +27,7 @@ import numpy as np
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from extractors import extract_synlab_biology, extract_idk_microbiome
+from extractors import extract_synlab_biology, extract_idk_microbiome, extract_microbiome_from_excel
 from rules_engine import RulesEngine
 
 # Tentative import PDF generator
@@ -695,34 +695,62 @@ with tabs[0]:
     st.markdown("<div style='margin: 30px 0;'>", unsafe_allow_html=True)
     
     if st.button("🚀 Extraire et Analyser", type="primary", use_container_width=True):
-        if not bio_pdf and not micro_pdf:
-            st.error("⚠️ Veuillez uploader au moins un fichier (biologie ou microbiote)")
+        if not bio_pdf and not micro_pdf and not bio_excel and not micro_excel:
+            st.error("⚠️ Veuillez uploader au moins un fichier")
         else:
             with st.spinner("⏳ Extraction et analyse en cours..."):
                 try:
-                    # Extraction données
+                    # ===== EXTRACTION DONNÉES =====
                     biology_dict = {}
                     microbiome_dict = {}
                     
+                    # ✅ BIOLOGIE: PDF
                     if bio_pdf:
                         bio_path = _file_to_temp_path(bio_pdf, ".pdf")
                         biology_dict = extract_synlab_biology(bio_path)
+                    
+                    # ✅ BIOLOGIE: Excel (complète ou enrichit les données PDF)
+                    if bio_excel:
+                        bio_excel_path = _file_to_temp_path(bio_excel, ".xlsx")
+                        from extractors import extract_biology_from_excel
+                        biology_excel = extract_biology_from_excel(bio_excel_path)
+                        biology_dict.update(biology_excel)
+                    
+                    # ✅ Convertir biologie en DataFrame
+                    if biology_dict:
                         st.session_state.biology_df = _dict_bio_to_dataframe(biology_dict)
                     
+                    # ✅ MICROBIOME: PDF (méthode principale)
                     if micro_pdf:
                         micro_path = _file_to_temp_path(micro_pdf, ".pdf")
                         micro_excel_path = _file_to_temp_path(micro_excel, ".xlsx") if micro_excel else None
                         microbiome_dict = extract_idk_microbiome(micro_path, micro_excel_path)
+                    
+                    # ✅ ✨ MICROBIOME: Excel seul (NOUVEAU - fichier structuré)
+                    elif micro_excel:
+                        micro_excel_path = _file_to_temp_path(micro_excel, ".xlsx")
+                        microbiome_dict = extract_microbiome_from_excel(micro_excel_path)
+                        
+                        # Afficher un message spécifique pour Excel
+                        st.info("📊 Données microbiome chargées depuis Excel")
+                    
+                    # ✅ Traiter les données microbiome
+                    if microbiome_dict:
                         st.session_state.microbiome_data = microbiome_dict
 
-                        # ✅ NOUVEAU : Tableau résumé microbiote (DI, diversité, groupes)
+                        # Tableau résumé microbiote (DI, diversité, groupes)
                         st.session_state.microbiome_summary_df = _microbiome_summary_dataframe(microbiome_dict)
                         
-                        # ✅ NOUVEAU : Créer le DataFrame microbiote pour tableau éditable
+                        # Créer le DataFrame microbiote pour tableau éditable
                         bacteria = _microbiome_get_groups(microbiome_dict)
                         st.session_state.microbiome_df = _microbiome_to_dataframe(bacteria)
+                        
+                        # Afficher les biomarqueurs de selles si présents
+                        stool_bio = microbiome_dict.get("stool_biomarkers", {})
+                        if stool_bio:
+                            st.success(f"✅ {len(stool_bio)} biomarqueurs de selles importés (Calprotectine, sIgA, etc.)")
                     
-                    # Génération des recommandations consolidées
+                    # ===== GÉNÉRATION RECOMMANDATIONS =====
                     engine = _get_rules_engine()
                     if engine:
                         consolidated = engine.generate_consolidated_recommendations(
@@ -733,13 +761,16 @@ with tabs[0]:
                         st.session_state.consolidated_recommendations = consolidated
                         st.session_state.cross_analysis = consolidated.get("cross_analysis", [])
 
-                        # ✅ NOUVEAU : Tableau de signaux croisés simple (fallback + UI)
+                        # Tableau de signaux croisés
                         try:
-                            st.session_state.cross_table_df = _compute_cross_table(st.session_state.biology_df, microbiome_dict if microbiome_dict else st.session_state.microbiome_data)
+                            st.session_state.cross_table_df = _compute_cross_table(
+                                st.session_state.biology_df, 
+                                microbiome_dict if microbiome_dict else st.session_state.microbiome_data
+                            )
                         except Exception:
                             st.session_state.cross_table_df = pd.DataFrame()
                     
-                    # Calcul âge biologique si données disponibles
+                    # ===== CALCUL ÂGE BIOLOGIQUE =====
                     if not st.session_state.biology_df.empty:
                         markers = _extract_biomarkers_for_bfrail(st.session_state.biology_df)
                         if all(k in markers for k in ['crp', 'hemoglobin', 'vitamin_d']):
@@ -754,6 +785,7 @@ with tabs[0]:
                             )
                             st.session_state.bio_age_result = bfrail_calc.calculate(bfrail_data)
                     
+                    # ===== FIN =====
                     st.session_state.data_extracted = True
                     st.success("✅ Extraction et analyse terminées !")
                     st.rerun()
