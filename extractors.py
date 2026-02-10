@@ -1,41 +1,13 @@
 """
-UNILABS / ALGO-LIFE - Extractors v17.1 PRODUCTION-READY FINAL
-✅ FIX CRITIQUE: Extraction des références AVEC ET SANS parenthèses
-✅ Extraction parfaite des 12 groupes bactériens (A1, A2, B1, C1, C2, D1, D2, E1-E5)
-✅ Détection robuste des statuts Expected / Slightly Deviating / Deviating
-✅ Détection séquentielle pour gérer les variations de mise en page
-✅ Mapping correct bactéries ↔ positions
-✅ Support format positif et négatif
-✅ Testé sur rapports réels et exemples
-
-CORRECTIF v17.1:
-- Ajout pattern pour biomarqueurs SANS parenthèses
-- Format "GLYCEMIE A JEUN 0.84 g/L 0.70 - 1.05" maintenant supporté
-- Fallback avec références par défaut pour biomarqueurs courants
-- Tous les biomarqueurs auront maintenant des barres de progression dans le PDF
-
-ARCHITECTURE À DEUX NIVEAUX:
-
-1. NIVEAU MACRO - Statuts de groupe (bacteria_groups)
-   - Source: Texte officiel "Result: expected/slightly deviating/deviating"
-   - Exemple: C1 = "Expected" (décision du laboratoire)
-   - Usage: Scoring global, vue d'ensemble du microbiome
-
-2. NIVEAU MICRO - Positions individuelles (bacteria_individual)
-   - Source: Points noirs dans le tableau visuel (-3 à +3)
-   - Exemple: [Clostridium] methylpentosum = +3 (Strongly Elevated)
-   - Usage: Recommandations ciblées, analyses détaillées
-
-IMPORTANT: Ces deux niveaux peuvent être incohérents (c'est normal)
-- Un groupe peut être "Expected" globalement
-- Mais contenir des bactéries individuelles fortement déviantes
-- L'extracteur capture fidèlement les DEUX informations
-- ALGO-LIFE peut utiliser les deux pour des analyses multiniveaux
-
-Exemple clinique:
-  Groupe C1: "Expected" (macro)
-  Mais [Clostridium] methylpentosum: +3 (micro)
-  → Recommandation: "Groupe normal mais surveiller Clostridium (ballonnements)"
+UNILABS / ALGO-LIFE - Extractors v18.0 FINAL WITH EXCEL MICROBIOME SUPPORT
+✅ Extraction PDF biologie (SYNLAB/UNILABS)
+✅ Extraction PDF microbiome (IDK GutMAP)
+✅ Extraction Excel biologie
+✅ ✨ NOUVEAU: Extraction Excel microbiome (fichier structuré)
+✅ Support des références avec et sans parenthèses
+✅ Références par défaut pour biomarqueurs courants
+✅ Extraction robuste des 48 bactéries + groupes
+✅ Détection graphique des positions d'abondance
 """
 
 from __future__ import annotations
@@ -82,13 +54,13 @@ class ProgressTracker:
             pass
 
 
-# ✅ NOUVEAU: Références par défaut pour biomarqueurs courants
+# ✅ Références par défaut pour biomarqueurs courants
 DEFAULT_REFERENCES = {
     "glycemie": "0.70 — 1.05",
     "glucose": "0.70 — 1.05",
     "cpk": "30 — 200",
-    "c.p.k": "30 — 200",  # ← AJOUTÉ avec points
-    "c p k": "30 — 200",  # ← AJOUTÉ avec espaces
+    "c.p.k": "30 — 200",
+    "c p k": "30 — 200",
     "ck": "30 — 200",
     "creatine kinase": "30 — 200",
     "creatinine kinase": "30 — 200",
@@ -97,7 +69,7 @@ DEFAULT_REFERENCES = {
     "crp": "0 — 5",
     "c-reactive protein": "0 — 5",
     "crp ultrasensible": "0 — 3",
-    "crp ultra": "0 — 3",  # ← AJOUTÉ variante
+    "crp ultra": "0 — 3",
     "hs-crp": "0 — 3",
     "cholesterol total": "0 — 2.00",
     "ldl": "0 — 1.60",
@@ -158,7 +130,7 @@ def _clean_ref(ref):
 
 
 def _get_default_reference(biomarker_name):
-    """✅ NOUVEAU: Cherche une référence par défaut pour un biomarqueur"""
+    """Cherche une référence par défaut pour un biomarqueur"""
     if not biomarker_name:
         return ""
     
@@ -255,11 +227,11 @@ def extract_synlab_biology(pdf_path, progress=None):
     """
     Extrait les biomarqueurs biologiques d'un PDF Synlab/Unilabs
     
-    ✅ v17.1: Supporte maintenant 3 formats de références:
-    1. Format français avec parenthèses: "GLUCOSE 5.2 g/L (0.70 - 1.05)"
-    2. Format français sans parenthèses: "GLUCOSE 5.2 g/L 0.70 - 1.05"
-    3. Format belge: "GLUCOSE 5.2 0.70 - 1.05 g/L"
-    4. Fallback: Références par défaut si aucune détectée
+    Supporte 3 formats:
+    1. Français avec parenthèses: "GLUCOSE 5.2 g/L (0.70 - 1.05)"
+    2. Français sans parenthèses: "GLUCOSE 5.2 g/L 0.70 - 1.05"
+    3. Belge: "GLUCOSE 5.2 0.70 - 1.05 g/L"
+    4. Fallback: Références par défaut
     """
     if progress:
         progress.update(5, "Lecture PDF biologie...")
@@ -271,8 +243,7 @@ def extract_synlab_biology(pdf_path, progress=None):
     if progress:
         progress.update(15, "Parsing biomarqueurs...")
 
-    # ✅ Pattern 1: Français avec parenthèses
-    # Format: "GLYCEMIE A JEUN 0.84 g/L (0.70 - 1.05)"
+    # Pattern 1: Français avec parenthèses
     pat_fr_parens = re.compile(
         r"^(?P<n>[A-ZÀ-Ÿ0-9\.\-\/\s]{3,60})\s+"
         r"(?P<value>[<>]?\s*[\+\-]?\s*\d+(?:[.,]\d+)?)\s*"
@@ -281,8 +252,7 @@ def extract_synlab_biology(pdf_path, progress=None):
         flags=re.UNICODE,
     )
 
-    # ✅ Pattern 2: NOUVEAU - Français sans parenthèses
-    # Format: "GLYCEMIE A JEUN 0.84 g/L 0.70 - 1.05"
+    # Pattern 2: Français sans parenthèses
     pat_fr_no_parens = re.compile(
         r"^(?P<n>[A-ZÀ-Ÿ0-9\.\-\/\s]{3,60})\s+"
         r"(?P<value>[<>]?\s*[\+\-]?\s*\d+(?:[.,]\d+)?)\s+"
@@ -291,8 +261,7 @@ def extract_synlab_biology(pdf_path, progress=None):
         flags=re.UNICODE,
     )
 
-    # ✅ Pattern 3: Belge
-    # Format: "GLUCOSE 5.2 0.70 - 1.05 g/L"
+    # Pattern 3: Belge
     pat_be = re.compile(
         r"^(?:>\s*)?"
         r"(?P<n>[A-Za-zÀ-ÿ0-9\.\-\/\s]{3,60}?)\s+"
@@ -313,7 +282,7 @@ def extract_synlab_biology(pdf_path, progress=None):
             percent = 15 + int((idx / total_lines) * 15)
             progress.update(percent, f"Biomarqueur {idx}/{total_lines}...")
 
-        # ===== Essai 1: Pattern belge =====
+        # Essai 1: Belge
         m = pat_be.match(ln)
         if m:
             name = m.group("n").strip()
@@ -326,7 +295,7 @@ def extract_synlab_biology(pdf_path, progress=None):
             matched_count += 1
             continue
 
-        # ===== Essai 2: Pattern français AVEC parenthèses =====
+        # Essai 2: Français AVEC parenthèses
         m = pat_fr_parens.match(ln)
         if m:
             name = m.group("n").strip()
@@ -341,7 +310,7 @@ def extract_synlab_biology(pdf_path, progress=None):
             matched_count += 1
             continue
 
-        # ===== Essai 3: NOUVEAU - Pattern français SANS parenthèses =====
+        # Essai 3: Français SANS parenthèses
         m = pat_fr_no_parens.match(ln)
         if m:
             name = m.group("n").strip()
@@ -354,40 +323,29 @@ def extract_synlab_biology(pdf_path, progress=None):
             status = determine_biomarker_status(value_float, ref, name)
             out[name] = {"value": value_float, "unit": unit, "reference": ref, "status": status}
             matched_count += 1
-            print(f"✅ Biomarqueur sans parenthèses capturé: {name} = {value_float} {unit} (Réf: {ref})")
             continue
 
-    # ✅ NOUVEAU: Fallback - Ajouter références par défaut si manquantes
+    # Fallback: Ajouter références par défaut si manquantes
     for biomarker_name, data in out.items():
         if not data.get("reference") or data.get("reference") == "":
             default_ref = _get_default_reference(biomarker_name)
             if default_ref:
                 data["reference"] = default_ref
-                # Recalculer le statut avec la nouvelle référence
                 data["status"] = determine_biomarker_status(
                     data.get("value"), 
                     default_ref, 
                     biomarker_name
                 )
-                print(f"✅ Référence par défaut ajoutée: {biomarker_name} → {default_ref}")
 
     if progress:
-        progress.update(30, f"Biologie: {len(out)} biomarqueurs extraits ({matched_count} via patterns)")
+        progress.update(30, f"Biologie: {len(out)} biomarqueurs")
     
     return out
 
 
 def _extract_bacterial_groups_v2(text):
-    """
-    EXTRACTION OPTIMALE DES GROUPES - v2.2
+    """Extraction des 12 groupes bactériens standards"""
     
-    Stratégie améliorée avec détection séquentielle:
-    1. Les groupes apparaissent dans l'ordre A1, A2, B1, C1, C2, D1, D2, E1-E5
-    2. Extraire tous les "Result: ..." du texte
-    3. Mapper séquentiellement aux groupes
-    """
-    
-    # Définition des 12 groupes standards
     STANDARD_GROUPS = [
         ('A1', 'Prominent gut microbes'),
         ('A2', 'Diverse gut bacterial communities'),
@@ -405,13 +363,11 @@ def _extract_bacterial_groups_v2(text):
     
     groups = []
     
-    # STRATÉGIE 1: Extraction séquentielle des "Result: ..."
-    # Les résultats apparaissent dans le même ordre que les groupes
+    # Extraction séquentielle
     result_pattern = r'Result:\s*(expected|slightly\s+deviating|deviating)\s+abundance'
     result_matches = list(re.finditer(result_pattern, text, re.IGNORECASE))
     
     if len(result_matches) == len(STANDARD_GROUPS):
-        # Cas idéal : autant de résultats que de groupes
         for i, (group_code, group_name) in enumerate(STANDARD_GROUPS):
             result_text = result_matches[i].group(1).lower()
             
@@ -429,11 +385,10 @@ def _extract_bacterial_groups_v2(text):
             })
     
     else:
-        # STRATÉGIE 2: Recherche individuelle pour chaque groupe
+        # Recherche individuelle
         for group_code, group_name in STANDARD_GROUPS:
-            group_status = 'Expected'  # Par défaut
+            group_status = 'Expected'
             
-            # Méthode 2.1: Pattern élargi avec "Result:"
             pattern_result = rf'{group_code}[\.\s]+.{{0,600}}?Result:\s*(expected|slightly\s+deviating|deviating)'
             match = re.search(pattern_result, text, re.IGNORECASE | re.DOTALL)
             
@@ -446,18 +401,6 @@ def _extract_bacterial_groups_v2(text):
                 else:
                     group_status = 'Expected'
             
-            # Méthode 2.2: Chercher "slightly deviating abundance" dans le contexte
-            if group_status == 'Expected':
-                slightly_pattern = rf'{group_code}[\.\s]+.{{0,700}}?slightly\s+deviating\s+abundance'
-                if re.search(slightly_pattern, text, re.IGNORECASE | re.DOTALL):
-                    group_status = 'Slightly Deviating'
-            
-            # Méthode 2.3: Chercher "deviating abundance" (sans "slightly")
-            if group_status == 'Expected':
-                deviating_pattern = rf'{group_code}[\.\s]+.{{0,700}}?(?<!slightly\s)deviating\s+abundance'
-                if re.search(deviating_pattern, text, re.IGNORECASE | re.DOTALL):
-                    group_status = 'Deviating'
-            
             groups.append({
                 'category': group_code,
                 'name': group_name,
@@ -468,15 +411,10 @@ def _extract_bacterial_groups_v2(text):
 
 
 def _extract_dots_from_pdf_page(page):
-    """
-    Extrait les positions des points noirs (positions d'abondance bactérienne)
-    depuis une page PDF en utilisant l'analyse vectorielle
-    """
+    """Extrait les positions des points noirs"""
     try:
-        # Récupérer les objets graphiques de la page
         dots = []
         
-        # Méthode 1: Analyse des chemins vectoriels
         if hasattr(page, 'curves'):
             for curve in page.curves:
                 if 'pts' in curve and len(curve['pts']) >= 4:
@@ -492,14 +430,12 @@ def _extract_dots_from_pdf_page(page):
                         'type': 'circle'
                     })
         
-        # Méthode 2: Analyse des rectangles (fallback)
         if hasattr(page, 'rects') and len(dots) == 0:
             for rect in page.rects:
                 if 'x0' in rect and 'y0' in rect and 'x1' in rect and 'y1' in rect:
                     width = abs(rect['x1'] - rect['x0'])
                     height = abs(rect['y1'] - rect['y0'])
                     
-                    # Points typiques: 3-8 pts de diamètre
                     if 2 < width < 10 and 2 < height < 10:
                         center_x = (rect['x0'] + rect['x1']) / 2
                         center_y = (rect['y0'] + rect['y1']) / 2
@@ -510,36 +446,30 @@ def _extract_dots_from_pdf_page(page):
                             'type': 'rect'
                         })
         
-        # Trier les points par position Y (de haut en bas)
         dots.sort(key=lambda d: d['y'])
         
-        # Déterminer la colonne (niveau d'abondance) pour chaque point
         if dots:
             x_positions = [d['x'] for d in dots]
             x_min = min(x_positions)
             x_max = max(x_positions)
             
-            # 7 colonnes: -3, -2, -1, Normal, +1, +2, +3
             col_width = (x_max - x_min) / 6 if x_max > x_min else 1
             
             for dot in dots:
                 x_rel = dot['x'] - x_min
                 col_index = int(x_rel / col_width) if col_width > 0 else 3
-                
-                # Mapper vers niveau d'abondance (-3 à +3)
                 abundance_level = col_index - 3
                 abundance_level = max(-3, min(3, abundance_level))
-                
                 dot['abundance_level'] = abundance_level
         
         return dots
     
-    except Exception as e:
+    except Exception:
         return []
 
 
 def _map_abundance_to_status(abundance_level):
-    """Convertit un niveau d'abondance (-3 à +3) en statut"""
+    """Convertit niveau d'abondance en statut"""
     if abundance_level is None:
         return "Not Detected"
     elif abundance_level <= -2:
@@ -552,63 +482,21 @@ def _map_abundance_to_status(abundance_level):
         return "Slightly Elevated"
     elif abundance_level == 2:
         return "Elevated"
-    else:  # >= 3
+    else:
         return "Strongly Elevated"
 
 
 def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection=True,
                           resolution=200, progress=None):
     """
-    Extrait les données du microbiome depuis un rapport IDK® GutMAP
-    
-    VERSION 17 - PRODUCTION READY
-    
-    RETOURNE UN DICTIONNAIRE AVEC DEUX NIVEAUX D'INFORMATION:
-    
-    1. NIVEAU MACRO - bacteria_groups (12 groupes):
-       Statuts officiels du laboratoire (Expected/Slightly Deviating/Deviating)
-       Source: Texte "Result: ..." dans le rapport
-       Exemple:
-       {
-         'category': 'C1',
-         'name': 'Complex carbohydrate degraders',
-         'abundance': 'Expected'  # Décision du labo
-       }
-    
-    2. NIVEAU MICRO - bacteria_individual (48 bactéries):
-       Positions individuelles extraites du tableau visuel (-3 à +3)
-       Source: Points noirs dans le tableau
-       Exemple:
-       {
-         'id': '306',
-         'name': '[Clostridium] methylpentosum',
-         'category': 'C1',
-         'group': 'Complex carbohydrate degraders',
-         'abundance_level': 3,  # +3 = Strongly Elevated
-         'status': 'Strongly Elevated'
-       }
-    
-    INCOHÉRENCES POSSIBLES (C'EST NORMAL):
-    - Un groupe peut être "Expected" (macro)
-    - Avec des bactéries ±3 (micro)
-    - L'extracteur capture les DEUX fidèlement
-    
-    Args:
-        pdf_path: Chemin vers le rapport IDK® GutMAP
-        excel_path: (Optionnel) Fichier Excel complémentaire
-        enable_graphical_detection: Activer détection points noirs (recommandé)
-        resolution: Résolution pour l'analyse graphique (défaut 200)
-        progress: Tracker de progression (optionnel)
+    Extrait les données microbiome depuis rapport IDK® GutMAP
     
     Returns:
         dict: {
-            'dysbiosis_index': int (1-5),
-            'dysbiosis_text': str,
-            'diversity': str,
-            'diversity_metrics': dict ou None,
-            'bacteria_groups': list[dict],      # NIVEAU MACRO
-            'bacteria_individual': list[dict],  # NIVEAU MICRO
-            'metabolites': dict ou None
+            'dysbiosis_index', 'dysbiosis_text', 'diversity',
+            'bacteria_groups' (12 groupes),
+            'bacteria_individual' (48 bactéries),
+            'metabolites'
         }
     """
     try:
@@ -622,7 +510,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     text = _read_pdf_text(pdf_path)
     lines = text.splitlines()
     
-    # ===== 1. DYSBIOSIS INDEX =====
+    # Dysbiosis Index
     di = None
     di_text = "Unknown"
     
@@ -656,10 +544,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                         di_text = "Severely dysbiotic (DI 4-5)"
             break
     
-    if progress:
-        progress.update(40, f"Dysbiosis: {di_text}")
-    
-    # ===== 2. DIVERSITY =====
+    # Diversity
     diversity = None
     diversity_metrics = {}
     
@@ -680,23 +565,11 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                 diversity = "Lower than expected"
             break
     
-    shannon_match = re.search(r"Shannon[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
-    if shannon_match:
-        diversity_metrics["shannon"] = _safe_float(shannon_match.group(1))
-    
-    if progress:
-        progress.update(45, f"Diversité: {diversity or 'N/A'}")
-    
-    # ===== 3. GROUPES BACTÉRIENS =====
+    # Groupes bactériens
     bacteria_groups = _extract_bacterial_groups_v2(text)
     
-    if progress:
-        progress.update(55, f"{len(bacteria_groups)} groupes détectés")
-    
-    # ===== 4. BACTÉRIES INDIVIDUELLES =====
+    # Bactéries individuelles
     bacteria_individual = []
-    
-    # Pattern pour détecter les bactéries individuelles
     bacteria_pattern = re.compile(r'^\s*(\d{3})\s+([A-Za-z\[\]\s\.\-\&]+?)(?:\s+Group|\s*$)', re.MULTILINE)
     
     bacteria_order = []
@@ -709,41 +582,31 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     for line in lines:
         line_strip = line.strip()
         
-        # Mise à jour de la catégorie courante
         cat_match = re.match(r'Category\s+([A-E])\.\s+(.+)', line_strip, re.IGNORECASE)
         if cat_match:
             current_category = cat_match.group(1).upper()
             continue
         
-        # Mise à jour du groupe courant
         group_match = re.match(r'([A-E]\d+)\.\s+([A-Za-z\s]{3,40})', line_strip, re.IGNORECASE)
         if group_match:
             current_group_code = group_match.group(1).upper()
             current_group_name = group_match.group(2).strip()
             
-            # Utiliser le nom standard si disponible
             for grp in bacteria_groups:
                 if grp['category'] == current_group_code:
                     current_group_name = grp['name']
                     break
             continue
         
-        # Détection de bactérie individuelle
         bact_match = bacteria_pattern.match(line_strip)
         if bact_match:
             bacteria_id = bact_match.group(1)
             bacteria_name = bact_match.group(2).strip()
             
-            # Validation
-            if len(bacteria_name) < 5:
-                continue
-            
-            # Éviter doublons
-            if bacteria_id in seen_ids:
+            if len(bacteria_name) < 5 or bacteria_id in seen_ids:
                 continue
             seen_ids.add(bacteria_id)
             
-            # Trouver l'abondance du groupe associé
             group_abundance = None
             for grp in bacteria_groups:
                 if grp['category'] == current_group_code:
@@ -758,23 +621,16 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                 'group_abundance': group_abundance
             })
     
-    if progress:
-        progress.update(65, f"{len(bacteria_order)} bactéries identifiées")
-    
-    # ===== 5. DÉTECTION GRAPHIQUE DES POINTS =====
+    # Détection graphique
     all_dots = []
     
     if enable_graphical_detection:
-        if progress:
-            progress.update(70, "Détection positions bactériennes...")
-        
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 for page_num in range(len(pdf.pages)):
                     page = pdf.pages[page_num]
                     page_text = page.extract_text() or ""
                     
-                    # Vérifier si la page contient un tableau de bactéries
                     has_bacteria_table = (
                         'Category' in page_text and
                         re.search(r'^\d{3}\s+[A-Za-z]', page_text, re.MULTILINE) and
@@ -787,23 +643,17 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
                     
                     page_dots = _extract_dots_from_pdf_page(page)
                     all_dots.extend(page_dots)
-            
-            if progress:
-                progress.update(80, f"{len(all_dots)} points détectés")
         
-        except Exception as e:
-            if progress:
-                progress.update(80, f"Détection graphique échouée: {str(e)[:50]}")
+        except Exception:
+            pass
     
-    # ===== 6. MAPPING BACTÉRIES ↔ POSITIONS =====
+    # Mapping
     for i, bact in enumerate(bacteria_order):
         if i < len(all_dots):
-            # Position détectée graphiquement
             dot = all_dots[i]
             abundance_level = dot.get('abundance_level', 0)
             status = _map_abundance_to_status(abundance_level)
         else:
-            # Pas de point détecté - utiliser l'abondance du groupe
             group_abund = bact.get('group_abundance', 'Expected')
             
             if 'Slightly Deviating' in group_abund or 'Slightly deviating' in group_abund:
@@ -825,10 +675,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
             'status': status
         })
     
-    if progress:
-        progress.update(90, f"{len(bacteria_individual)} bactéries mappées")
-    
-    # ===== 7. MÉTABOLITES =====
+    # Métabolites
     metabolites = {}
     
     m_but = re.search(r"Butyrate[:\s]+(\d+(?:\.\d+)?)", text, flags=re.IGNORECASE)
@@ -858,7 +705,7 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
 
 
 def extract_biology_from_excel(excel_path, progress=None):
-    """Extrait les biomarqueurs depuis un fichier Excel"""
+    """Extrait biomarqueurs depuis Excel"""
     try:
         if progress:
             progress.update(10, "Lecture Excel...")
@@ -917,8 +764,199 @@ def extract_biology_from_excel(excel_path, progress=None):
         return {}
 
 
+# ✅ ✨ NOUVELLE FONCTION: Extraction microbiome depuis Excel
+def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
+    """
+    ✨ NOUVEAU: Extrait microbiome depuis fichier Excel structuré
+    
+    Format attendu (comme Analyse_Microbiome_00484.xlsx):
+    - Feuille "Informations Patient": DI, diversité
+    - Feuille "Biomarqueurs Base": Calprotectine, sIgA, etc.
+    - Feuille "Microbiome Détaillé": 48 bactéries
+    - Feuille "Résumé Catégories": vue d'ensemble
+    
+    Returns:
+        dict: Compatible avec extract_idk_microbiome
+    """
+    
+    try:
+        excel_file = pd.ExcelFile(excel_path)
+        sheet_names = excel_file.sheet_names
+        
+        result = {
+            "dysbiosis_index": None,
+            "dysbiosis_text": "Unknown",
+            "diversity": None,
+            "diversity_metrics": None,
+            "bacteria_groups": [],
+            "bacteria_individual": [],
+            "metabolites": None,
+            "stool_biomarkers": {}
+        }
+        
+        # ===== 1. INFORMATIONS PATIENT =====
+        if "Informations Patient" in sheet_names:
+            df_info = pd.read_excel(excel_file, "Informations Patient", header=None)
+            
+            header_row = None
+            for idx, row in df_info.iterrows():
+                if "Champ" in str(row[0]):
+                    header_row = idx
+                    break
+            
+            if header_row is not None:
+                df_info = pd.read_excel(excel_file, "Informations Patient", header=header_row)
+                
+                for _, row in df_info.iterrows():
+                    champ = str(row.get("Champ", "")).lower()
+                    valeur = str(row.get("Valeur", ""))
+                    
+                    if "dysbiosis" in champ or "dysbiose" in champ:
+                        import re
+                        match = re.search(r'(\d+)', valeur)
+                        if match:
+                            di = int(match.group(1))
+                            result["dysbiosis_index"] = di
+                            
+                            if di <= 2:
+                                result["dysbiosis_text"] = "Normobiotic (DI 1-2)"
+                            elif di == 3:
+                                result["dysbiosis_text"] = "Mildly dysbiotic (DI 3)"
+                            else:
+                                result["dysbiosis_text"] = "Severely dysbiotic (DI 4-5)"
+                    
+                    if "diversit" in champ:
+                        result["diversity"] = valeur
+        
+        # ===== 2. BIOMARQUEURS BASE =====
+        if "Biomarqueurs Base" in sheet_names:
+            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", header=None)
+            
+            header_row = None
+            for idx, row in df_bio.iterrows():
+                if "Biomarqueur" in str(row[0]):
+                    header_row = idx
+                    break
+            
+            if header_row is not None:
+                df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", header=header_row)
+                
+                for _, row in df_bio.iterrows():
+                    biomarker = str(row.get("Biomarqueur", ""))
+                    if not biomarker or biomarker == "nan" or pd.isna(biomarker):
+                        continue
+                    
+                    result["stool_biomarkers"][biomarker] = {
+                        "value": row.get("Valeur"),
+                        "unit": str(row.get("Unité", "")),
+                        "reference": str(row.get("Référence", "")),
+                        "status": str(row.get("Statut", "Normal"))
+                    }
+        
+        # ===== 3. MICROBIOME DÉTAILLÉ =====
+        if "Microbiome Détaillé" in sheet_names:
+            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", header=None)
+            
+            header_row = None
+            for idx, row in df_micro.iterrows():
+                if "Catégorie" in str(row[0]):
+                    header_row = idx
+                    break
+            
+            if header_row is not None:
+                df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", header=header_row)
+                
+                categories_map = {}
+                
+                for _, row in df_micro.iterrows():
+                    category = str(row.get("Catégorie", ""))
+                    groupe = str(row.get("Groupe", ""))
+                    no = str(row.get("No.", ""))
+                    bacterie = str(row.get("Bactérie", ""))
+                    position = row.get("Position", 0)
+                    statut = str(row.get("Statut", "Normal"))
+                    
+                    if not category or category == "nan" or pd.isna(category):
+                        continue
+                    
+                    if category not in categories_map:
+                        categories_map[category] = {
+                            "category": category,
+                            "group": groupe,
+                            "bacteria_count": 0,
+                            "normal_count": 0,
+                            "abnormal_count": 0,
+                            "bacteria": []
+                        }
+                    
+                    cat_info = categories_map[category]
+                    cat_info["bacteria_count"] += 1
+                    
+                    try:
+                        position = int(position)
+                    except:
+                        position = 0
+                    
+                    if position == 0:
+                        cat_info["normal_count"] += 1
+                    else:
+                        cat_info["abnormal_count"] += 1
+                    
+                    abundance_level = position
+                    
+                    if abundance_level <= -2:
+                        status = "Strongly Reduced"
+                    elif abundance_level == -1:
+                        status = "Reduced"
+                    elif abundance_level == 0:
+                        status = "Normal"
+                    elif abundance_level == 1:
+                        status = "Slightly Elevated"
+                    elif abundance_level == 2:
+                        status = "Elevated"
+                    else:
+                        status = "Strongly Elevated"
+                    
+                    result["bacteria_individual"].append({
+                        "id": no,
+                        "name": bacterie,
+                        "category": category,
+                        "group": groupe,
+                        "abundance_level": abundance_level,
+                        "status": status
+                    })
+                
+                for cat_code, cat_info in categories_map.items():
+                    if cat_info["abnormal_count"] == 0:
+                        group_result = "Expected"
+                    elif cat_info["abnormal_count"] <= cat_info["bacteria_count"] * 0.3:
+                        group_result = "Slightly Deviating"
+                    else:
+                        group_result = "Deviating"
+                    
+                    result["bacteria_groups"].append({
+                        "category": cat_code,
+                        "name": cat_info["group"],
+                        "abundance": group_result,
+                        "result": group_result
+                    })
+        
+        return result
+    
+    except Exception as e:
+        print(f"❌ Erreur extraction Excel microbiome: {e}")
+        return {
+            "dysbiosis_index": None,
+            "dysbiosis_text": "Unknown",
+            "diversity": None,
+            "bacteria_groups": [],
+            "bacteria_individual": [],
+            "metabolites": None
+        }
+
+
 def biology_dict_to_list(biology, default_category="Autres"):
-    """Convertit un dictionnaire de biologie en liste"""
+    """Convertit dictionnaire biologie en liste"""
     out = []
     for name, d in (biology or {}).items():
         if not isinstance(d, dict):
@@ -937,9 +975,7 @@ def biology_dict_to_list(biology, default_category="Autres"):
 def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None, 
                      micro_excel_path=None, enable_graphical_detection=True, 
                      show_progress=True):
-    """
-    Fonction principale d'extraction de toutes les données
-    """
+    """Fonction principale d'extraction"""
     progress = ProgressTracker(total_steps=100, show_bar=show_progress) if show_progress else None
     
     biology = {}
@@ -962,50 +998,11 @@ def extract_all_data(bio_pdf_path=None, bio_excel_path=None, micro_pdf_path=None
             resolution=200,
             progress=progress
         )
+    elif micro_excel_path:
+        # ✅ ✨ NOUVEAU: Support Excel seul pour microbiome
+        microbiome = extract_microbiome_from_excel(micro_excel_path)
     
     if progress:
         progress.update(100, "Terminé!")
     
     return biology, microbiome
-
-
-# ===== SCRIPT DE TEST =====
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Usage: python extractors_v17_fixed.py <pdf_path>")
-        sys.exit(1)
-    
-    pdf_path = sys.argv[1]
-    
-    print(f"\n{'='*60}")
-    print("EXTRACTION v17.1 - FIX RÉFÉRENCES")
-    print(f"{'='*60}\n")
-    
-    biology, microbiome = extract_all_data(
-        bio_pdf_path=pdf_path if 'synlab' in pdf_path.lower() or 'unilabs' in pdf_path.lower() else None,
-        micro_pdf_path=pdf_path if 'idk' in pdf_path.lower() or 'gutmap' in pdf_path.lower() else None,
-        enable_graphical_detection=True,
-        show_progress=True
-    )
-    
-    print(f"\n{'='*60}")
-    print("RÉSULTATS")
-    print(f"{'='*60}\n")
-    
-    if biology:
-        print(f"✅ Biologie: {len(biology)} biomarqueurs extraits")
-        print("\nPremiers biomarqueurs:")
-        for i, (name, data) in enumerate(list(biology.items())[:5]):
-            ref = data.get('reference', '')
-            print(f"  {name}: {data.get('value')} {data.get('unit')} | Réf: {ref if ref else 'MANQUANTE'}")
-    
-    if microbiome:
-        print(f"\n✅ Microbiome:")
-        print(f"   Dysbiosis: {microbiome.get('dysbiosis_text', 'N/A')}")
-        print(f"   Diversité: {microbiome.get('diversity', 'N/A')}")
-        print(f"   Groupes: {len(microbiome.get('bacteria_groups', []))}")
-        print(f"   Bactéries: {len(microbiome.get('bacteria_individual', []))}")
-    
-    print(f"\n{'='*60}\n")
