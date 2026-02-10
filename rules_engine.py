@@ -1,5 +1,5 @@
 """
-ALGO-LIFE / UNILABS - Rules Engine v10.0
+UNILABS - Rules Engine v10.0
 ✅ Catégorisation structurée des recommandations
 ✅ Support multimodal (Bio + Microbiote + Cross-analysis)
 ✅ Segmentation exacte : Prioritaires, À surveiller, Nutrition, Micronutrition, Hygiène de vie, Examens complémentaires, Suivi
