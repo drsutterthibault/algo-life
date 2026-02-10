@@ -62,21 +62,20 @@ def _build_ai_user_prompt(payload: Dict[str, Any]) -> str:
         },
         "dedup_notes": ["string (optionnel: mentionne fusions/suppressions de doublons)"]
     }
-    return (
-        "TÂCHE: Re-ranker + dédupliquer + synthétiser des recommandations EXISTANTES.
-"
-        "CONTRAINTE CRITIQUE: output JSON strict uniquement.
 
-"
-        "ENTRÉE (JSON):
-"
-        f"{_json.dumps(payload, ensure_ascii=False)}
+    payload_json = _json.dumps(payload, ensure_ascii=False)
+    schema_json = _json.dumps(schema, ensure_ascii=False)
 
-"
-        "SCHÉMA DE SORTIE (respecte les clés, JSON strict):
-"
-        f"{_json.dumps(schema, ensure_ascii=False)}"
-    )
+    # ✅ FIX: string multi-ligne correctement fermée (plus de SyntaxError)
+    return f"""TÂCHE: Re-ranker + dédupliquer + synthétiser des recommandations EXISTANTES.
+CONTRAINTE CRITIQUE: output JSON strict uniquement.
+
+ENTRÉE (JSON):
+{payload_json}
+
+SCHÉMA DE SORTIE (respecte les clés, JSON strict):
+{schema_json}
+"""
 
 def _openai_call_json(system_prompt: str, user_prompt: str, model: str) -> Dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY")
@@ -87,6 +86,7 @@ def _openai_call_json(system_prompt: str, user_prompt: str, model: str) -> Dict[
     try:
         from openai import OpenAI  # type: ignore
         client = OpenAI(api_key=api_key)
+
         # responses API (recommandée)
         resp = client.responses.create(
             model=model,
@@ -96,16 +96,18 @@ def _openai_call_json(system_prompt: str, user_prompt: str, model: str) -> Dict[
             ],
             response_format={"type": "json_object"},
         )
-        # Le SDK renvoie du texte JSON dans output_text
+
         out_text = getattr(resp, "output_text", None)
         if not out_text:
-            # fallback: concaténer les segments texte
+            # fallback: concaténer segments texte si nécessaire
             try:
                 out_text = "".join([c.text for c in resp.output[0].content if hasattr(c, "text")])
             except Exception:
                 out_text = None
+
         if not out_text:
             raise RuntimeError("Réponse OpenAI vide.")
+
         return _json.loads(out_text)
 
     except Exception:
@@ -1175,29 +1177,6 @@ with tabs[1]:
                         border_color = "#10b981"
                         card_bg = "#f6ffed"
                     
-                    # Titre de l'expander avec badge
-                    title_html = f"""
-                        <span style="background: {badge_bg}; 
-                                     color: {badge_color}; 
-                                     padding: 4px 12px; 
-                                     border-radius: 12px;
-                                     font-weight: 700;
-                                     font-size: 11px;
-                                     letter-spacing: 0.5px;
-                                     margin-right: 10px;">
-                            {badge_text}
-                        </span>
-                        <span style="font-weight: 600; color: #1f2937;">
-                            {bio.get('biomarker')}
-                        </span>
-                        <span style="color: {badge_color}; font-weight: 600; margin: 0 8px;">
-                            {bio.get('status')}
-                        </span>
-                        <span style="color: #6b7280; font-size: 14px;">
-                            ({bio.get('value')} {bio.get('unit')})
-                        </span>
-                    """
-                    
                     with st.expander(
                         f"{bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
                         expanded=(priority in ['critical', 'high'])
@@ -1299,7 +1278,6 @@ with tabs[1]:
                 for ca in cross:
                     severity = ca.get("severity", "info")
                     
-                    # Design selon sévérité
                     if severity == "critical":
                         badge_bg = "#fef2f2"
                         badge_color = "#dc2626"
@@ -1323,7 +1301,6 @@ with tabs[1]:
                         f"{ca.get('title')}",
                         expanded=(severity == "critical")
                     ):
-                        # Badge sévérité
                         st.markdown(f"""
                             <div style="margin-bottom: 15px;">
                                 <span style="background: {badge_bg}; 
@@ -1339,7 +1316,6 @@ with tabs[1]:
                             </div>
                         """, unsafe_allow_html=True)
                         
-                        # Description dans une carte élégante
                         st.markdown(f"""
                             <div style="background: {card_bg}; 
                                         padding: 18px 20px; 
@@ -1391,73 +1367,70 @@ with tabs[2]:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
 
-# ─────────────────────────────────────────────────────────
-# 🤖 IA : Re-ranking + Synthèse (JSON strict) à partir des reco existantes
-# ─────────────────────────────────────────────────────────
-with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", expanded=False):
-    st.caption("L'IA ne crée pas de nouvelles recommandations : elle ré-ordonne, déduplique et synthétise à partir des recommandations existantes.")
-    col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 1, 2])
-    with col_ai_1:
-        use_ai = st.button("✨ Appliquer IA", type="primary", use_container_width=True)
-    with col_ai_2:
-        reset_ai = st.button("↩️ Revenir aux règles", use_container_width=True)
+        # ─────────────────────────────────────────────────────────
+        # 🤖 IA : Re-ranking + Synthèse (JSON strict) à partir des reco existantes
+        # ✅ FIX: bloc IA bien DANS le tab + DANS le else (évite variables non définies)
+        # ─────────────────────────────────────────────────────────
+        with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", expanded=False):
+            st.caption("L'IA ne crée pas de nouvelles recommandations : elle ré-ordonne, déduplique et synthétise à partir des recommandations existantes.")
+            col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 1, 2])
+            with col_ai_1:
+                use_ai = st.button("✨ Appliquer IA", type="primary", use_container_width=True)
+            with col_ai_2:
+                reset_ai = st.button("↩️ Revenir aux règles", use_container_width=True)
 
-    if reset_ai:
-        st.session_state.ai_reco_output = None
-        st.session_state.ai_reco_active = False
-        st.success("✅ Recommandations remises en mode 'règles' (sans IA).")
-        st.rerun()
+            if reset_ai:
+                st.session_state.ai_reco_output = None
+                st.session_state.ai_reco_active = False
+                st.success("✅ Recommandations remises en mode 'règles' (sans IA).")
+                st.rerun()
 
-    if use_ai:
-        try:
-            # Payload minimal (pas d'identifiants)
-            patient_ctx = {
-                "sex": st.session_state.patient_info.get("sex"),
-                "age": st.session_state.patient_info.get("age"),
-                "bmi": st.session_state.patient_info.get("bmi"),
-                "antecedents": st.session_state.patient_info.get("antecedents", "")[:800],
-            }
-            cross_titles = []
-            for ca in (st.session_state.cross_analysis or []):
-                title = ca.get("title") or ca.get("titre") or ""
-                if title:
-                    cross_titles.append(title)
+            if use_ai:
+                try:
+                    patient_ctx = {
+                        "sex": st.session_state.patient_info.get("sex"),
+                        "age": st.session_state.patient_info.get("age"),
+                        "bmi": st.session_state.patient_info.get("bmi"),
+                        "antecedents": st.session_state.patient_info.get("antecedents", "")[:800],
+                    }
+                    cross_titles = []
+                    for ca in (st.session_state.cross_analysis or []):
+                        title = ca.get("title") or ca.get("titre") or ""
+                        if title:
+                            cross_titles.append(title)
 
-            payload = {
-                "patient_context": patient_ctx,
-                "cross_signals": cross_titles[:20],
-                "recommendations_by_section": recommendations,
-            }
+                    payload = {
+                        "patient_context": patient_ctx,
+                        "cross_signals": cross_titles[:20],
+                        "recommendations_by_section": recommendations,
+                    }
 
-            with st.spinner("⏳ Appel IA en cours..."):
-                ai_out = ai_rerank_recommendations(payload)
+                    with st.spinner("⏳ Appel IA en cours..."):
+                        ai_out = ai_rerank_recommendations(payload)
 
-            # Validation minimale
-            if not isinstance(ai_out, dict) or "recommendations_by_section" not in ai_out:
-                raise ValueError("Sortie IA invalide (clé 'recommendations_by_section' manquante).")
+                    if not isinstance(ai_out, dict) or "recommendations_by_section" not in ai_out:
+                        raise ValueError("Sortie IA invalide (clé 'recommendations_by_section' manquante).")
 
-            st.session_state.ai_reco_output = ai_out
-            st.session_state.ai_reco_active = True
-            st.success("✅ IA appliquée : recommandations re-priorisées + synthèse générée.")
-            st.rerun()
+                    st.session_state.ai_reco_output = ai_out
+                    st.session_state.ai_reco_active = True
+                    st.success("✅ IA appliquée : recommandations re-priorisées + synthèse générée.")
+                    st.rerun()
 
-        except Exception as e:
-            st.error(f"❌ IA indisponible / erreur: {e}")
-            st.info("Astuce: ajoute OPENAI_API_KEY (et optionnellement OPENAI_MODEL) dans les variables d'environnement de ton app Streamlit.")
+                except Exception as e:
+                    st.error(f"❌ IA indisponible / erreur: {e}")
+                    st.info("Astuce: ajoute OPENAI_API_KEY (et optionnellement OPENAI_MODEL) dans les variables d'environnement de ton app Streamlit.")
 
-# Si IA active, on remplace l'affichage par la version re-rankée
-if st.session_state.ai_reco_active and isinstance(st.session_state.ai_reco_output, dict):
-    try:
-        ai_rec = st.session_state.ai_reco_output.get("recommendations_by_section", {})
-        if isinstance(ai_rec, dict) and ai_rec:
-            recommendations = ai_rec
-        ai_summary = st.session_state.ai_reco_output.get("summary")
-        if ai_summary:
-            st.info(ai_summary)
-    except Exception:
-        pass
-
-
+        # Si IA active, on remplace l'affichage par la version re-rankée
+        if st.session_state.ai_reco_active and isinstance(st.session_state.ai_reco_output, dict):
+            try:
+                ai_rec = st.session_state.ai_reco_output.get("recommendations_by_section", {})
+                if isinstance(ai_rec, dict) and ai_rec:
+                    recommendations = ai_rec
+                ai_summary = st.session_state.ai_reco_output.get("summary")
+                if ai_summary:
+                    st.info(ai_summary)
+            except Exception:
+                pass
 
         if st.session_state.cross_analysis:
             with st.expander("🔄 Analyses croisées détaillées", expanded=False):
