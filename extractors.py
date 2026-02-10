@@ -6,6 +6,29 @@ UNILABS / ALGO-LIFE - Extractors v17.0 PRODUCTION-READY FINAL
 ✅ Mapping correct bactéries ↔ positions
 ✅ Support format positif et négatif
 ✅ Testé sur rapports réels et exemples
+
+ARCHITECTURE À DEUX NIVEAUX:
+
+1. NIVEAU MACRO - Statuts de groupe (bacteria_groups)
+   - Source: Texte officiel "Result: expected/slightly deviating/deviating"
+   - Exemple: C1 = "Expected" (décision du laboratoire)
+   - Usage: Scoring global, vue d'ensemble du microbiome
+
+2. NIVEAU MICRO - Positions individuelles (bacteria_individual)
+   - Source: Points noirs dans le tableau visuel (-3 à +3)
+   - Exemple: [Clostridium] methylpentosum = +3 (Strongly Elevated)
+   - Usage: Recommandations ciblées, analyses détaillées
+
+IMPORTANT: Ces deux niveaux peuvent être incohérents (c'est normal)
+- Un groupe peut être "Expected" globalement
+- Mais contenir des bactéries individuelles fortement déviantes
+- L'extracteur capture fidèlement les DEUX informations
+- ALGO-LIFE peut utiliser les deux pour des analyses multiniveaux
+
+Exemple clinique:
+  Groupe C1: "Expected" (macro)
+  Mais [Clostridium] methylpentosum: +3 (micro)
+  → Recommandation: "Groupe normal mais surveiller Clostridium (ballonnements)"
 """
 
 from __future__ import annotations
@@ -437,7 +460,55 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     """
     Extrait les données du microbiome depuis un rapport IDK® GutMAP
     
-    VERSION 16 - PRODUCTION READY
+    VERSION 17 - PRODUCTION READY
+    
+    RETOURNE UN DICTIONNAIRE AVEC DEUX NIVEAUX D'INFORMATION:
+    
+    1. NIVEAU MACRO - bacteria_groups (12 groupes):
+       Statuts officiels du laboratoire (Expected/Slightly Deviating/Deviating)
+       Source: Texte "Result: ..." dans le rapport
+       Exemple:
+       {
+         'category': 'C1',
+         'name': 'Complex carbohydrate degraders',
+         'abundance': 'Expected'  # Décision du labo
+       }
+    
+    2. NIVEAU MICRO - bacteria_individual (48 bactéries):
+       Positions individuelles extraites du tableau visuel (-3 à +3)
+       Source: Points noirs dans le tableau
+       Exemple:
+       {
+         'id': '306',
+         'name': '[Clostridium] methylpentosum',
+         'category': 'C1',
+         'group': 'Complex carbohydrate degraders',
+         'abundance_level': 3,  # +3 = Strongly Elevated
+         'status': 'Strongly Elevated'
+       }
+    
+    INCOHÉRENCES POSSIBLES (C'EST NORMAL):
+    - Un groupe peut être "Expected" (macro)
+    - Avec des bactéries ±3 (micro)
+    - L'extracteur capture les DEUX fidèlement
+    
+    Args:
+        pdf_path: Chemin vers le rapport IDK® GutMAP
+        excel_path: (Optionnel) Fichier Excel complémentaire
+        enable_graphical_detection: Activer détection points noirs (recommandé)
+        resolution: Résolution pour l'analyse graphique (défaut 200)
+        progress: Tracker de progression (optionnel)
+    
+    Returns:
+        dict: {
+            'dysbiosis_index': int (1-5),
+            'dysbiosis_text': str,
+            'diversity': str,
+            'diversity_metrics': dict ou None,
+            'bacteria_groups': list[dict],      # NIVEAU MACRO
+            'bacteria_individual': list[dict],  # NIVEAU MICRO
+            'metabolites': dict ou None
+        }
     """
     try:
         import pdfplumber
