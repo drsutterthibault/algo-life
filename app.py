@@ -21,6 +21,125 @@ import pandas as pd
 import streamlit as st
 import numpy as np
 
+
+# =====================================================================
+# IA - RE-RANKING & SYNTHÈSE (JSON STRICT)
+# =====================================================================
+# ⚠️ IMPORTANT:
+# - L'app Streamlit ne peut pas utiliser "ton compte ChatGPT" directement.
+# - Il faut un accès API (clé OPENAI_API_KEY) côté serveur/app.
+# - Le modèle est paramétrable via OPENAI_MODEL (ex: gpt-4.1-mini).
+#
+# Objectif IA ici: uniquement re-ranking + synthèse à partir des recommandations EXISTANTES,
+# sans diagnostic, sans posologie, sans invention de biomarqueurs.
+
+import json as _json
+
+_DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+_AI_SYSTEM_PROMPT = """Tu es un assistant d'aide à la rédaction clinique NON médicale.
+Tu dois STRICTEMENT respecter ces règles :
+1) Ne fournis aucun diagnostic, aucune interprétation médicale nouvelle.
+2) Ne donne aucune posologie, dose, durée, fréquence, ni schéma de prise (même approximatif).
+3) N'invente aucun biomarqueur, aucune valeur, aucune donnée non présente dans l'entrée.
+4) Tu ne peux PAS créer de nouvelles recommandations : uniquement reclasser, dédupliquer et reformuler légèrement les recommandations existantes.
+5) Tu dois produire une sortie JSON STRICTE et valide, et RIEN d'autre (pas de texte hors JSON).
+6) Style: clair, concis, orienté "hygiène de vie / nutrition / micronutrition" et suivi, sans prescription.
+"""
+
+def _build_ai_user_prompt(payload: Dict[str, Any]) -> str:
+    schema = {
+        "summary": "string (2-5 lignes max, synthèse non médicale, basée sur les recommandations)",
+        "priorities": ["string (liste priorisée, items issus des recommandations existantes, max 8)"],
+        "recommendations_by_section": {
+            "Prioritaires": ["string"],
+            "À surveiller": ["string"],
+            "Nutrition": ["string"],
+            "Micronutrition": ["string"],
+            "Hygiène de vie": ["string"],
+            "Examens complémentaires": ["string"],
+            "Suivi": ["string"]
+        },
+        "dedup_notes": ["string (optionnel: mentionne fusions/suppressions de doublons)"]
+    }
+    return (
+        "TÂCHE: Re-ranker + dédupliquer + synthétiser des recommandations EXISTANTES.
+"
+        "CONTRAINTE CRITIQUE: output JSON strict uniquement.
+
+"
+        "ENTRÉE (JSON):
+"
+        f"{_json.dumps(payload, ensure_ascii=False)}
+
+"
+        "SCHÉMA DE SORTIE (respecte les clés, JSON strict):
+"
+        f"{_json.dumps(schema, ensure_ascii=False)}"
+    )
+
+def _openai_call_json(system_prompt: str, user_prompt: str, model: str) -> Dict[str, Any]:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY manquant (variable d'environnement).")
+
+    # 1) SDK OpenAI (si dispo)
+    try:
+        from openai import OpenAI  # type: ignore
+        client = OpenAI(api_key=api_key)
+        # responses API (recommandée)
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+        # Le SDK renvoie du texte JSON dans output_text
+        out_text = getattr(resp, "output_text", None)
+        if not out_text:
+            # fallback: concaténer les segments texte
+            try:
+                out_text = "".join([c.text for c in resp.output[0].content if hasattr(c, "text")])
+            except Exception:
+                out_text = None
+        if not out_text:
+            raise RuntimeError("Réponse OpenAI vide.")
+        return _json.loads(out_text)
+
+    except Exception:
+        # 2) Fallback HTTP (si SDK absent / incompatible)
+        import requests  # type: ignore
+
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            # Forcer la sortie JSON strict quand supporté
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+        }
+        r = requests.post(url, headers=headers, data=_json.dumps(body), timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        content = data["choices"][0]["message"]["content"]
+        return _json.loads(content)
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def ai_rerank_recommendations(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Appel IA caché (évite les reruns Streamlit trop coûteux)."""
+    user_prompt = _build_ai_user_prompt(payload)
+    return _openai_call_json(_AI_SYSTEM_PROMPT, user_prompt, _DEFAULT_OPENAI_MODEL)
+
+
 # =====================================================================
 # CONFIGURATION & IMPORTS
 # =====================================================================
@@ -392,7 +511,9 @@ def init_session_state():
         "consolidated_recommendations": {},
         "cross_analysis": [],
         "follow_up": {},
-        "bio_age_result": None
+        "bio_age_result": None,
+        "ai_reco_output": None,
+        "ai_reco_active": False
     }
     
     for key, value in defaults.items():
@@ -1269,6 +1390,74 @@ with tabs[2]:
     else:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
+
+# ─────────────────────────────────────────────────────────
+# 🤖 IA : Re-ranking + Synthèse (JSON strict) à partir des reco existantes
+# ─────────────────────────────────────────────────────────
+with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", expanded=False):
+    st.caption("L'IA ne crée pas de nouvelles recommandations : elle ré-ordonne, déduplique et synthétise à partir des recommandations existantes.")
+    col_ai_1, col_ai_2, col_ai_3 = st.columns([1, 1, 2])
+    with col_ai_1:
+        use_ai = st.button("✨ Appliquer IA", type="primary", use_container_width=True)
+    with col_ai_2:
+        reset_ai = st.button("↩️ Revenir aux règles", use_container_width=True)
+
+    if reset_ai:
+        st.session_state.ai_reco_output = None
+        st.session_state.ai_reco_active = False
+        st.success("✅ Recommandations remises en mode 'règles' (sans IA).")
+        st.rerun()
+
+    if use_ai:
+        try:
+            # Payload minimal (pas d'identifiants)
+            patient_ctx = {
+                "sex": st.session_state.patient_info.get("sex"),
+                "age": st.session_state.patient_info.get("age"),
+                "bmi": st.session_state.patient_info.get("bmi"),
+                "antecedents": st.session_state.patient_info.get("antecedents", "")[:800],
+            }
+            cross_titles = []
+            for ca in (st.session_state.cross_analysis or []):
+                title = ca.get("title") or ca.get("titre") or ""
+                if title:
+                    cross_titles.append(title)
+
+            payload = {
+                "patient_context": patient_ctx,
+                "cross_signals": cross_titles[:20],
+                "recommendations_by_section": recommendations,
+            }
+
+            with st.spinner("⏳ Appel IA en cours..."):
+                ai_out = ai_rerank_recommendations(payload)
+
+            # Validation minimale
+            if not isinstance(ai_out, dict) or "recommendations_by_section" not in ai_out:
+                raise ValueError("Sortie IA invalide (clé 'recommendations_by_section' manquante).")
+
+            st.session_state.ai_reco_output = ai_out
+            st.session_state.ai_reco_active = True
+            st.success("✅ IA appliquée : recommandations re-priorisées + synthèse générée.")
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"❌ IA indisponible / erreur: {e}")
+            st.info("Astuce: ajoute OPENAI_API_KEY (et optionnellement OPENAI_MODEL) dans les variables d'environnement de ton app Streamlit.")
+
+# Si IA active, on remplace l'affichage par la version re-rankée
+if st.session_state.ai_reco_active and isinstance(st.session_state.ai_reco_output, dict):
+    try:
+        ai_rec = st.session_state.ai_reco_output.get("recommendations_by_section", {})
+        if isinstance(ai_rec, dict) and ai_rec:
+            recommendations = ai_rec
+        ai_summary = st.session_state.ai_reco_output.get("summary")
+        if ai_summary:
+            st.info(ai_summary)
+    except Exception:
+        pass
+
+
 
         if st.session_state.cross_analysis:
             with st.expander("🔄 Analyses croisées détaillées", expanded=False):
