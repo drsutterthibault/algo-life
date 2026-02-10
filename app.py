@@ -21,6 +21,94 @@ import pandas as pd
 import streamlit as st
 import numpy as np
 
+# ═══════════════════════════════════════════════════════════════
+# 🔍 DEBUG OPENAI - BLOC TEMPORAIRE
+# ═══════════════════════════════════════════════════════════════
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔍 Debug OpenAI API")
+
+# Test 1: Vérifier présence clé
+key_env = os.getenv("OPENAI_API_KEY")
+key_secrets = None
+
+try:
+    key_secrets = st.secrets.get("OPENAI_API_KEY")
+except Exception as e:
+    st.sidebar.error(f"Erreur lecture secrets: {e}")
+
+# Affichage
+if key_secrets:
+    st.sidebar.success(f"✅ Clé dans SECRETS")
+    st.sidebar.code(f"{key_secrets[:25]}...{key_secrets[-10:]}")
+    st.sidebar.info(f"Longueur: {len(key_secrets)} caractères")
+    
+    # Vérifier format
+    if key_secrets.startswith('sk-proj-'):
+        st.sidebar.success("✅ Format sk-proj- correct")
+    else:
+        st.sidebar.error(f"❌ Format invalide: {key_secrets[:15]}...")
+        
+elif key_env:
+    st.sidebar.warning(f"⚠️ Clé dans ENV (pas dans secrets)")
+    st.sidebar.code(f"{key_env[:25]}...")
+else:
+    st.sidebar.error("❌ AUCUNE CLÉ DÉTECTÉE !")
+
+# Test 2: Modèle
+model = st.secrets.get("OPENAI_MODEL", "Non défini")
+st.sidebar.info(f"📦 Modèle: **{model}**")
+
+# Test 3: Test connexion réelle
+if st.sidebar.button("🔌 Test connexion API"):
+    with st.sidebar:
+        with st.spinner("Test en cours..."):
+            try:
+                from openai import OpenAI
+                api_key = key_secrets or key_env
+                
+                if not api_key:
+                    st.error("Aucune clé à tester !")
+                else:
+                    client = OpenAI(api_key=api_key)
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": "Test"}],
+                        max_tokens=5
+                    )
+                    st.success("✅ CONNEXION RÉUSSIE !")
+                    st.json({
+                        "model": response.model,
+                        "response": response.choices[0].message.content
+                    })
+            except Exception as e:
+                st.error(f"❌ ERREUR: {e}")
+                
+                if "401" in str(e):
+                    st.error("🔴 Erreur 401 = Clé invalide ou révoquée")
+                elif "429" in str(e):
+                    st.warning("🟡 Erreur 429 = Quota dépassé")
+                elif "model" in str(e).lower():
+                    st.error("🔴 Modèle inexistant ou non autorisé")
+
+st.sidebar.markdown("---")
+# ═══════════════════════════════════════════════════════════════
+```
+
+### **4. Sauvegardez et redéployez**
+
+- Commitez sur GitHub
+- Attendez que l'app redémarre
+
+### **5. Vous verrez dans la SIDEBAR gauche** :
+```
+🔍 Debug OpenAI API
+✅ Clé dans SECRETS
+sk-proj-xyY7tLzZy17YHP...OnEsw93wA
+Longueur: 164 caractères
+✅ Format sk-proj- correct
+📦 Modèle: gpt-4o-mini
+
+[🔌 Test connexion API]  ← BOUTON À CLIQUER
 
 # =====================================================================
 # IA - RE-RANKING & SYNTHÈSE (JSON STRICT)
