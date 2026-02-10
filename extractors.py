@@ -879,17 +879,24 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
                     if not category or category == "nan" or pd.isna(category):
                         continue
                     
-                    if category not in categories_map:
-                        categories_map[category] = {
-                            "category": category,
-                            "group": groupe,
+                    # ✅ IMPORTANT: Dans l'Excel:
+                    # - "Catégorie" = nom long (ex: "A. Broad commensals")
+                    # - "Groupe" = code court (ex: "A1")
+                    # On inverse pour correspondre au format attendu
+                    group_code = groupe  # "A1"
+                    group_name = category  # "A. Broad commensals"
+                    
+                    if group_code not in categories_map:
+                        categories_map[group_code] = {
+                            "category": group_code,  # "A1"
+                            "group": group_name,  # "A. Broad commensals"
                             "bacteria_count": 0,
                             "normal_count": 0,
                             "abnormal_count": 0,
                             "bacteria": []
                         }
                     
-                    cat_info = categories_map[category]
+                    cat_info = categories_map[group_code]
                     cat_info["bacteria_count"] += 1
                     
                     try:
@@ -920,8 +927,8 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
                     result["bacteria_individual"].append({
                         "id": no,
                         "name": bacterie,
-                        "category": category,
-                        "group": groupe,
+                        "category": group_code,  # "A1" au lieu de "A. Broad commensals"
+                        "group": group_name,  # "A. Broad commensals"
                         "abundance_level": abundance_level,
                         "status": status
                     })
