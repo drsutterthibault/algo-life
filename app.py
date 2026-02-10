@@ -159,37 +159,46 @@ def _enforce_ai_limits(ai_out: Dict[str, Any], max_total: int) -> Dict[str, Any]
     return ai_out
 
 def _openai_call_json(system_prompt: str, user_prompt: str, model: str) -> Dict[str, Any]:
-    api_key = _get_openai_api_key()
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY manquant (variable d'environnement ou st.secrets).")
+        raise RuntimeError("OPENAI_API_KEY manquant.")
 
-    # 1) SDK OpenAI (si dispo)
-    try:
-        from openai import OpenAI  # type: ignore
+    import requests
 
-        client = OpenAI(api_key=api_key)
+    url = "https://api.openai.com/v1/responses"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
-        resp = client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
+    body = {
+        "model": model,
+        "input": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.2,
+    }
+
+    r = requests.post(url, headers=headers, json=body, timeout=60)
+    r.raise_for_status()
+    data = r.json()
+
+    out_text = data.get("output_text")
+    if not out_text:
+        out_text = "".join(
+            chunk.get("text", "")
+            for item in data.get("output", [])
+            for chunk in item.get("content", [])
+            if isinstance(chunk, dict)
         )
 
-        out_text = getattr(resp, "output_text", None)
-        if not out_text:
-            # Fallback si output_text absent selon versions
-            try:
-                out_text = "".join([c.text for c in resp.output[0].content if hasattr(c, "text")])
-            except Exception:
-                out_text = None
+    if not out_text:
+        raise RuntimeError("Réponse IA vide.")
 
-        if not out_text:
-            raise RuntimeError("Réponse OpenAI vide.")
+    return json.loads(out_text)
 
-        return _enforce_ai_limits(_json.loads(out_text), _MAX_AI_RECO_TOTAL)
 
     except Exception:
         # 2) Fallback HTTP
