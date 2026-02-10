@@ -1462,6 +1462,7 @@ with tabs[1]:
 # ═════════════════════════════════════════════════════════════════════
 # TAB 2: RECOMMANDATIONS
 # ═════════════════════════════════════════════════════════════════════
+
 with tabs[2]:
     st.subheader("💊 Plan Thérapeutique Personnalisé")
     st.markdown("*Recommandations générées par IA à partir du système de règles*")
@@ -1471,86 +1472,112 @@ with tabs[2]:
     else:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
-
         
-# ─────────────────────────────────────────────────────────
-# 🤖 IA : Re-ranking + Synthèse (JSON strict) à partir des reco existantes
-# ─────────────────────────────────────────────────────────
-with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", expanded=False):
-    st.caption("L'IA ne crée pas de nouvelles recommandations : elle ré-ordonne, déduplique et synthétise à partir des recommandations existantes (max 6 recommandations au total).")
-    col_ai_1, col_ai_2 = st.columns([1, 1])
-    with col_ai_1:
-        use_ai = st.button("✨ Appliquer IA", type="primary", use_container_width=True)
-    with col_ai_2:
-        reset_ai = st.button("↩️ Revenir aux règles", use_container_width=True)
+        # ─────────────────────────────────────────────────────────────────────
+        # 🤖 IA : Re-ranking + Synthèse (JSON strict)
+        # ─────────────────────────────────────────────────────────────────────
+        with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", expanded=False):
+            st.caption("L'IA ne crée pas de nouvelles recommandations : elle ré-ordonne, déduplique et synthétise à partir des recommandations existantes (max 6 recommandations au total).")
+            col_ai_1, col_ai_2 = st.columns([1, 1])
+            with col_ai_1:
+                use_ai = st.button("✨ Appliquer IA", type="primary", use_container_width=True)
+            with col_ai_2:
+                reset_ai = st.button("↩️ Revenir aux règles", use_container_width=True)
 
-    if reset_ai:
-        st.session_state.ai_reco_output = None
-        st.session_state.ai_reco_active = False
-        st.success("✅ Recommandations remises en mode 'règles' (sans IA).")
-        st.rerun()
+            if reset_ai:
+                st.session_state.ai_reco_output = None
+                st.session_state.ai_reco_active = False
+                st.success("✅ Recommandations remises en mode 'règles' (sans IA).")
+                st.rerun()
 
-    if use_ai:
-        try:
-            patient_ctx = {
-                "sex": st.session_state.patient_info.get("sex"),
-                "age": st.session_state.patient_info.get("age"),
-                "bmi": st.session_state.patient_info.get("bmi"),
-                "antecedents": (st.session_state.patient_info.get("antecedents", "") or "")[:800],
-            }
+            if use_ai:
+                try:
+                    patient_ctx = {
+                        "sex": st.session_state.patient_info.get("sex"),
+                        "age": st.session_state.patient_info.get("age"),
+                        "bmi": st.session_state.patient_info.get("bmi"),
+                        "antecedents": (st.session_state.patient_info.get("antecedents", "") or "")[:800],
+                    }
 
-            cross_titles = []
-            for ca in (st.session_state.cross_analysis or []):
-                title = ca.get("title") or ca.get("titre") or ""
-                if title:
-                    cross_titles.append(title)
+                    cross_titles = []
+                    for ca in (st.session_state.cross_analysis or []):
+                        title = ca.get("title") or ca.get("titre") or ""
+                        if title:
+                            cross_titles.append(title)
 
-            payload = {
-                "patient_context": patient_ctx,
-                "cross_signals": cross_titles[:20],
-                "recommendations_by_section": recommendations,
-            }
+                    payload = {
+                        "patient_context": patient_ctx,
+                        "cross_signals": cross_titles[:20],
+                        "recommendations_by_section": recommendations,
+                    }
 
-            with st.spinner("⏳ Appel IA en cours..."):
-                ai_out = ai_rerank_recommendations(payload)
+                    with st.spinner("⏳ Appel IA en cours..."):
+                        ai_out = ai_rerank_recommendations(payload)
 
-            if not isinstance(ai_out, dict) or "recommendations_by_section" not in ai_out:
-                raise ValueError("Sortie IA invalide (clé 'recommendations_by_section' manquante).")
+                    if not isinstance(ai_out, dict) or "recommendations_by_section" not in ai_out:
+                        raise ValueError("Sortie IA invalide (clé 'recommendations_by_section' manquante).")
 
-            st.session_state.ai_reco_output = ai_out
-            st.session_state.ai_reco_active = True
-            st.success("✅ IA appliquée : recommandations re-priorisées + synthèse générée.")
-            st.rerun()
+                    st.session_state.ai_reco_output = ai_out
+                    st.session_state.ai_reco_active = True
+                    st.success("✅ IA appliquée : recommandations re-priorisées + synthèse générée.")
+                    st.rerun()
 
-        except Exception as e:
-            st.error(f"❌ IA indisponible / erreur: {e}")
-            st.info("Astuce: ajoute OPENAI_API_KEY (et optionnellement OPENAI_MODEL) dans les variables d'environnement (Secrets Streamlit Cloud).")
+                except Exception as e:
+                    st.error(f"❌ IA indisponible / erreur: {e}")
+                    st.info("Astuce: ajoute OPENAI_API_KEY (et optionnellement OPENAI_MODEL) dans les variables d'environnement (Secrets Streamlit Cloud).")
 
-        # Si IA active, on remplace l'affichage par la version re-rankée
+        # ✅ APPLIQUER LES RECOMMANDATIONS IA SI ACTIVES
         if st.session_state.get("ai_reco_active") and isinstance(st.session_state.get("ai_reco_output"), dict):
             try:
                 ai_rec = st.session_state.ai_reco_output.get("recommendations_by_section", {})
                 if isinstance(ai_rec, dict) and ai_rec:
                     recommendations = ai_rec
+                    st.info("🤖 **Mode IA activé** : Recommandations optimisées par IA")
+                
                 ai_summary = st.session_state.ai_reco_output.get("summary")
                 if ai_summary:
-                    st.info(ai_summary)
-            except Exception:
-                pass
+                    st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
+                                    padding: 20px; 
+                                    border-radius: 12px;
+                                    border-left: 4px solid #3b82f6;
+                                    margin: 20px 0;">
+                            <h4 style="color: #1e40af; margin: 0 0 10px 0;">📋 Synthèse IA</h4>
+                            <p style="color: #1e3a8a; margin: 0; line-height: 1.6;">{ai_summary}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+            except Exception as e:
+                st.warning(f"⚠️ Erreur application IA : {e}")
+        
+        # ✅ AFFICHER SIGNAUX CROISÉS
         if st.session_state.cross_analysis:
-            with st.expander("🔄 Analyses croisées détaillées", expanded=False):
+            with st.expander("🔄 Analyses croisées Biologie × Microbiote", expanded=True):
                 for ca in st.session_state.cross_analysis:
                     sev = ca.get("severity", "info")
                     icon = {"critical":"🔴","warning":"🟠","info":"ℹ️"}.get(sev, "ℹ️")
-                    st.markdown(f"**{icon} {ca.get('title', 'Signal croisé')}**")
+                    
+                    st.markdown(f"""
+                        <div style="background: {'#fef2f2' if sev=='critical' else '#fff7ed' if sev=='warning' else '#f0f9ff'}; 
+                                    padding: 15px; 
+                                    border-radius: 10px;
+                                    border-left: 4px solid {'#ef4444' if sev=='critical' else '#f59e0b' if sev=='warning' else '#3b82f6'};
+                                    margin: 12px 0;">
+                            <h4 style="margin: 0 0 8px 0; color: {'#991b1b' if sev=='critical' else '#9a3412' if sev=='warning' else '#1e40af'};">
+                                {icon} {ca.get('title', 'Signal croisé')}
+                            </h4>
+                    """, unsafe_allow_html=True)
+                    
                     if ca.get("description"):
-                        st.write(ca.get("description"))
+                        st.markdown(f"<p style='margin: 0 0 10px 0; color: #374151;'>{ca.get('description')}</p>", unsafe_allow_html=True)
+                    
                     if ca.get("recommendations"):
-                        st.caption("Recommandations associées :")
+                        st.markdown("<p style='margin: 8px 0 4px 0; font-weight: 600; color: #374151;'>💊 Recommandations associées :</p>", unsafe_allow_html=True)
                         for r in ca.get("recommendations"):
-                            st.write(f"• {r}")
-                    st.markdown("---")
+                            st.markdown(f"<p style='margin: 4px 0; padding-left: 20px; color: #4b5563;'>• {r}</p>", unsafe_allow_html=True)
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
         
+        # ✅ AFFICHER LES RECOMMANDATIONS
         if not any(recommendations.values()):
             st.info("ℹ️ Aucune recommandation spécifique générée")
         else:
@@ -1587,9 +1614,7 @@ with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", 
                     """, unsafe_allow_html=True)
                 st.markdown("---")
             
-            # ─────────────────────────────────────────────────────────
-            # ⚠️ À SURVEILLER (Design Premium)
-            # ─────────────────────────────────────────────────────────
+            # ⚠️ À SURVEILLER
             a_surveiller = recommendations.get("À surveiller", [])
             if a_surveiller:
                 with st.expander("⚠️ **À Surveiller**", expanded=True):
@@ -1605,9 +1630,7 @@ with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", 
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
-            # ─────────────────────────────────────────────────────────
-            # 🥗 NUTRITION (Design Premium)
-            # ─────────────────────────────────────────────────────────
+            # 🥗 NUTRITION
             nutrition = recommendations.get("Nutrition", [])
             if nutrition:
                 with st.expander("🥗 **Nutrition & Diététique**", expanded=True):
@@ -1633,9 +1656,7 @@ with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", 
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
-            # ─────────────────────────────────────────────────────────
-            # 💊 MICRONUTRITION (Design Premium)
-            # ─────────────────────────────────────────────────────────
+            # 💊 MICRONUTRITION
             micronutrition = recommendations.get("Micronutrition", [])
             if micronutrition:
                 with st.expander("💊 **Micronutrition**", expanded=True):
@@ -1661,9 +1682,7 @@ with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", 
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
-            # ─────────────────────────────────────────────────────────
-            # 🏃 HYGIÈNE DE VIE (Design Premium)
-            # ─────────────────────────────────────────────────────────
+            # 🏃 HYGIÈNE DE VIE
             hygiene_vie = recommendations.get("Hygiène de vie", [])
             if hygiene_vie:
                 with st.expander("🏃 **Hygiène de Vie**", expanded=True):
@@ -1689,9 +1708,7 @@ with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", 
                     st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("---")
             
-            # ─────────────────────────────────────────────────────────
             # 🔬 EXAMENS COMPLÉMENTAIRES
-            # ─────────────────────────────────────────────────────────
             examens = recommendations.get("Examens complémentaires", [])
             if examens:
                 with st.expander("🔬 **Examens Complémentaires**", expanded=False):
@@ -1699,9 +1716,7 @@ with st.expander("🤖 Amélioration IA (re-ranking + synthèse, JSON strict)", 
                         st.markdown(f"**{i}.** {item}")
                 st.markdown("---")
             
-            # ─────────────────────────────────────────────────────────
             # 📅 SUIVI
-            # ─────────────────────────────────────────────────────────
             suivi = recommendations.get("Suivi", [])
             if suivi:
                 with st.expander("📅 **Plan de Suivi**", expanded=False):
