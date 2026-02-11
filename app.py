@@ -902,10 +902,10 @@ with tab1:
                 
                 col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
                 df = st.session_state.biology_df
-                col_stat1.metric("✅ Normaux", len(df[df["Statut"] == "Normal"]), border=True)
-                col_stat2.metric("⚠️ À surveiller", len(df[df["Statut"] == "Bas"]) + len(df[df["Statut"] == "Élevé"])), delta="1", border=True)
-                col_stat3.metric("🔴 Anormaux", len(df[df["Statut"] == "Élevé"]]), delta="3", border=True)
-                col_stat4.metric("⚪ Non évaluables", len(df[df["Statut"] == "Inconnu"]), delta="2", border=True)
+                col_stat1.metric("✅ Normaux", len(df[df["Statut"] == "Normal"]))
+                col_stat2.metric("⚠️ À surveiller", len(df[df["Statut"] == "Bas"]) + len(df[df["Statut"] == "Élevé"]))
+                col_stat3.metric("🔴 Anormaux", len(df[df["Statut"] == "Élevé"]))
+                col_stat4.metric("⚪ Non évaluables", len(df[df["Statut"] == "Inconnu"]))
                 
                 st.dataframe(df, use_container_width=True, height=400)
         
