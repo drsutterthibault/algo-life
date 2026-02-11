@@ -798,19 +798,22 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
         
         # ===== 1. INFORMATIONS PATIENT =====
         if "Informations Patient" in sheet_names:
-            # ✅ CORRECTION: header=1 car ligne 0 contient le titre décoré
-            df_info = pd.read_excel(excel_file, "Informations Patient", header=1)
+            # ✅ CORRECTION: skiprows=1 pour ignorer titre, header=None pour indices numériques
+            df_info = pd.read_excel(excel_file, "Informations Patient", skiprows=1, header=None)
             
             for _, row in df_info.iterrows():
-                champ = str(row.get("Champ", "")).lower()
-                valeur = str(row.get("Valeur", ""))
+                # Utiliser indices numériques [0] et [1]
+                champ = str(row[0]) if 0 in row.index else ""
+                valeur = str(row[1]) if 1 in row.index else ""
                 
-                # Ignorer les lignes vides
-                if pd.isna(champ) or champ == "nan" or not champ.strip():
+                # Ignorer les lignes vides ou en-têtes
+                if pd.isna(champ) or champ == "nan" or not champ.strip() or champ.lower() == "champ":
                     continue
                 
+                champ_lower = champ.lower()
+                
                 # Dysbiosis Index
-                if "dysbiosis" in champ or "dysbiose" in champ or "indice" in champ:
+                if "dysbiosis" in champ_lower or "dysbiose" in champ_lower:
                     import re
                     match = re.search(r'(\d+)', valeur)
                     if match:
@@ -825,42 +828,46 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
                             result["dysbiosis_text"] = "Severely dysbiotic (DI 4-5)"
                 
                 # Diversity
-                if "diversit" in champ:
+                if "diversit" in champ_lower:
                     result["diversity"] = valeur
         
         # ===== 2. BIOMARQUEURS BASE =====
         if "Biomarqueurs Base" in sheet_names:
-            # ✅ CORRECTION: header=1 car ligne 0 contient le titre décoré
-            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", header=1)
+            # ✅ CORRECTION: skiprows=1 pour ignorer titre, header=None pour indices numériques
+            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", skiprows=1, header=None)
             
             for _, row in df_bio.iterrows():
-                biomarker = str(row.get("Biomarqueur", ""))
-                if not biomarker or biomarker == "nan" or pd.isna(biomarker):
+                # Utiliser indices numériques [0]=Bio, [1]=Valeur, [2]=Unité, [3]=Référence, [4]=Statut
+                biomarker = str(row[0]) if 0 in row.index else ""
+                
+                if not biomarker or biomarker == "nan" or pd.isna(biomarker) or biomarker.lower() == "biomarqueur":
                     continue
                 
                 result["stool_biomarkers"][biomarker] = {
-                    "value": row.get("Valeur"),
-                    "unit": str(row.get("Unité", "")),
-                    "reference": str(row.get("Référence", "")),
-                    "status": str(row.get("Statut", "Normal"))
+                    "value": row[1] if 1 in row.index else None,
+                    "unit": str(row[2]) if 2 in row.index else "",
+                    "reference": str(row[3]) if 3 in row.index else "",
+                    "status": str(row[4]) if 4 in row.index else "Normal"
                 }
         
         # ===== 3. MICROBIOME DÉTAILLÉ =====
         if "Microbiome Détaillé" in sheet_names:
-            # ✅ CORRECTION: header=1 car ligne 0 contient le titre décoré
-            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", header=1)
+            # ✅ CORRECTION: skiprows=1 pour ignorer titre, header=None pour indices numériques
+            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", skiprows=1, header=None)
             
             categories_map = {}
             
             for _, row in df_micro.iterrows():
-                category = str(row.get("Catégorie", ""))
-                groupe = str(row.get("Groupe", ""))
-                no = str(row.get("No.", ""))
-                bacterie = str(row.get("Bactérie", ""))
-                position = row.get("Position", 0)
-                statut = str(row.get("Statut", "Normal"))
+                # Indices: [0]=Catégorie, [1]=Groupe, [2]=No., [3]=Bactérie, [4]=Position, [5]=Statut, [6]=Interprétation
+                category = str(row[0]) if 0 in row.index else ""
+                groupe = str(row[1]) if 1 in row.index else ""
+                no = str(row[2]) if 2 in row.index else ""
+                bacterie = str(row[3]) if 3 in row.index else ""
+                position = row[4] if 4 in row.index else 0
+                statut = str(row[5]) if 5 in row.index else "Normal"
                 
-                if not category or category == "nan" or pd.isna(category):
+                # Ignorer en-têtes et lignes vides
+                if not category or category == "nan" or pd.isna(category) or category.lower() == "catégorie":
                     continue
                 
                 # ✅ IMPORTANT: Dans l'Excel:
