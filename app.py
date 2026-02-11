@@ -925,7 +925,55 @@ with tab1:
         
         with tab_micro:
             if not st.session_state.microbiome_summary_df.empty:
+                st.markdown("#### 📊 Résumé Microbiote")
                 st.dataframe(st.session_state.microbiome_summary_df, use_container_width=True, height=240)
+                
+                # TABLEAU DÉTAILLÉ DES BACTÉRIES
+                if not st.session_state.microbiome_df.empty:
+                    st.markdown("---")
+                    st.markdown("#### 🦠 Détail des Groupes Bactériens (Outliers)")
+                    bacteria_df = st.session_state.microbiome_df
+                    
+                    # Filtres
+                    filter_col1, filter_col2 = st.columns(2)
+                    with filter_col1:
+                        selected_categories = st.multiselect(
+                            "🔍 Filtrer par catégorie",
+                            options=sorted(bacteria_df["Catégorie"].unique()),
+                            default=None,
+                            key="bacteria_category_filter"
+                        )
+                    with filter_col2:
+                        result_filter = st.multiselect(
+                            "📊 Filtrer par résultat",
+                            options=["Expected", "Slightly deviating", "Deviating"],
+                            default=None,
+                            key="bacteria_result_filter"
+                        )
+                    
+                    # Application des filtres
+                    filtered_df = bacteria_df.copy()
+                    if selected_categories:
+                        filtered_df = filtered_df[filtered_df["Catégorie"].isin(selected_categories)]
+                    if result_filter:
+                        mask = filtered_df["Résultat"].str.lower().str.contains("|".join([r.lower() for r in result_filter]), na=False)
+                        filtered_df = filtered_df[mask]
+                    
+                    # Coloration conditionnelle
+                    def color_result(val):
+                        val_lower = str(val).lower()
+                        if "expected" in val_lower:
+                            return 'background-color: #d1fae5; color: #065f46'
+                        elif "slightly" in val_lower:
+                            return 'background-color: #fef3c7; color: #92400e'
+                        elif "deviating" in val_lower:
+                            return 'background-color: #fee2e2; color: #991b1b'
+                        return ''
+                    
+                    styled_df = filtered_df.style.applymap(color_result, subset=['Résultat'])
+                    st.dataframe(styled_df, use_container_width=True, height=500)
+                    
+                    st.caption(f"📊 Affichage de {len(filtered_df)} groupes sur {len(bacteria_df)} au total")
 
 
 # ═════════════════════════════════════════════════════════════════════
