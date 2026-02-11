@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-PDF Generator - COMPATIBLE AVEC APP.PY v12
-✅ Signature identique à l'appel dans app.py
-✅ Détection automatique IA via importation streamlit
-✅ Templates bio conservés (visualisations barres)
+PDF Generator - COMPATIBLE AVEC RULES_ENGINE v10 + APP.PY v12
+✅ Extraction correcte depuis consolidated_recommendations
+✅ Templates bio conservés
 ✅ Tableaux microbiote complets
-✅ Analyses croisées du système
-✅ Export professionnel 15-20 pages
+✅ Analyses croisées du rules_engine
+✅ Détection automatique IA
 """
 
 import os
@@ -23,7 +22,6 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.graphics.shapes import Drawing, Rect, String, Circle
 from datetime import datetime
 
-# Détection automatique de l'IA via streamlit session_state
 try:
     import streamlit as st
     STREAMLIT_AVAILABLE = True
@@ -122,8 +120,12 @@ def generate_multimodal_report(
     output_path=None
 ):
     """
-    Génère le rapport PDF - SIGNATURE COMPATIBLE APP.PY
-    Détecte automatiquement l'IA via streamlit session_state
+    Génère le rapport PDF - COMPATIBLE RULES_ENGINE v10
+    
+    Parameters:
+    - recommendations: Dict retourné par rules_engine.generate_consolidated_recommendations()
+                      Structure attendue: {"Prioritaires": [...], "À surveiller": [...], ...}
+    - cross_analysis: Liste retournée par rules_engine (dans consolidated["cross_analysis"])
     """
     
     # Détection automatique IA
@@ -486,13 +488,14 @@ def generate_multimodal_report(
         story.append(PageBreak())
     
     # RECOMMANDATIONS SYSTÈME
-    if recommendations:
+    # CRITICAL: recommendations est un DICT pas une liste
+    if recommendations and isinstance(recommendations, dict):
         story.append(Paragraph("💊 RECOMMANDATIONS PERSONNALISÉES", subtitle_style))
         story.append(Paragraph("(Générées par le Système de Règles)", ParagraphStyle('Subtitle2', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor('#6b7280'), alignment=TA_CENTER)))
         story.append(Spacer(1, 0.5*cm))
         
         def create_reco_section(title, items, bg_color, border_color, icon="•"):
-            if not items:
+            if not items or not isinstance(items, list):
                 return []
             
             elements = []
@@ -651,23 +654,27 @@ def generate_multimodal_report(
     file_size = os.path.getsize(output_path) / 1024
     print(f"✅ PDF généré: {output_path}")
     print(f"📄 Taille: {file_size:.1f} KB")
+    
+    # Debug recommandations
+    if recommendations:
+        total_reco = sum(len(v) if isinstance(v, list) else 0 for v in recommendations.values())
+        print(f"📋 Recommandations incluses: {total_reco}")
+    
     if ai_enrichment:
         print("🤖 IA détectée et incluse")
     
     return output_path
 
-# Alias pour compatibilité
+# Alias
 generate_report = generate_multimodal_report
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("PDF Generator - COMPATIBLE APP.PY v12")
+    print("PDF Generator - COMPATIBLE RULES_ENGINE v10 + APP.PY v12")
     print("=" * 70)
-    print("✅ Signature identique à l'appel app.py")
-    print("✅ Détection automatique IA via streamlit session_state")
-    print("✅ Templates bio (barres de progression)")
+    print("✅ Extraction correcte depuis consolidated_recommendations")
+    print("✅ Templates bio conservés")
     print("✅ Tableaux microbiote complets")
-    print("✅ Analyses croisées du système")
-    print("✅ Export 15-20 pages professionnel")
+    print("✅ Analyses croisées du rules_engine")
+    print("✅ Détection automatique IA")
     print("=" * 70)
-    
