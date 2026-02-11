@@ -1,5 +1,5 @@
 """
-UNILABS Plateforme Multimodale v12.0 - VERSION AMÉLIORÉE
+UNILABS Plateforme Multimodale v12.0 - VERSION FINALE
 ✅ VÉRITABLE MULTIMODALITÉ : Bio + Microbiote + Analyses croisées dans l'interprétation
 ✅ IA À VALEUR AJOUTÉE : Recommandations précises nutrition/micronutrition basées sur bilans
 ✅ IA enrichit les règles (ne les remplace pas) avec conseils actionnables
@@ -96,9 +96,12 @@ def _build_enrichment_payload(
     """Construit un prompt riche pour l'IA"""
     
     # Résumé patient
+    bmi_value = patient_info.get('bmi')
+    bmi_display = f"{bmi_value:.1f}" if bmi_value else '?'
+    
     patient_summary = f"""
 👤 PROFIL PATIENT :
-- Sexe : {patient_info.get('sex', '?')} | Âge : {patient_info.get('age', '?')} ans | IMC : {patient_info.get('bmi', '?'):.1f if patient_info.get('bmi') else '?'}
+- Sexe : {patient_info.get('sex', '?')} | Âge : {patient_info.get('age', '?')} ans | IMC : {bmi_display}
 - Antécédents : {patient_info.get('antecedents', 'Non renseignés')[:500]}
 """
     
@@ -123,7 +126,6 @@ def _build_enrichment_payload(
         micro_summary += f"- Diversité : {diversity}\n"
         
         # Groupes déviants
-        from extractors import extract_synlab_biology  # Import helper
         groups = microbiome_data.get('bacteria_groups') or microbiome_data.get('bacteria', [])
         deviating = [g for g in groups if 'deviating' in str(g.get('result', '')).lower()]
         if deviating:
