@@ -1,9 +1,10 @@
 """
-UNILABS / ALGO-LIFE - Extractors v18.0 FINAL WITH EXCEL MICROBIOME SUPPORT
+UNILABS / ALGO-LIFE - Extractors v18.1 FINAL WITH EXCEL MICROBIOME SUPPORT
 ✅ Extraction PDF biologie (SYNLAB/UNILABS)
 ✅ Extraction PDF microbiome (IDK GutMAP)
 ✅ Extraction Excel biologie
 ✅ ✨ NOUVEAU: Extraction Excel microbiome (fichier structuré)
+✅ ✨ CORRIGÉ: Gestion en-têtes Excel à ligne 1 (ligne 0 = titres décorés)
 ✅ Support des références avec et sans parenthèses
 ✅ Références par défaut pour biomarqueurs courants
 ✅ Extraction robuste des 48 bactéries + groupes
@@ -768,6 +769,7 @@ def extract_biology_from_excel(excel_path, progress=None):
 def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
     """
     ✨ NOUVEAU: Extrait microbiome depuis fichier Excel structuré
+    ✅ CORRIGÉ: Gestion en-têtes à ligne 1 (ligne 0 = titres décorés)
     
     Format attendu (comme Analyse_Microbiome_00484.xlsx):
     - Feuille "Informations Patient": DI, diversité
@@ -796,162 +798,147 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
         
         # ===== 1. INFORMATIONS PATIENT =====
         if "Informations Patient" in sheet_names:
-            df_info = pd.read_excel(excel_file, "Informations Patient", header=None)
+            # ✅ CORRECTION: header=1 car ligne 0 contient le titre décoré
+            df_info = pd.read_excel(excel_file, "Informations Patient", header=1)
             
-            header_row = None
-            for idx, row in df_info.iterrows():
-                if "Champ" in str(row[0]):
-                    header_row = idx
-                    break
-            
-            if header_row is not None:
-                df_info = pd.read_excel(excel_file, "Informations Patient", header=header_row)
+            for _, row in df_info.iterrows():
+                champ = str(row.get("Champ", "")).lower()
+                valeur = str(row.get("Valeur", ""))
                 
-                for _, row in df_info.iterrows():
-                    champ = str(row.get("Champ", "")).lower()
-                    valeur = str(row.get("Valeur", ""))
-                    
-                    if "dysbiosis" in champ or "dysbiose" in champ:
-                        import re
-                        match = re.search(r'(\d+)', valeur)
-                        if match:
-                            di = int(match.group(1))
-                            result["dysbiosis_index"] = di
-                            
-                            if di <= 2:
-                                result["dysbiosis_text"] = "Normobiotic (DI 1-2)"
-                            elif di == 3:
-                                result["dysbiosis_text"] = "Mildly dysbiotic (DI 3)"
-                            else:
-                                result["dysbiosis_text"] = "Severely dysbiotic (DI 4-5)"
-                    
-                    if "diversit" in champ:
-                        result["diversity"] = valeur
+                # Ignorer les lignes vides
+                if pd.isna(champ) or champ == "nan" or not champ.strip():
+                    continue
+                
+                # Dysbiosis Index
+                if "dysbiosis" in champ or "dysbiose" in champ or "indice" in champ:
+                    import re
+                    match = re.search(r'(\d+)', valeur)
+                    if match:
+                        di = int(match.group(1))
+                        result["dysbiosis_index"] = di
+                        
+                        if di <= 2:
+                            result["dysbiosis_text"] = "Normobiotic (DI 1-2)"
+                        elif di == 3:
+                            result["dysbiosis_text"] = "Mildly dysbiotic (DI 3)"
+                        else:
+                            result["dysbiosis_text"] = "Severely dysbiotic (DI 4-5)"
+                
+                # Diversity
+                if "diversit" in champ:
+                    result["diversity"] = valeur
         
         # ===== 2. BIOMARQUEURS BASE =====
         if "Biomarqueurs Base" in sheet_names:
-            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", header=None)
+            # ✅ CORRECTION: header=1 car ligne 0 contient le titre décoré
+            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", header=1)
             
-            header_row = None
-            for idx, row in df_bio.iterrows():
-                if "Biomarqueur" in str(row[0]):
-                    header_row = idx
-                    break
-            
-            if header_row is not None:
-                df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", header=header_row)
+            for _, row in df_bio.iterrows():
+                biomarker = str(row.get("Biomarqueur", ""))
+                if not biomarker or biomarker == "nan" or pd.isna(biomarker):
+                    continue
                 
-                for _, row in df_bio.iterrows():
-                    biomarker = str(row.get("Biomarqueur", ""))
-                    if not biomarker or biomarker == "nan" or pd.isna(biomarker):
-                        continue
-                    
-                    result["stool_biomarkers"][biomarker] = {
-                        "value": row.get("Valeur"),
-                        "unit": str(row.get("Unité", "")),
-                        "reference": str(row.get("Référence", "")),
-                        "status": str(row.get("Statut", "Normal"))
-                    }
+                result["stool_biomarkers"][biomarker] = {
+                    "value": row.get("Valeur"),
+                    "unit": str(row.get("Unité", "")),
+                    "reference": str(row.get("Référence", "")),
+                    "status": str(row.get("Statut", "Normal"))
+                }
         
         # ===== 3. MICROBIOME DÉTAILLÉ =====
         if "Microbiome Détaillé" in sheet_names:
-            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", header=None)
+            # ✅ CORRECTION: header=1 car ligne 0 contient le titre décoré
+            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", header=1)
             
-            header_row = None
-            for idx, row in df_micro.iterrows():
-                if "Catégorie" in str(row[0]):
-                    header_row = idx
-                    break
+            categories_map = {}
             
-            if header_row is not None:
-                df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", header=header_row)
+            for _, row in df_micro.iterrows():
+                category = str(row.get("Catégorie", ""))
+                groupe = str(row.get("Groupe", ""))
+                no = str(row.get("No.", ""))
+                bacterie = str(row.get("Bactérie", ""))
+                position = row.get("Position", 0)
+                statut = str(row.get("Statut", "Normal"))
                 
-                categories_map = {}
+                if not category or category == "nan" or pd.isna(category):
+                    continue
                 
-                for _, row in df_micro.iterrows():
-                    category = str(row.get("Catégorie", ""))
-                    groupe = str(row.get("Groupe", ""))
-                    no = str(row.get("No.", ""))
-                    bacterie = str(row.get("Bactérie", ""))
-                    position = row.get("Position", 0)
-                    statut = str(row.get("Statut", "Normal"))
-                    
-                    if not category or category == "nan" or pd.isna(category):
-                        continue
-                    
-                    # ✅ IMPORTANT: Dans l'Excel:
-                    # - "Catégorie" = nom long (ex: "A. Broad commensals")
-                    # - "Groupe" = code court (ex: "A1")
-                    # On inverse pour correspondre au format attendu
-                    group_code = groupe  # "A1"
-                    group_name = category  # "A. Broad commensals"
-                    
-                    if group_code not in categories_map:
-                        categories_map[group_code] = {
-                            "category": group_code,  # "A1"
-                            "group": group_name,  # "A. Broad commensals"
-                            "bacteria_count": 0,
-                            "normal_count": 0,
-                            "abnormal_count": 0,
-                            "bacteria": []
-                        }
-                    
-                    cat_info = categories_map[group_code]
-                    cat_info["bacteria_count"] += 1
-                    
-                    try:
-                        position = int(position)
-                    except:
-                        position = 0
-                    
-                    if position == 0:
-                        cat_info["normal_count"] += 1
-                    else:
-                        cat_info["abnormal_count"] += 1
-                    
-                    abundance_level = position
-                    
-                    if abundance_level <= -2:
-                        status = "Strongly Reduced"
-                    elif abundance_level == -1:
-                        status = "Reduced"
-                    elif abundance_level == 0:
-                        status = "Normal"
-                    elif abundance_level == 1:
-                        status = "Slightly Elevated"
-                    elif abundance_level == 2:
-                        status = "Elevated"
-                    else:
-                        status = "Strongly Elevated"
-                    
-                    result["bacteria_individual"].append({
-                        "id": no,
-                        "name": bacterie,
-                        "category": group_code,  # "A1" au lieu de "A. Broad commensals"
+                # ✅ IMPORTANT: Dans l'Excel:
+                # - "Catégorie" = nom long (ex: "A. Broad commensals")
+                # - "Groupe" = code court (ex: "A1")
+                # On inverse pour correspondre au format attendu
+                group_code = groupe  # "A1"
+                group_name = category  # "A. Broad commensals"
+                
+                if group_code not in categories_map:
+                    categories_map[group_code] = {
+                        "category": group_code,  # "A1"
                         "group": group_name,  # "A. Broad commensals"
-                        "abundance_level": abundance_level,
-                        "status": status
-                    })
+                        "bacteria_count": 0,
+                        "normal_count": 0,
+                        "abnormal_count": 0,
+                        "bacteria": []
+                    }
                 
-                for cat_code, cat_info in categories_map.items():
-                    if cat_info["abnormal_count"] == 0:
-                        group_result = "Expected"
-                    elif cat_info["abnormal_count"] <= cat_info["bacteria_count"] * 0.3:
-                        group_result = "Slightly Deviating"
-                    else:
-                        group_result = "Deviating"
-                    
-                    result["bacteria_groups"].append({
-                        "category": cat_code,
-                        "name": cat_info["group"],
-                        "abundance": group_result,
-                        "result": group_result
-                    })
+                cat_info = categories_map[group_code]
+                cat_info["bacteria_count"] += 1
+                
+                try:
+                    position = int(position)
+                except:
+                    position = 0
+                
+                if position == 0:
+                    cat_info["normal_count"] += 1
+                else:
+                    cat_info["abnormal_count"] += 1
+                
+                abundance_level = position
+                
+                if abundance_level <= -2:
+                    status = "Strongly Reduced"
+                elif abundance_level == -1:
+                    status = "Reduced"
+                elif abundance_level == 0:
+                    status = "Normal"
+                elif abundance_level == 1:
+                    status = "Slightly Elevated"
+                elif abundance_level == 2:
+                    status = "Elevated"
+                else:
+                    status = "Strongly Elevated"
+                
+                result["bacteria_individual"].append({
+                    "id": no,
+                    "name": bacterie,
+                    "category": group_code,  # "A1" au lieu de "A. Broad commensals"
+                    "group": group_name,  # "A. Broad commensals"
+                    "abundance_level": abundance_level,
+                    "status": status
+                })
+            
+            # Générer bacteria_groups à partir des catégories
+            for cat_code, cat_info in categories_map.items():
+                if cat_info["abnormal_count"] == 0:
+                    group_result = "Expected"
+                elif cat_info["abnormal_count"] <= cat_info["bacteria_count"] * 0.3:
+                    group_result = "Slightly Deviating"
+                else:
+                    group_result = "Deviating"
+                
+                result["bacteria_groups"].append({
+                    "category": cat_code,
+                    "name": cat_info["group"],
+                    "abundance": group_result,
+                    "result": group_result
+                })
         
         return result
     
     except Exception as e:
         print(f"❌ Erreur extraction Excel microbiome: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "dysbiosis_index": None,
             "dysbiosis_text": "Unknown",
