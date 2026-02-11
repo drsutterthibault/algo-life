@@ -1,8 +1,10 @@
 """
-UNILABS Plateforme Multimodale v12.0 - VERSION FINALE
-✅ VÉRITABLE MULTIMODALITÉ : Bio + Microbiote + Analyses croisées dans l'interprétation
-✅ IA À VALEUR AJOUTÉE : Recommandations précises nutrition/micronutrition basées sur bilans
-✅ IA enrichit les règles (ne les remplace pas) avec conseils actionnables
+UNILABS Plateforme Multimodale v12.1 - AMÉLIORATIONS UX
+✅ Tableau détaillé bactéries dans Import
+✅ Onglet Microbiote dans Interprétation
+✅ Recommandations lifestyle/activité physique enrichies par IA
+✅ Recommandations éditables
+✅ Suivi avec biomarqueurs du bilan + bibliothèque complète
 """
 
 from __future__ import annotations
@@ -47,11 +49,13 @@ _AI_ENRICHMENT_PROMPT = """Tu es un expert en biologie fonctionnelle, nutrition 
 
 🎯 TA MISSION :
 Tu reçois des recommandations générées par un système de règles expert. 
-TON RÔLE : les ENRICHIR avec 8-15 recommandations NOUVELLES ultra-précises et actionnables.
+TON RÔLE : les ENRICHIR avec 10-20 recommandations NOUVELLES ultra-précises et actionnables.
 
 📋 FOCUS ABSOLU :
 1. NUTRITION : Aliments spécifiques, quantités, fréquences, timing, mode de cuisson
 2. MICRONUTRITION : Formes biodisponibles, dosages suggérés (non prescriptifs), synergies, timing de prise
+3. LIFESTYLE : Gestion stress, sommeil, hydratation, expositions environnementales
+4. ACTIVITÉ PHYSIQUE : Types d'exercices, intensité, fréquence, timing optimal
 
 ❌ INTERDICTIONS :
 - Aucun diagnostic médical
@@ -64,7 +68,7 @@ TON RÔLE : les ENRICHIR avec 8-15 recommandations NOUVELLES ultra-précises et 
 - Analyser le microbiote (DI, diversité, groupes déviants)
 - Analyser les signaux croisés bio × micro
 - Contextualiser selon âge, sexe, IMC, antécédents
-- Générer 8-15 recommandations NOUVELLES précises et actionnables
+- Générer 10-20 recommandations NOUVELLES précises et actionnables
 
 📊 FORMAT DE SORTIE (JSON STRICT) :
 {
@@ -75,6 +79,12 @@ TON RÔLE : les ENRICHIR avec 8-15 recommandations NOUVELLES ultra-précises et 
   "micronutrition_enrichie": [
     "5-8 recommandations micronutrition PRÉCISES (formes, dosages suggérés, synergies, timing)"
   ],
+  "lifestyle_enrichi": [
+    "3-5 recommandations lifestyle PRÉCISES (stress, sommeil, hydratation, environnement)"
+  ],
+  "activite_physique_enrichie": [
+    "3-5 recommandations activité physique PRÉCISES (types, intensité, fréquence, timing)"
+  ],
   "contexte_applique": "Comment tu as personnalisé selon profil patient"
 }
 
@@ -82,8 +92,11 @@ EXEMPLES DE PRÉCISION ATTENDUE :
 ❌ Mauvais : "Consommer des oméga-3"
 ✅ Bon : "Consommer 2-3 portions/semaine de petits poissons gras (sardines, maquereaux, anchois) riches en EPA/DHA, privilégier cuisson vapeur ou papillote pour préserver les acides gras"
 
-❌ Mauvais : "Prendre de la vitamine D"
-✅ Bon : "Vitamine D3 (cholécalciférol) généralement conseillée autour de 2000-4000 UI/jour selon déficit, en association avec vitamine K2-MK7 (100-200 µg) pour synergie calcique, à prendre pendant repas contenant lipides pour optimiser absorption"""
+❌ Mauvais : "Faire du sport"
+✅ Bon : "Pratiquer 30 min de marche rapide 5x/semaine, idéalement le matin à jeun pour optimiser le métabolisme lipidique, compléter par 2 séances de renforcement musculaire"
+
+❌ Mauvais : "Gérer le stress"
+✅ Bon : "Pratiquer 10 min de cohérence cardiaque 3x/jour (5s inspire, 5s expire) pour réguler le cortisol, particulièrement avant repas et au coucher"""
 
 
 def _build_enrichment_payload(
@@ -154,8 +167,8 @@ def _build_enrichment_payload(
     full_prompt = f"""{patient_summary}{bio_summary}{micro_summary}{cross_summary}{existing_summary}
 
 🎯 TON TRAVAIL :
-Génère 8-15 recommandations NOUVELLES ultra-précises en nutrition et micronutrition, contextualisées pour ce patient.
-Focus sur les aliments, quantités, timing, formes bioactives, dosages suggérés, synergies.
+Génère 10-20 recommandations NOUVELLES ultra-précises en nutrition, micronutrition, lifestyle et activité physique, contextualisées pour ce patient.
+Focus sur les aliments, quantités, timing, formes bioactives, dosages suggérés, synergies, gestion stress, sommeil, exercices.
 
 ⚠️ SORTIE JSON STRICTE UNIQUEMENT (pas de texte hors JSON)."""
     
@@ -241,6 +254,59 @@ except Exception:
     PDF_EXPORT_AVAILABLE = False
 
 RULES_EXCEL_PATH = os.path.join(BASE_DIR, "data", "Bases_regles_Synlab.xlsx")
+
+
+# =====================================================================
+# BIBLIOTHÈQUE BIOMARQUEURS
+# =====================================================================
+BIOMARQUEURS_LIBRARY = {
+    "Hématologie": [
+        "Hémoglobine", "Hématocrite", "Globules rouges", "VGM", "TCMH", "CCMH",
+        "Globules blancs", "Neutrophiles", "Lymphocytes", "Monocytes", "Éosinophiles", "Basophiles",
+        "Plaquettes", "VMP", "Réticulocytes", "Ferritine", "Fer sérique", "Transferrine", "CRP"
+    ],
+    "Métabolisme glucidique": [
+        "Glucose", "HbA1c", "Insuline", "HOMA-IR", "Peptide C", "Fructosamine"
+    ],
+    "Bilan lipidique": [
+        "Cholestérol total", "HDL", "LDL", "Triglycérides", "ApoA1", "ApoB", "Lp(a)", "Rapport CT/HDL"
+    ],
+    "Fonction hépatique": [
+        "ALAT", "ASAT", "GGT", "PAL", "Bilirubine totale", "Bilirubine conjuguée", "Albumine", "TP", "INR"
+    ],
+    "Fonction rénale": [
+        "Créatinine", "Urée", "DFG", "Acide urique", "Sodium", "Potassium", "Chlore", "Calcium", "Phosphore", "Magnésium"
+    ],
+    "Hormones thyroïdiennes": [
+        "TSH", "T3 libre", "T4 libre", "T3 totale", "T4 totale", "Anti-TPO", "Anti-thyroglobuline"
+    ],
+    "Hormones stéroïdes": [
+        "Cortisol", "DHEA", "DHEA-S", "Testostérone totale", "Testostérone libre", "SHBG",
+        "Oestradiol", "Progestérone", "17-OH-progestérone", "Androstènedione"
+    ],
+    "Vitamines": [
+        "Vitamine D", "Vitamine B12", "Vitamine B9 (folates)", "Vitamine B6", "Vitamine B1", "Vitamine C",
+        "Vitamine A", "Vitamine E", "Vitamine K"
+    ],
+    "Oligo-éléments": [
+        "Zinc", "Cuivre", "Sélénium", "Iode", "Chrome", "Manganèse"
+    ],
+    "Acides aminés": [
+        "Taurine", "Glutamine", "Arginine", "Glycine", "Méthionine", "Cystéine", "Tyrosine", "Tryptophane"
+    ],
+    "Acides gras": [
+        "Oméga-3 totaux", "EPA", "DHA", "Oméga-6 totaux", "Rapport Oméga-6/Oméga-3", "Acide arachidonique"
+    ],
+    "Stress oxydatif": [
+        "Glutathion", "SOD", "GPx", "Coenzyme Q10", "Homocystéine", "MDA"
+    ],
+    "Marqueurs inflammatoires": [
+        "CRP ultra-sensible", "Fibrinogène", "Interleukine-6", "TNF-alpha", "Calprotectine"
+    ],
+    "Immunologie": [
+        "IgG", "IgA", "IgM", "IgE totales", "Complément C3", "Complément C4"
+    ]
+}
 
 
 # =====================================================================
@@ -484,7 +550,8 @@ def init_session_state():
         "follow_up": {},
         "bio_age_result": None,
         "ai_enrichment_active": False,
-        "ai_enrichment_output": None
+        "ai_enrichment_output": None,
+        "edited_recommendations": {}
     }
     
     for key, value in defaults.items():
@@ -731,6 +798,53 @@ with tabs[0]:
             st.markdown("---")
             st.markdown("### 🦠 Microbiote - Résumé")
             st.dataframe(st.session_state.microbiome_summary_df, use_container_width=True, height=240)
+            
+            # NOUVEAU: Tableau détaillé des bactéries
+            if not st.session_state.microbiome_df.empty:
+                st.markdown("---")
+                st.markdown("### 🦠 Microbiote - Détail des Groupes Bactériens")
+                bacteria_df = st.session_state.microbiome_df
+                
+                # Filtres
+                filter_col1, filter_col2 = st.columns(2)
+                with filter_col1:
+                    selected_categories = st.multiselect(
+                        "🔍 Filtrer par catégorie",
+                        options=sorted(bacteria_df["Catégorie"].unique()),
+                        default=None,
+                        key="bacteria_category_filter"
+                    )
+                with filter_col2:
+                    result_filter = st.multiselect(
+                        "📊 Filtrer par résultat",
+                        options=["Expected", "Slightly deviating", "Deviating"],
+                        default=None,
+                        key="bacteria_result_filter"
+                    )
+                
+                # Application des filtres
+                filtered_df = bacteria_df.copy()
+                if selected_categories:
+                    filtered_df = filtered_df[filtered_df["Catégorie"].isin(selected_categories)]
+                if result_filter:
+                    mask = filtered_df["Résultat"].str.lower().str.contains("|".join([r.lower() for r in result_filter]), na=False)
+                    filtered_df = filtered_df[mask]
+                
+                # Coloration conditionnelle
+                def color_result(val):
+                    val_lower = str(val).lower()
+                    if "expected" in val_lower:
+                        return 'background-color: #d1fae5; color: #065f46'
+                    elif "slightly" in val_lower:
+                        return 'background-color: #fef3c7; color: #92400e'
+                    elif "deviating" in val_lower:
+                        return 'background-color: #fee2e2; color: #991b1b'
+                    return ''
+                
+                styled_df = filtered_df.style.applymap(color_result, subset=['Résultat'])
+                st.dataframe(styled_df, use_container_width=True, height=500)
+                
+                st.caption(f"📊 Affichage de {len(filtered_df)} groupes sur {len(bacteria_df)} au total")
         
         if st.session_state.bio_age_result:
             st.markdown("---")
@@ -848,7 +962,7 @@ with tabs[1]:
                         st.info(f"💡 {bio.get('interpretation')}")
         
         # ═══════════════════════════════════════════════════════════
-        # SECTION 2/3 : MICROBIOTE
+        # SECTION 2/3 : MICROBIOTE (NOUVEAU)
         # ═══════════════════════════════════════════════════════════
         micro_details = consolidated.get("microbiome_details", [])
         if micro_details:
@@ -862,19 +976,68 @@ with tabs[1]:
                 </div>
             """, unsafe_allow_html=True)
             
-            deviating = [m for m in micro_details if m.get("severity", 0) > 0]
+            # Filtres microbiote
+            micro_filter_col1, micro_filter_col2 = st.columns(2)
+            with micro_filter_col1:
+                severity_filter = st.multiselect(
+                    "🔍 Filtrer par sévérité",
+                    options=[0, 1, 2],
+                    format_func=lambda x: {0: "Normal", 1: "Légèrement déviant", 2: "Déviant"}[x],
+                    default=[1, 2],
+                    key="micro_severity_filter"
+                )
+            with micro_filter_col2:
+                micro_categories = list(set([m.get('category', '') for m in micro_details]))
+                selected_micro_cat = st.multiselect(
+                    "📊 Filtrer par catégorie",
+                    options=sorted(micro_categories),
+                    default=None,
+                    key="micro_category_filter"
+                )
             
-            if not deviating:
-                st.success("✅ Tous les groupes bactériens sont dans les normes attendues")
+            # Application des filtres
+            filtered_micro = [
+                m for m in micro_details 
+                if m.get("severity", 0) in severity_filter
+                and (not selected_micro_cat or m.get('category') in selected_micro_cat)
+            ]
+            
+            if not filtered_micro:
+                st.success("✅ Tous les groupes bactériens sont dans les normes attendues (selon les filtres)")
             else:
-                for micro in deviating:
+                for micro in filtered_micro:
                     severity = micro.get("severity", 0)
-                    icon = "🔴" if severity >= 2 else "🟠"
+                    
+                    if severity >= 2:
+                        icon, badge_color, badge_bg = "🔴", "#dc2626", "#fef2f2"
+                        badge_text, card_bg = "DÉVIANT", "#fff5f5"
+                    elif severity == 1:
+                        icon, badge_color, badge_bg = "🟠", "#ea580c", "#fff7ed"
+                        badge_text, card_bg = "LÉGÈREMENT DÉVIANT", "#fffbeb"
+                    else:
+                        icon, badge_color, badge_bg = "🟢", "#059669", "#f0fdf4"
+                        badge_text, card_bg = "NORMAL", "#f6ffed"
                     
                     with st.expander(f"{icon} {micro.get('category')} - {micro.get('group')} ({micro.get('result')})",
                                     expanded=(severity >= 2)):
+                        st.markdown(f"""
+                            <div style="margin-bottom: 15px;">
+                                <span style="background: {badge_bg}; color: {badge_color}; padding: 6px 16px; 
+                                             border-radius: 20px; font-weight: 700; font-size: 12px; display: inline-block;">
+                                    {badge_text}
+                                </span>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
                         if micro.get('interpretation'):
-                            st.info(f"💡 {micro.get('interpretation')}")
+                            st.markdown(f"""
+                                <div style="background: {card_bg}; padding: 15px 20px; border-radius: 10px;
+                                            border-left: 4px solid {badge_color}; margin-bottom: 15px;">
+                                    <p style="margin: 0; color: #1f2937; line-height: 1.7; font-size: 14px;">
+                                        💡 {micro.get('interpretation')}
+                                    </p>
+                                </div>
+                            """, unsafe_allow_html=True)
         
         # ═══════════════════════════════════════════════════════════
         # SECTION 3/3 : ANALYSES CROISÉES
@@ -933,7 +1096,7 @@ with tabs[1]:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 2: RECOMMANDATIONS AVEC IA
+# TAB 2: RECOMMANDATIONS AVEC IA + ÉDITION
 # ═════════════════════════════════════════════════════════════════════
 with tabs[2]:
     st.subheader("💊 Plan Thérapeutique Personnalisé")
@@ -947,12 +1110,13 @@ with tabs[2]:
         # ═══════════════════════════════════════════════════════════
         # MODULE IA ENRICHISSEMENT
         # ═══════════════════════════════════════════════════════════
-        with st.expander("🤖 Enrichissement IA - Recommandations Précises Nutrition/Micronutrition", expanded=False):
+        with st.expander("🤖 Enrichissement IA - Recommandations Complètes", expanded=False):
             st.markdown("""
                 **L'IA enrichit les recommandations du système de règles avec :**
                 - 🥗 **Nutrition précise** : Aliments, quantités, fréquences, timing, mode de cuisson
                 - 💊 **Micronutrition experte** : Formes bioactives, dosages suggérés, synergies, timing de prise
-                - 🎯 **Personnalisation complète** : Basé sur votre profil (âge, sexe, IMC, biomarqueurs, microbiote)
+                - 🧘 **Lifestyle optimisé** : Stress, sommeil, hydratation, environnement
+                - 🏃 **Activité physique ciblée** : Types d'exercices, intensité, fréquence, timing optimal
             """)
             
             col_ai_1, col_ai_2 = st.columns([1, 1])
@@ -991,23 +1155,38 @@ with tabs[2]:
                     st.info("💡 Vérifiez que OPENAI_API_KEY est configurée dans les secrets Streamlit")
         
         # ═══════════════════════════════════════════════════════════
-        # AFFICHAGE RECOMMANDATIONS
+        # AFFICHAGE RECOMMANDATIONS AVEC ÉDITION
         # ═══════════════════════════════════════════════════════════
         if st.session_state.ai_enrichment_active and st.session_state.ai_enrichment_output:
             # MODE IA ENRICHI
-            st.info("🤖 **Mode IA Enrichi activé** : Recommandations personnalisées nutrition/micronutrition")
+            st.info("🤖 **Mode IA Enrichi activé** : Recommandations personnalisées complètes")
             
             ai_out = st.session_state.ai_enrichment_output
             
             # Synthèse IA
             if ai_out.get("synthese_enrichie"):
-                st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
-                                padding: 20px; border-radius: 12px; border-left: 4px solid #3b82f6; margin: 20px 0;">
-                        <h4 style="color: #1e40af; margin: 0 0 10px 0;">📋 Synthèse Personnalisée IA</h4>
-                        <p style="color: #1e3a8a; margin: 0; line-height: 1.6;">{ai_out.get("synthese_enrichie")}</p>
-                    </div>
-                """, unsafe_allow_html=True)
+                synthese_key = "synthese_enrichie"
+                if synthese_key not in st.session_state.edited_recommendations:
+                    st.session_state.edited_recommendations[synthese_key] = ai_out.get("synthese_enrichie")
+                
+                with st.expander("📋 Synthèse Personnalisée IA (éditable)", expanded=True):
+                    edited_synthese = st.text_area(
+                        "Modifier la synthèse",
+                        value=st.session_state.edited_recommendations[synthese_key],
+                        height=100,
+                        key="edit_synthese",
+                        label_visibility="collapsed"
+                    )
+                    if st.button("💾 Sauvegarder synthèse", key="save_synthese"):
+                        st.session_state.edited_recommendations[synthese_key] = edited_synthese
+                        st.success("✅ Synthèse mise à jour")
+                    
+                    st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
+                                    padding: 20px; border-radius: 12px; border-left: 4px solid #3b82f6; margin: 20px 0;">
+                            <p style="color: #1e3a8a; margin: 0; line-height: 1.6;">{st.session_state.edited_recommendations[synthese_key]}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
             
             # Contexte appliqué
             if ai_out.get("contexte_applique"):
@@ -1015,55 +1194,105 @@ with tabs[2]:
             
             st.markdown("---")
             
-            # Nutrition enrichie IA
-            nutrition_enrichie = ai_out.get("nutrition_enrichie", [])
-            if nutrition_enrichie:
-                st.markdown("""
-                    <div style="background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%); 
-                                padding: 20px 25px; border-radius: 12px; border-left: 5px solid #22c55e;
-                                margin: 20px 0; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.2);">
-                        <h3 style="color: #14532d; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">
-                            🥗 Nutrition Personnalisée (IA)
-                        </h3>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                for i, item in enumerate(nutrition_enrichie, 1):
+            # Fonction helper pour afficher section éditable
+            def display_editable_section(title, icon, items_key, color_gradient, border_color):
+                items = ai_out.get(items_key, [])
+                if items:
+                    if items_key not in st.session_state.edited_recommendations:
+                        st.session_state.edited_recommendations[items_key] = items.copy()
+                    
                     st.markdown(f"""
-                        <div style="background: white; padding: 15px 20px; border-radius: 10px;
-                                    border-left: 4px solid #22c55e; margin: 12px 0;
-                                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-                            <p style="margin: 0; color: #14532d; font-weight: 500; font-size: 15px;">
-                                <strong>{i}.</strong> {item}
-                            </p>
+                        <div style="background: {color_gradient}; 
+                                    padding: 20px 25px; border-radius: 12px; border-left: 5px solid {border_color};
+                                    margin: 20px 0; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                            <h3 style="color: #1f2937; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">
+                                {icon} {title}
+                            </h3>
                         </div>
                     """, unsafe_allow_html=True)
+                    
+                    with st.expander("✏️ Éditer les recommandations", expanded=False):
+                        for i, item in enumerate(st.session_state.edited_recommendations[items_key]):
+                            col1, col2 = st.columns([5, 1])
+                            with col1:
+                                edited = st.text_area(
+                                    f"Reco {i+1}",
+                                    value=item,
+                                    height=80,
+                                    key=f"edit_{items_key}_{i}",
+                                    label_visibility="collapsed"
+                                )
+                                st.session_state.edited_recommendations[items_key][i] = edited
+                            with col2:
+                                if st.button("🗑️", key=f"del_{items_key}_{i}", help="Supprimer"):
+                                    st.session_state.edited_recommendations[items_key].pop(i)
+                                    st.rerun()
+                        
+                        new_item = st.text_area(
+                            "➕ Ajouter une nouvelle recommandation",
+                            height=80,
+                            key=f"new_{items_key}",
+                            placeholder="Entrez une nouvelle recommandation..."
+                        )
+                        if st.button(f"➕ Ajouter", key=f"add_{items_key}"):
+                            if new_item.strip():
+                                st.session_state.edited_recommendations[items_key].append(new_item.strip())
+                                st.success("✅ Recommandation ajoutée")
+                                st.rerun()
+                    
+                    # Affichage des recommandations
+                    for i, item in enumerate(st.session_state.edited_recommendations[items_key], 1):
+                        st.markdown(f"""
+                            <div style="background: white; padding: 15px 20px; border-radius: 10px;
+                                        border-left: 4px solid {border_color}; margin: 12px 0;
+                                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                                <p style="margin: 0; color: #1f2937; font-weight: 500; font-size: 15px;">
+                                    <strong>{i}.</strong> {item}
+                                </p>
+                            </div>
+                        """, unsafe_allow_html=True)
+            
+            # Nutrition enrichie IA
+            display_editable_section(
+                "Nutrition Personnalisée (IA)",
+                "🥗",
+                "nutrition_enrichie",
+                "linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%)",
+                "#22c55e"
+            )
             
             st.markdown("---")
             
             # Micronutrition enrichie IA
-            micronutrition_enrichie = ai_out.get("micronutrition_enrichie", [])
-            if micronutrition_enrichie:
-                st.markdown("""
-                    <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
-                                padding: 20px 25px; border-radius: 12px; border-left: 5px solid #3b82f6;
-                                margin: 20px 0; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);">
-                        <h3 style="color: #1e3a8a; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">
-                            💊 Micronutrition Experte (IA)
-                        </h3>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                for i, item in enumerate(micronutrition_enrichie, 1):
-                    st.markdown(f"""
-                        <div style="background: white; padding: 15px 20px; border-radius: 10px;
-                                    border-left: 4px solid #3b82f6; margin: 12px 0;
-                                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-                            <p style="margin: 0; color: #1e3a8a; font-weight: 500; font-size: 15px;">
-                                <strong>{i}.</strong> {item}
-                            </p>
-                        </div>
-                    """, unsafe_allow_html=True)
+            display_editable_section(
+                "Micronutrition Experte (IA)",
+                "💊",
+                "micronutrition_enrichie",
+                "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
+                "#3b82f6"
+            )
+            
+            st.markdown("---")
+            
+            # NOUVEAU: Lifestyle enrichi IA
+            display_editable_section(
+                "Lifestyle & Bien-être (IA)",
+                "🧘",
+                "lifestyle_enrichi",
+                "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)",
+                "#a855f7"
+            )
+            
+            st.markdown("---")
+            
+            # NOUVEAU: Activité physique enrichie IA
+            display_editable_section(
+                "Activité Physique Ciblée (IA)",
+                "🏃",
+                "activite_physique_enrichie",
+                "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)",
+                "#f59e0b"
+            )
             
             st.markdown("---")
             st.markdown("### 📋 Recommandations du Système de Règles")
@@ -1123,7 +1352,7 @@ with tabs[2]:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 3: SUIVI
+# TAB 3: SUIVI AMÉLIORÉ
 # ═════════════════════════════════════════════════════════════════════
 with tabs[3]:
     st.subheader("📅 Plan de Suivi")
@@ -1131,6 +1360,8 @@ with tabs[3]:
     if not st.session_state.data_extracted:
         st.warning("⚠️ Veuillez d'abord extraire les données")
     else:
+        # Plan de suivi général
+        st.markdown("### 📋 Plan de Suivi Général")
         next_date = st.date_input("Date du prochain contrôle", value=date.today(), key="follow_date")
         
         plan = st.text_area("Plan de suivi détaillé", value=st.session_state.follow_up.get("plan", ""),
@@ -1139,13 +1370,153 @@ with tabs[3]:
         objectives = st.text_area("Objectifs mesurables", value=st.session_state.follow_up.get("objectives", ""),
                                  height=150, placeholder="Ex: Réduire LDL <1.0 g/L...", key="follow_objectives")
         
-        if st.button("💾 Enregistrer le plan", type="primary", use_container_width=True):
+        if st.button("💾 Enregistrer le plan général", type="primary", use_container_width=True):
             st.session_state.follow_up = {
                 "next_date": next_date,
                 "plan": plan,
                 "objectives": objectives
             }
-            st.success("✅ Plan de suivi enregistré")
+            st.success("✅ Plan de suivi général enregistré")
+        
+        st.markdown("---")
+        
+        # NOUVEAU: Sous-onglets pour biomarqueurs
+        suivi_tabs = st.tabs([
+            "🔬 Biomarqueurs du Bilan",
+            "📚 Bibliothèque Complète"
+        ])
+        
+        # Onglet 1: Biomarqueurs du bilan actuel
+        with suivi_tabs[0]:
+            st.markdown("### 🔬 Biomarqueurs à Suivre (Bilan Actuel)")
+            
+            if not st.session_state.biology_df.empty:
+                bio_df = st.session_state.biology_df
+                
+                # Initialiser la liste de suivi
+                if "biomarkers_to_follow" not in st.session_state.follow_up:
+                    st.session_state.follow_up["biomarkers_to_follow"] = []
+                
+                # Sélection des biomarqueurs à suivre
+                st.markdown("**Sélectionnez les biomarqueurs à contrôler lors du prochain bilan :**")
+                
+                # Grouper par statut
+                abnormal_markers = bio_df[bio_df["Statut"].isin(["Bas", "Élevé"])]
+                
+                if not abnormal_markers.empty:
+                    st.info(f"💡 {len(abnormal_markers)} biomarqueurs anormaux détectés - Sélection recommandée")
+                    
+                    for _, row in abnormal_markers.iterrows():
+                        biomarker_name = row["Biomarqueur"]
+                        current_value = row["Valeur"]
+                        unit = row["Unité"]
+                        status = row["Statut"]
+                        reference = row["Référence"]
+                        
+                        is_selected = biomarker_name in st.session_state.follow_up["biomarkers_to_follow"]
+                        
+                        col1, col2 = st.columns([4, 1])
+                        with col1:
+                            st.markdown(f"""
+                                <div style="background: {'#fee2e2' if status == 'Élevé' else '#fef3c7'}; 
+                                            padding: 12px 15px; border-radius: 8px; margin: 8px 0;
+                                            border-left: 4px solid {'#ef4444' if status == 'Élevé' else '#f59e0b'};">
+                                    <strong>{biomarker_name}</strong>: {current_value} {unit} ({status})<br>
+                                    <small>Référence: {reference}</small>
+                                </div>
+                            """, unsafe_allow_html=True)
+                        with col2:
+                            if st.checkbox("Suivre", value=is_selected, key=f"follow_{biomarker_name}"):
+                                if biomarker_name not in st.session_state.follow_up["biomarkers_to_follow"]:
+                                    st.session_state.follow_up["biomarkers_to_follow"].append(biomarker_name)
+                            else:
+                                if biomarker_name in st.session_state.follow_up["biomarkers_to_follow"]:
+                                    st.session_state.follow_up["biomarkers_to_follow"].remove(biomarker_name)
+                
+                # Autres biomarqueurs normaux
+                normal_markers = bio_df[bio_df["Statut"] == "Normal"]
+                if not normal_markers.empty:
+                    with st.expander("➕ Ajouter d'autres biomarqueurs du bilan", expanded=False):
+                        for _, row in normal_markers.iterrows():
+                            biomarker_name = row["Biomarqueur"]
+                            current_value = row["Valeur"]
+                            unit = row["Unité"]
+                            reference = row["Référence"]
+                            
+                            is_selected = biomarker_name in st.session_state.follow_up["biomarkers_to_follow"]
+                            
+                            col1, col2 = st.columns([4, 1])
+                            with col1:
+                                st.markdown(f"**{biomarker_name}**: {current_value} {unit} - Réf: {reference}")
+                            with col2:
+                                if st.checkbox("Suivre", value=is_selected, key=f"follow_normal_{biomarker_name}"):
+                                    if biomarker_name not in st.session_state.follow_up["biomarkers_to_follow"]:
+                                        st.session_state.follow_up["biomarkers_to_follow"].append(biomarker_name)
+                                else:
+                                    if biomarker_name in st.session_state.follow_up["biomarkers_to_follow"]:
+                                        st.session_state.follow_up["biomarkers_to_follow"].remove(biomarker_name)
+                
+                # Résumé
+                if st.session_state.follow_up["biomarkers_to_follow"]:
+                    st.markdown("---")
+                    st.success(f"✅ **{len(st.session_state.follow_up['biomarkers_to_follow'])} biomarqueur(s) sélectionné(s) pour le suivi**")
+                    st.markdown("**Liste de suivi :**")
+                    for marker in st.session_state.follow_up["biomarkers_to_follow"]:
+                        st.markdown(f"• {marker}")
+            
+            else:
+                st.info("ℹ️ Aucune donnée biologique disponible")
+        
+        # Onglet 2: Bibliothèque complète des biomarqueurs
+        with suivi_tabs[1]:
+            st.markdown("### 📚 Bibliothèque Complète des Biomarqueurs")
+            st.caption("Tous les biomarqueurs disponibles en biologie et biologie fonctionnelle")
+            
+            # Initialiser la liste de suivi additionnels
+            if "additional_biomarkers_to_follow" not in st.session_state.follow_up:
+                st.session_state.follow_up["additional_biomarkers_to_follow"] = []
+            
+            # Recherche
+            search_term = st.text_input("🔍 Rechercher un biomarqueur", placeholder="Ex: vitamine D, fer, cortisol...")
+            
+            # Affichage par catégories
+            for category, markers in BIOMARQUEURS_LIBRARY.items():
+                # Filtrer par recherche
+                if search_term:
+                    filtered_markers = [m for m in markers if search_term.lower() in m.lower()]
+                else:
+                    filtered_markers = markers
+                
+                if filtered_markers:
+                    with st.expander(f"📁 {category} ({len(filtered_markers)} biomarqueurs)", expanded=bool(search_term)):
+                        cols = st.columns(3)
+                        for idx, marker in enumerate(filtered_markers):
+                            with cols[idx % 3]:
+                                is_selected = marker in st.session_state.follow_up["additional_biomarkers_to_follow"]
+                                if st.checkbox(marker, value=is_selected, key=f"lib_{category}_{marker}"):
+                                    if marker not in st.session_state.follow_up["additional_biomarkers_to_follow"]:
+                                        st.session_state.follow_up["additional_biomarkers_to_follow"].append(marker)
+                                else:
+                                    if marker in st.session_state.follow_up["additional_biomarkers_to_follow"]:
+                                        st.session_state.follow_up["additional_biomarkers_to_follow"].remove(marker)
+            
+            # Résumé biomarqueurs additionnels
+            if st.session_state.follow_up["additional_biomarkers_to_follow"]:
+                st.markdown("---")
+                st.info(f"ℹ️ **{len(st.session_state.follow_up['additional_biomarkers_to_follow'])} biomarqueur(s) additionnel(s) sélectionné(s)**")
+                
+                # Affichage par catégories
+                selected_by_category = {}
+                for marker in st.session_state.follow_up["additional_biomarkers_to_follow"]:
+                    for cat, markers in BIOMARQUEURS_LIBRARY.items():
+                        if marker in markers:
+                            if cat not in selected_by_category:
+                                selected_by_category[cat] = []
+                            selected_by_category[cat].append(marker)
+                            break
+                
+                for cat, markers in selected_by_category.items():
+                    st.markdown(f"**{cat}** : {', '.join(markers)}")
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1174,7 +1545,7 @@ with tabs[4]:
                             patient_data=st.session_state.patient_info,
                             biology_data=st.session_state.biology_df.to_dict('records'),
                             microbiome_data=st.session_state.microbiome_data,
-                            recommendations=consolidated.get("recommendations", {}),
+                            recommendations=st.session_state.edited_recommendations if st.session_state.ai_enrichment_active else consolidated.get("recommendations", {}),
                             cross_analysis=st.session_state.cross_analysis,
                             follow_up=st.session_state.follow_up,
                             bio_age_result=st.session_state.bio_age_result,
