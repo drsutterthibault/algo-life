@@ -497,6 +497,23 @@ def _extract_biomarkers_for_bfrail(bio_df: pd.DataFrame) -> Dict[str, float]:
     return markers
 
 
+def _bio_df_to_dict(bio_df: pd.DataFrame) -> Dict[str, Any]:
+    """Convertit le DataFrame biologie en dict {biomarqueur: {value, unit, status, reference}}"""
+    if bio_df is None or bio_df.empty:
+        return {}
+    result = {}
+    for _, row in bio_df.iterrows():
+        name = str(row.get("Biomarqueur", "")).strip()
+        if name and name.lower() != "nan":
+            result[name] = {
+                "value": row.get("Valeur"),
+                "unit": row.get("Unité", ""),
+                "status": row.get("Statut", "Normal"),
+                "reference": row.get("Référence", ""),
+            }
+    return result
+
+
 @st.cache_resource
 def _get_rules_engine():
     if not os.path.exists(RULES_EXCEL_PATH):
@@ -711,7 +728,6 @@ with tab1:
     patient_age = _calc_age_from_birthdate(birthdate)
     patient_bmi = _calc_bmi(patient_weight, patient_height)
     
-    # Symptômes
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
     st.markdown("**Symptômes**")
     symptoms_options = [
@@ -720,7 +736,6 @@ with tab1:
     ]
     selected_symptoms = st.multiselect("Sélectionnez les symptômes présents", options=symptoms_options)
     
-    # Antécédents
     st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
     st.markdown("**📋 Antécédents médicaux**")
     patient_antecedents = st.text_area("", value=st.session_state.patient_info.get("antecedents", "Allergies"), 
@@ -746,7 +761,6 @@ with tab1:
     
     st.markdown("---")
     
-    # Zone d'importation
     st.markdown("""
         <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); 
                     padding: 20px 25px; border-radius: 12px; border-left: 4px solid #0ea5e9; margin-bottom: 25px;">
@@ -759,7 +773,6 @@ with tab1:
         </div>
     """, unsafe_allow_html=True)
     
-    # 3 colonnes pour les imports
     col_import1, col_import2, col_import3 = st.columns(3)
     
     with col_import1:
@@ -829,7 +842,6 @@ with tab1:
     
     st.markdown("<div style='margin: 30px 0;'></div>", unsafe_allow_html=True)
     
-    # Bouton extraction
     if st.button("🚀 Lancer l'extraction et l'analyse", type="primary", use_container_width=True):
         if not bio_pdf and not bio_excel and not micro_pdf and not micro_excel:
             st.error("⚠️ Veuillez uploader au moins un fichier")
@@ -839,7 +851,6 @@ with tab1:
                     biology_dict = {}
                     microbiome_dict = {}
                     
-                    # Extraction biologie
                     if bio_pdf:
                         bio_path = _file_to_temp_path(bio_pdf, ".pdf")
                         biology_dict = extract_synlab_biology(bio_path)
@@ -853,7 +864,6 @@ with tab1:
                     if biology_dict:
                         st.session_state.biology_df = _dict_bio_to_dataframe(biology_dict)
                     
-                    # Extraction microbiome
                     if micro_pdf:
                         micro_path = _file_to_temp_path(micro_pdf, ".pdf")
                         micro_excel_path = _file_to_temp_path(micro_excel, ".xlsx") if micro_excel else None
@@ -868,18 +878,17 @@ with tab1:
                         bacteria = _microbiome_get_groups(microbiome_dict)
                         st.session_state.microbiome_df = _microbiome_to_dataframe(bacteria)
                     
-                    # Génération recommandations
+                    # ── Appel engine avec bio_data (dict) ──
                     engine = _get_rules_engine()
                     if engine:
                         consolidated = engine.generate_consolidated_recommendations(
-                            biology_data=st.session_state.biology_df if not st.session_state.biology_df.empty else None,
+                            bio_data=_bio_df_to_dict(st.session_state.biology_df),
                             microbiome_data=microbiome_dict if microbiome_dict else None,
                             patient_info=st.session_state.patient_info
                         )
                         st.session_state.consolidated_recommendations = consolidated
                         st.session_state.cross_analysis = consolidated.get("cross_analysis", [])
                     
-                    # Calcul âge biologique
                     if not st.session_state.biology_df.empty:
                         markers = _extract_biomarkers_for_bfrail(st.session_state.biology_df)
                         if all(k in markers for k in ['crp', 'hemoglobin', 'vitamin_d']):
@@ -903,7 +912,6 @@ with tab1:
                     import traceback
                     st.code(traceback.format_exc())
     
-    # Affichage données extraites
     if st.session_state.data_extracted:
         st.markdown("---")
         st.markdown("### 📊 Aperçu des Documents")
@@ -928,13 +936,11 @@ with tab1:
                 st.markdown("#### 📊 Résumé Microbiote")
                 st.dataframe(st.session_state.microbiome_summary_df, use_container_width=True, height=240)
                 
-                # TABLEAU DÉTAILLÉ DES BACTÉRIES
                 if not st.session_state.microbiome_df.empty:
                     st.markdown("---")
                     st.markdown("#### 🦠 Détail des Groupes Bactériens (Outliers)")
                     bacteria_df = st.session_state.microbiome_df
                     
-                    # Filtres
                     filter_col1, filter_col2 = st.columns(2)
                     with filter_col1:
                         selected_categories = st.multiselect(
@@ -951,7 +957,6 @@ with tab1:
                             key="bacteria_result_filter"
                         )
                     
-                    # Application des filtres
                     filtered_df = bacteria_df.copy()
                     if selected_categories:
                         filtered_df = filtered_df[filtered_df["Catégorie"].isin(selected_categories)]
@@ -959,7 +964,6 @@ with tab1:
                         mask = filtered_df["Résultat"].str.lower().str.contains("|".join([r.lower() for r in result_filter]), na=False)
                         filtered_df = filtered_df[mask]
                     
-                    # Coloration conditionnelle
                     def color_result(val):
                         val_lower = str(val).lower()
                         if "expected" in val_lower:
@@ -972,12 +976,11 @@ with tab1:
                     
                     styled_df = filtered_df.style.applymap(color_result, subset=['Résultat'])
                     st.dataframe(styled_df, use_container_width=True, height=500)
-                    
                     st.caption(f"📊 Affichage de {len(filtered_df)} groupes sur {len(bacteria_df)} au total")
 
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 2: INTERPRÉTATION (CODE COMPLET DU DOCUMENT ORIGINAL)
+# TAB 2: INTERPRÉTATION
 # ═════════════════════════════════════════════════════════════════════
 with tab2:
     st.subheader("🧬 Interprétation Multimodale des Résultats")
@@ -1011,7 +1014,6 @@ with tab2:
         
         st.markdown("---")
         
-        # Biologie
         bio_details = consolidated.get("biology_details", [])
         if bio_details:
             st.markdown("""
@@ -1074,7 +1076,6 @@ with tab2:
                     if bio.get('interpretation'):
                         st.info(f"💡 {bio.get('interpretation')}")
         
-        # Microbiote
         micro_details = consolidated.get("microbiome_details", [])
         if micro_details:
             st.markdown("---")
@@ -1148,7 +1149,6 @@ with tab2:
                                 </div>
                             """, unsafe_allow_html=True)
         
-        # Analyses croisées
         cross = st.session_state.cross_analysis
         if cross:
             st.markdown("---")
@@ -1203,7 +1203,7 @@ with tab2:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 3: RECOMMANDATIONS (CODE COMPLET)
+# TAB 3: RECOMMANDATIONS
 # ═════════════════════════════════════════════════════════════════════
 with tab3:
     st.subheader("💊 Plan Thérapeutique Personnalisé")
@@ -1214,7 +1214,6 @@ with tab3:
         consolidated = st.session_state.consolidated_recommendations
         recommendations = consolidated.get("recommendations", {})
         
-        # Module IA
         with st.expander("🤖 Enrichissement IA - Recommandations Complètes", expanded=False):
             st.markdown("""
                 **L'IA enrichit les recommandations du système de règles avec :**
@@ -1259,13 +1258,11 @@ with tab3:
                     st.error(f"❌ Erreur IA : {e}")
                     st.info("💡 Vérifiez que OPENAI_API_KEY est configurée dans les secrets Streamlit")
         
-        # Affichage recommandations
         if st.session_state.ai_enrichment_active and st.session_state.ai_enrichment_output:
             st.info("🤖 **Mode IA Enrichi activé** : Recommandations personnalisées complètes")
             
             ai_out = st.session_state.ai_enrichment_output
             
-            # Synthèse IA
             if ai_out.get("synthese_enrichie"):
                 synthese_key = "synthese_enrichie"
                 if synthese_key not in st.session_state.edited_recommendations:
@@ -1351,96 +1348,41 @@ with tab3:
                             </div>
                         """, unsafe_allow_html=True)
             
-            display_editable_section(
-                "Nutrition Personnalisée (IA)",
-                "🥗",
-                "nutrition_enrichie",
-                "linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%)",
-                "#22c55e"
-            )
-            
+            display_editable_section("Nutrition Personnalisée (IA)", "🥗", "nutrition_enrichie",
+                                    "linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%)", "#22c55e")
             st.markdown("---")
-            
-            display_editable_section(
-                "Micronutrition Experte (IA)",
-                "💊",
-                "micronutrition_enrichie",
-                "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-                "#3b82f6"
-            )
-            
+            display_editable_section("Micronutrition Experte (IA)", "💊", "micronutrition_enrichie",
+                                    "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)", "#3b82f6")
             st.markdown("---")
-            
-            display_editable_section(
-                "Lifestyle & Bien-être (IA)",
-                "🧘",
-                "lifestyle_enrichi",
-                "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)",
-                "#a855f7"
-            )
-            
+            display_editable_section("Lifestyle & Bien-être (IA)", "🧘", "lifestyle_enrichi",
+                                    "linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)", "#a855f7")
             st.markdown("---")
-            
-            display_editable_section(
-                "Activité Physique Ciblée (IA)",
-                "🏃",
-                "activite_physique_enrichie",
-                "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)",
-                "#f59e0b"
-            )
-            
+            display_editable_section("Activité Physique Ciblée (IA)", "🏃", "activite_physique_enrichie",
+                                    "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)", "#f59e0b")
             st.markdown("---")
             st.markdown("### 📋 Recommandations du Système de Règles")
         
-        # Afficher recommandations du système de règles
-        if not any(recommendations.values()):
+        if not any(recommendations.values()) if recommendations else True:
             st.info("ℹ️ Aucune recommandation générée par le système de règles")
         else:
-            prioritaires = recommendations.get("Prioritaires", [])
-            if prioritaires:
-                with st.expander("🔥 **Actions Prioritaires**", expanded=True):
-                    for i, item in enumerate(prioritaires, 1):
-                        st.markdown(f"**{i}.** {item}")
-            
-            a_surveiller = recommendations.get("À surveiller", [])
-            if a_surveiller:
-                with st.expander("⚠️ **À Surveiller**", expanded=False):
-                    for i, item in enumerate(a_surveiller, 1):
-                        st.markdown(f"**{i}.** {item}")
-            
-            nutrition = recommendations.get("Nutrition", [])
-            if nutrition:
-                with st.expander("🥗 **Nutrition (Règles)**", expanded=False):
-                    for item in nutrition:
-                        st.markdown(f"• {item}")
-            
-            micronutrition = recommendations.get("Micronutrition", [])
-            if micronutrition:
-                with st.expander("💊 **Micronutrition (Règles)**", expanded=False):
-                    for item in micronutrition:
-                        st.markdown(f"• {item}")
-            
-            hygiene_vie = recommendations.get("Hygiène de vie", [])
-            if hygiene_vie:
-                with st.expander("🏃 **Hygiène de Vie**", expanded=False):
-                    for item in hygiene_vie:
-                        st.markdown(f"• {item}")
-            
-            examens = recommendations.get("Examens complémentaires", [])
-            if examens:
-                with st.expander("🔬 **Examens Complémentaires**", expanded=False):
-                    for item in examens:
-                        st.markdown(f"• {item}")
-            
-            suivi = recommendations.get("Suivi", [])
-            if suivi:
-                with st.expander("📅 **Plan de Suivi**", expanded=False):
-                    for item in suivi:
-                        st.markdown(f"• {item}")
+            for section_key, section_label, icon in [
+                ("Prioritaires", "Actions Prioritaires", "🔥"),
+                ("À surveiller", "À Surveiller", "⚠️"),
+                ("Nutrition", "Nutrition (Règles)", "🥗"),
+                ("Micronutrition", "Micronutrition (Règles)", "💊"),
+                ("Hygiène de vie", "Hygiène de Vie", "🏃"),
+                ("Examens complémentaires", "Examens Complémentaires", "🔬"),
+                ("Suivi", "Plan de Suivi", "📅"),
+            ]:
+                items = recommendations.get(section_key, [])
+                if items:
+                    with st.expander(f"{icon} **{section_label}**", expanded=(section_key == "Prioritaires")):
+                        for i, item in enumerate(items, 1):
+                            st.markdown(f"**{i}.** {item}")
 
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 4: SUIVI (CODE COMPLET)
+# TAB 4: SUIVI
 # ═════════════════════════════════════════════════════════════════════
 with tab4:
     st.subheader("📅 Plan de Suivi")
@@ -1467,10 +1409,7 @@ with tab4:
         
         st.markdown("---")
         
-        suivi_tabs = st.tabs([
-            "🔬 Biomarqueurs du Bilan",
-            "📚 Bibliothèque Complète"
-        ])
+        suivi_tabs = st.tabs(["🔬 Biomarqueurs du Bilan", "📚 Bibliothèque Complète"])
         
         with suivi_tabs[0]:
             st.markdown("### 🔬 Biomarqueurs à Suivre (Bilan Actuel)")
@@ -1540,10 +1479,8 @@ with tab4:
                 if st.session_state.follow_up["biomarkers_to_follow"]:
                     st.markdown("---")
                     st.success(f"✅ **{len(st.session_state.follow_up['biomarkers_to_follow'])} biomarqueur(s) sélectionné(s) pour le suivi**")
-                    st.markdown("**Liste de suivi :**")
                     for marker in st.session_state.follow_up["biomarkers_to_follow"]:
                         st.markdown(f"• {marker}")
-            
             else:
                 st.info("ℹ️ Aucune donnée biologique disponible")
         
@@ -1557,10 +1494,7 @@ with tab4:
             search_term = st.text_input("🔍 Rechercher un biomarqueur", placeholder="Ex: vitamine D, fer, cortisol...")
             
             for category, markers in BIOMARQUEURS_LIBRARY.items():
-                if search_term:
-                    filtered_markers = [m for m in markers if search_term.lower() in m.lower()]
-                else:
-                    filtered_markers = markers
+                filtered_markers = [m for m in markers if search_term.lower() in m.lower()] if search_term else markers
                 
                 if filtered_markers:
                     with st.expander(f"📁 {category} ({len(filtered_markers)} biomarqueurs)", expanded=bool(search_term)):
@@ -1578,22 +1512,18 @@ with tab4:
             if st.session_state.follow_up["additional_biomarkers_to_follow"]:
                 st.markdown("---")
                 st.info(f"ℹ️ **{len(st.session_state.follow_up['additional_biomarkers_to_follow'])} biomarqueur(s) additionnel(s) sélectionné(s)**")
-                
                 selected_by_category = {}
                 for marker in st.session_state.follow_up["additional_biomarkers_to_follow"]:
                     for cat, markers in BIOMARQUEURS_LIBRARY.items():
                         if marker in markers:
-                            if cat not in selected_by_category:
-                                selected_by_category[cat] = []
-                            selected_by_category[cat].append(marker)
+                            selected_by_category.setdefault(cat, []).append(marker)
                             break
-                
                 for cat, markers in selected_by_category.items():
                     st.markdown(f"**{cat}** : {', '.join(markers)}")
 
 
 # ═════════════════════════════════════════════════════════════════════
-# TAB 5: EXPORT PDF (CODE COMPLET)
+# TAB 5: EXPORT PDF
 # ═════════════════════════════════════════════════════════════════════
 with tab5:
     st.subheader("📄 Export Rapport PDF")
