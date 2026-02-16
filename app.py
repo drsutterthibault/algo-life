@@ -497,6 +497,103 @@ def _extract_biomarkers_for_bfrail(bio_df: pd.DataFrame) -> Dict[str, float]:
     return markers
 
 
+def _generate_excel_export() -> bytes:
+    """Génère un fichier Excel avec Biologie et Microbiote."""
+    from io import BytesIO
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+
+        # ── Onglet Biologie ───────────────────────────────────────────
+        if not st.session_state.biology_df.empty:
+            df_bio = st.session_state.biology_df.copy()
+            df_bio.to_excel(writer, sheet_name='Biologie', index=False)
+            ws = writer.sheets['Biologie']
+
+            # En-têtes
+            header_fill = PatternFill("solid", fgColor="0EA5E9")
+            header_font = Font(bold=True, color="FFFFFF", size=11)
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            # Coloration des lignes selon statut
+            fill_bas    = PatternFill("solid", fgColor="DBEAFE")  # bleu clair
+            fill_eleve  = PatternFill("solid", fgColor="FEE2E2")  # rouge clair
+            fill_normal = PatternFill("solid", fgColor="D1FAE5")  # vert clair
+
+            statut_col = None
+            for idx, cell in enumerate(ws[1], 1):
+                if str(cell.value) == "Statut":
+                    statut_col = idx
+                    break
+
+            if statut_col:
+                for row in ws.iter_rows(min_row=2):
+                    statut = str(row[statut_col - 1].value or "")
+                    fill = fill_eleve if statut == "Élevé" else (fill_bas if statut == "Bas" else fill_normal)
+                    for cell in row:
+                        cell.fill = fill
+                        cell.alignment = Alignment(vertical="center")
+
+            # Largeurs colonnes
+            for col in ws.columns:
+                max_len = max((len(str(c.value or "")) for c in col), default=10)
+                ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 40)
+
+            ws.row_dimensions[1].height = 22
+            ws.freeze_panes = "A2"
+
+        # ── Onglet Microbiote ─────────────────────────────────────────
+        if not st.session_state.microbiome_df.empty:
+            df_micro = st.session_state.microbiome_df.copy()
+            df_micro.to_excel(writer, sheet_name='Microbiote', index=False)
+            ws = writer.sheets['Microbiote']
+
+            header_fill2 = PatternFill("solid", fgColor="6366F1")
+            for cell in ws[1]:
+                cell.fill = header_fill2
+                cell.font = Font(bold=True, color="FFFFFF", size=11)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            fill_expected  = PatternFill("solid", fgColor="D1FAE5")
+            fill_slightly  = PatternFill("solid", fgColor="FEF3C7")
+            fill_deviating = PatternFill("solid", fgColor="FEE2E2")
+
+            result_col = None
+            for idx, cell in enumerate(ws[1], 1):
+                if str(cell.value) in ("Résultat", "Abondance"):
+                    result_col = idx
+                    break
+
+            if result_col:
+                for row in ws.iter_rows(min_row=2):
+                    val = str(row[result_col - 1].value or "").lower()
+                    if "deviating" in val and "slightly" not in val:
+                        fill = fill_deviating
+                    elif "slightly" in val:
+                        fill = fill_slightly
+                    else:
+                        fill = fill_expected
+                    for cell in row:
+                        cell.fill = fill
+                        cell.alignment = Alignment(vertical="center")
+
+            for col in ws.columns:
+                max_len = max((len(str(c.value or "")) for c in col), default=10)
+                ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 50)
+
+            ws.row_dimensions[1].height = 22
+            ws.freeze_panes = "A2"
+
+    output.seek(0)
+    return output.getvalue()
+
+
 def _bio_df_to_dict(bio_df: pd.DataFrame) -> Dict[str, Any]:
     """Convertit le DataFrame biologie en dict {biomarqueur: {value, unit, status, reference}}"""
     if bio_df is None or bio_df.empty:
@@ -977,6 +1074,7 @@ with tab1:
                     styled_df = filtered_df.style.applymap(color_result, subset=['Résultat'])
                     st.dataframe(styled_df, use_container_width=True, height=500)
                     st.caption(f"📊 Affichage de {len(filtered_df)} groupes sur {len(bacteria_df)} au total")
+
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1541,6 +1639,38 @@ with tab5:
             
             pdf_filename = st.text_input("Nom du fichier PDF", value=default_filename)
             
+            # ── Export Excel (Bio + Microbiote) ───────────────────────────
+            st.markdown("---")
+            col_xl_left, col_xl_right = st.columns([3, 1])
+            with col_xl_left:
+                st.markdown("""
+                    <div style="background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%);
+                                padding: 15px 20px; border-radius: 10px; border-left: 4px solid #10b981;">
+                        <strong>📊 Export Excel</strong><br>
+                        <small style="color:#64748b;">
+                            2 onglets colorisés : <b>Biologie</b> (statuts en couleur) · <b>Microbiote</b> (déviances en couleur)
+                        </small>
+                    </div>
+                """, unsafe_allow_html=True)
+            with col_xl_right:
+                if st.button("⬇️ Télécharger Excel", use_container_width=True, key="export_excel_tab5", type="secondary"):
+                    try:
+                        excel_bytes = _generate_excel_export()
+                        patient_name = st.session_state.patient_info.get("name", "patient").replace(" ", "_")
+                        fname = f"ALGOLIFE_{patient_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                        st.download_button(
+                            label="📥 Cliquer pour télécharger",
+                            data=excel_bytes,
+                            file_name=fname,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dl_excel_tab5"
+                        )
+                    except Exception as e:
+                        st.error(f"❌ Erreur Excel : {e}")
+
+            # ── Export PDF ────────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### 📄 Export PDF")
             if st.button("📄 Générer PDF", type="primary", use_container_width=True):
                 with st.spinner("⏳ Génération..."):
                     try:
