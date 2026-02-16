@@ -595,29 +595,31 @@ def _generate_excel_export() -> bytes:
 
 
 def _bio_df_to_dict(bio_df: pd.DataFrame) -> Dict[str, Any]:
-    """Convertit le DataFrame biologie en dict {biomarqueur: {value, unit, status, reference}}"""
+    """
+    Convertit le DataFrame biologie en dict PLAT {biomarqueur: valeur_float}
+    compatible avec RulesEngine._evaluate_bio_rule() qui fait float(value).
+    """
     if bio_df is None or bio_df.empty:
         return {}
     result = {}
     for _, row in bio_df.iterrows():
         name = str(row.get("Biomarqueur", "")).strip()
-        if name and name.lower() != "nan":
-            result[name] = {
-                "value": row.get("Valeur"),
-                "unit": row.get("Unité", ""),
-                "status": row.get("Statut", "Normal"),
-                "reference": row.get("Référence", ""),
-            }
+        if not name or name.lower() == "nan":
+            continue
+        val = row.get("Valeur")
+        try:
+            val_float = float(str(val).replace(",", ".")) if val is not None else None
+        except (ValueError, TypeError):
+            val_float = None
+        if val_float is not None:
+            result[name] = val_float
     return result
 
 
 def _build_display_recommendations(consolidated: dict) -> dict:
     """
-    Convertit la structure du moteur de règles en dict par sections
-    pour l'affichage dans le Tab 3.
-    
-    Moteur retourne : {"all": [{priority, category, title, recommendations:{nutrition,supplementation,lifestyle,monitoring}}]}
-    Tab 3 attend   : {"Prioritaires": [...], "Nutrition": [...], "Micronutrition": [...], ...}
+    Convertit la structure du moteur {all:[{priority,title,recommendations:{...}}]}
+    en dict lisible pour le Tab 3 : {Prioritaires:[...], Nutrition:[...], ...}
     """
     all_recs = consolidated.get("all", [])
     if not all_recs:
@@ -636,7 +638,6 @@ def _build_display_recommendations(consolidated: dict) -> dict:
     for rec in all_recs:
         priority  = rec.get("priority", "LOW")
         title     = rec.get("title", "")
-        category  = rec.get("category", "")
         recs      = rec.get("recommendations", {})
         nutrition = str(recs.get("nutrition", "")).strip()
         suppl     = str(recs.get("supplementation", "")).strip()
@@ -644,26 +645,24 @@ def _build_display_recommendations(consolidated: dict) -> dict:
         monitoring= str(recs.get("monitoring", "")).strip()
         desc      = str(rec.get("description", "")).strip()
 
-        # Ligne de résumé pour la section priorité
-        summary_line = title if title else category
+        summary = title if title else rec.get("category", "")
         if desc and desc != title:
-            summary_line += f" — {desc[:120]}"
+            summary += f" — {desc[:150]}"
 
         if priority == "HIGH":
-            display["Prioritaires"].append(summary_line)
+            display["Prioritaires"].append(summary)
         elif priority == "MEDIUM":
-            display["À surveiller"].append(summary_line)
+            display["À surveiller"].append(summary)
 
-        if nutrition and nutrition != "nan":
-            display["Nutrition"].append(f"[{title}] {nutrition}")
-        if suppl and suppl != "nan":
-            display["Micronutrition"].append(f"[{title}] {suppl}")
-        if lifestyle and lifestyle != "nan":
-            display["Hygiène de vie"].append(f"[{title}] {lifestyle}")
-        if monitoring and monitoring != "nan":
-            display["Suivi"].append(f"[{title}] {monitoring}")
+        if nutrition  and nutrition  not in ("", "nan"):
+            display["Nutrition"].append(f"[{title}] {nutrition}" if title else nutrition)
+        if suppl      and suppl      not in ("", "nan"):
+            display["Micronutrition"].append(f"[{title}] {suppl}" if title else suppl)
+        if lifestyle  and lifestyle  not in ("", "nan"):
+            display["Hygiène de vie"].append(f"[{title}] {lifestyle}" if title else lifestyle)
+        if monitoring and monitoring not in ("", "nan"):
+            display["Suivi"].append(f"[{title}] {monitoring}" if title else monitoring)
 
-    # Nettoyer les sections vides
     return {k: v for k, v in display.items() if v}
 
 
@@ -1518,7 +1517,7 @@ with tab3:
             st.markdown("---")
             st.markdown("### 📋 Recommandations du Système de Règles")
         
-        if not any(recommendations.values()) if recommendations else True:
+        if not recommendations:
             st.info("ℹ️ Aucune recommandation générée par le système de règles")
         else:
             for section_key, section_label, icon in [
