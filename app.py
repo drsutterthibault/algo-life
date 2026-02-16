@@ -1003,18 +1003,26 @@ with tab2:
             </div>
         """, unsafe_allow_html=True)
         
-        summary = consolidated.get("summary", {})
-        col1, col2, col3, col4 = st.columns(4)
-        
-        col1.metric("🔬 Anomalies Bio", summary.get("anomalies_count", 0))
+        # ── Métriques depuis les vraies structures ──
+        bio_df_tab2 = st.session_state.biology_df
+        bio_anomalies = len(bio_df_tab2[bio_df_tab2["Statut"].isin(["Bas", "Élevé"])]) if not bio_df_tab2.empty else 0
+        bio_critiques = len(bio_df_tab2[bio_df_tab2["Statut"] == "Élevé"]) if not bio_df_tab2.empty else 0
         di_value = st.session_state.microbiome_data.get('dysbiosis_index', '—')
+        total_recs = consolidated.get("total", 0)
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("🔬 Anomalies Bio", bio_anomalies)
         col2.metric("🦠 Index Dysbiose", f"{di_value}/5" if di_value != '—' else "—")
-        col3.metric("⚠️ Signaux Critiques", summary.get("critical_count", 0))
-        col4.metric("🔄 Analyses Croisées", len(st.session_state.cross_analysis))
-        
+        col3.metric("⚠️ Signaux Critiques", bio_critiques)
+        col4.metric("💊 Recommandations", total_recs)
+
+        summary_text = consolidated.get("summary", "")
+        if summary_text and isinstance(summary_text, str):
+            st.info(f"📋 {summary_text}")
+
         st.markdown("---")
-        
-        bio_details = consolidated.get("biology_details", [])
+
+        bio_details = bio_df_tab2.to_dict("records") if not bio_df_tab2.empty else []
         if bio_details:
             st.markdown("""
                 <div style="background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%); 
@@ -1031,30 +1039,26 @@ with tab2:
                                               options=["Bas", "Normal", "Élevé", "Inconnu"], 
                                               default=["Bas", "Élevé"], key="bio_status_filter")
             with filter_col2:
-                priority_filter = st.multiselect("⚡ Filtrer par priorité",
-                                                options=["critical", "high", "medium", "normal"],
-                                                default=["critical", "high", "medium"], key="bio_priority_filter")
+                st.markdown("")  # placeholder
             
-            filtered_bio = [b for b in bio_details if b.get("status") in status_filter and b.get("priority") in priority_filter]
+            # Les clés viennent du DataFrame: Biomarqueur, Valeur, Unité, Statut, Référence
+            filtered_bio = [b for b in bio_details if b.get("Statut") in status_filter]
             
             for bio in filtered_bio:
-                priority = bio.get('priority')
+                statut = bio.get('Statut', 'Normal')
                 
-                if priority == 'critical':
-                    badge_color, badge_bg, badge_text = "#dc2626", "#fef2f2", "CRITIQUE"
+                if statut == 'Élevé':
+                    badge_color, badge_bg, badge_text = "#dc2626", "#fef2f2", "ÉLEVÉ"
                     border_color, card_bg = "#ef4444", "#fff5f5"
-                elif priority == 'high':
-                    badge_color, badge_bg, badge_text = "#ea580c", "#fff7ed", "ÉLEVÉ"
-                    border_color, card_bg = "#f97316", "#fffbeb"
-                elif priority == 'medium':
-                    badge_color, badge_bg, badge_text = "#0891b2", "#ecfeff", "MOYEN"
+                elif statut == 'Bas':
+                    badge_color, badge_bg, badge_text = "#0891b2", "#ecfeff", "BAS"
                     border_color, card_bg = "#06b6d4", "#f0fdfa"
                 else:
                     badge_color, badge_bg, badge_text = "#059669", "#f0fdf4", "NORMAL"
                     border_color, card_bg = "#10b981", "#f6ffed"
                 
-                with st.expander(f"{bio.get('biomarker')} - {bio.get('status')} ({bio.get('value')} {bio.get('unit')})",
-                                expanded=(priority in ['critical', 'high'])):
+                label = f"{bio.get('Biomarqueur', '?')} — {statut} ({bio.get('Valeur', '?')} {bio.get('Unité', '')})"
+                with st.expander(label, expanded=(statut in ['Élevé', 'Bas'])):
                     st.markdown(f"""
                         <div style="margin-bottom: 15px;">
                             <span style="background: {badge_bg}; color: {badge_color}; padding: 6px 16px; 
@@ -1068,15 +1072,12 @@ with tab2:
                         <div style="background: {card_bg}; padding: 15px 20px; border-radius: 10px;
                                     border-left: 4px solid {border_color}; margin-bottom: 15px;">
                             <p style="margin: 0; color: {badge_color}; font-weight: 600; font-size: 14px;">
-                                📊 Référence : <span style="font-weight: 700;">{bio.get('reference')}</span>
+                                📊 Référence : <span style="font-weight: 700;">{bio.get('Référence', '—')}</span>
                             </p>
                         </div>
                     """, unsafe_allow_html=True)
-                    
-                    if bio.get('interpretation'):
-                        st.info(f"💡 {bio.get('interpretation')}")
         
-        micro_details = consolidated.get("microbiome_details", [])
+        micro_details = st.session_state.microbiome_df.to_dict("records") if not st.session_state.microbiome_df.empty else []
         if micro_details:
             st.markdown("---")
             st.markdown("""
@@ -1098,7 +1099,7 @@ with tab2:
                     key="micro_severity_filter"
                 )
             with micro_filter_col2:
-                micro_categories = list(set([m.get('category', '') for m in micro_details]))
+                micro_categories = list(set([m.get('Catégorie', '') for m in micro_details]))
                 selected_micro_cat = st.multiselect(
                     "📊 Filtrer par catégorie",
                     options=sorted(micro_categories),
@@ -1106,17 +1107,25 @@ with tab2:
                     key="micro_category_filter"
                 )
             
+            def _get_severity(result_str):
+                r = str(result_str).lower()
+                if "deviating" in r and "slightly" not in r:
+                    return 2
+                elif "slightly" in r:
+                    return 1
+                return 0
+
             filtered_micro = [
                 m for m in micro_details 
-                if m.get("severity", 0) in severity_filter
-                and (not selected_micro_cat or m.get('category') in selected_micro_cat)
+                if _get_severity(m.get("Résultat", "")) in severity_filter
+                and (not selected_micro_cat or m.get('Catégorie') in selected_micro_cat)
             ]
             
             if not filtered_micro:
                 st.success("✅ Tous les groupes bactériens sont dans les normes attendues (selon les filtres)")
             else:
                 for micro in filtered_micro:
-                    severity = micro.get("severity", 0)
+                    severity = _get_severity(micro.get("Résultat", ""))
                     
                     if severity >= 2:
                         icon, badge_color, badge_bg = "🔴", "#dc2626", "#fef2f2"
@@ -1128,8 +1137,8 @@ with tab2:
                         icon, badge_color, badge_bg = "🟢", "#059669", "#f0fdf4"
                         badge_text, card_bg = "NORMAL", "#f6ffed"
                     
-                    with st.expander(f"{icon} {micro.get('category')} - {micro.get('group')} ({micro.get('result')})",
-                                    expanded=(severity >= 2)):
+                    label = f"{icon} {micro.get('Catégorie','?')} - {micro.get('Groupe','?')} ({micro.get('Résultat','?')})"
+                    with st.expander(label, expanded=(severity >= 2)):
                         st.markdown(f"""
                             <div style="margin-bottom: 15px;">
                                 <span style="background: {badge_bg}; color: {badge_color}; padding: 6px 16px; 
@@ -1138,18 +1147,11 @@ with tab2:
                                 </span>
                             </div>
                         """, unsafe_allow_html=True)
-                        
-                        if micro.get('interpretation'):
-                            st.markdown(f"""
-                                <div style="background: {card_bg}; padding: 15px 20px; border-radius: 10px;
-                                            border-left: 4px solid {badge_color}; margin-bottom: 15px;">
-                                    <p style="margin: 0; color: #1f2937; line-height: 1.7; font-size: 14px;">
-                                        💡 {micro.get('interpretation')}
-                                    </p>
-                                </div>
-                            """, unsafe_allow_html=True)
         
-        cross = st.session_state.cross_analysis
+        cross = consolidated.get("all", [])
+        # filtrer seulement les règles croisées si disponibles
+        cross_typed = [r for r in cross if r.get("rule_type") == "cross"]
+        cross = cross_typed if cross_typed else []
         if cross:
             st.markdown("---")
             st.markdown("""
