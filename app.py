@@ -611,6 +611,62 @@ def _bio_df_to_dict(bio_df: pd.DataFrame) -> Dict[str, Any]:
     return result
 
 
+def _build_display_recommendations(consolidated: dict) -> dict:
+    """
+    Convertit la structure du moteur de règles en dict par sections
+    pour l'affichage dans le Tab 3.
+    
+    Moteur retourne : {"all": [{priority, category, title, recommendations:{nutrition,supplementation,lifestyle,monitoring}}]}
+    Tab 3 attend   : {"Prioritaires": [...], "Nutrition": [...], "Micronutrition": [...], ...}
+    """
+    all_recs = consolidated.get("all", [])
+    if not all_recs:
+        return {}
+
+    display = {
+        "Prioritaires": [],
+        "À surveiller": [],
+        "Nutrition": [],
+        "Micronutrition": [],
+        "Hygiène de vie": [],
+        "Examens complémentaires": [],
+        "Suivi": [],
+    }
+
+    for rec in all_recs:
+        priority  = rec.get("priority", "LOW")
+        title     = rec.get("title", "")
+        category  = rec.get("category", "")
+        recs      = rec.get("recommendations", {})
+        nutrition = str(recs.get("nutrition", "")).strip()
+        suppl     = str(recs.get("supplementation", "")).strip()
+        lifestyle = str(recs.get("lifestyle", "")).strip()
+        monitoring= str(recs.get("monitoring", "")).strip()
+        desc      = str(rec.get("description", "")).strip()
+
+        # Ligne de résumé pour la section priorité
+        summary_line = title if title else category
+        if desc and desc != title:
+            summary_line += f" — {desc[:120]}"
+
+        if priority == "HIGH":
+            display["Prioritaires"].append(summary_line)
+        elif priority == "MEDIUM":
+            display["À surveiller"].append(summary_line)
+
+        if nutrition and nutrition != "nan":
+            display["Nutrition"].append(f"[{title}] {nutrition}")
+        if suppl and suppl != "nan":
+            display["Micronutrition"].append(f"[{title}] {suppl}")
+        if lifestyle and lifestyle != "nan":
+            display["Hygiène de vie"].append(f"[{title}] {lifestyle}")
+        if monitoring and monitoring != "nan":
+            display["Suivi"].append(f"[{title}] {monitoring}")
+
+    # Nettoyer les sections vides
+    return {k: v for k, v in display.items() if v}
+
+
 @st.cache_resource
 def _get_rules_engine():
     if not os.path.exists(RULES_EXCEL_PATH):
@@ -1312,7 +1368,7 @@ with tab3:
         st.warning("⚠️ Veuillez d'abord extraire les données")
     else:
         consolidated = st.session_state.consolidated_recommendations
-        recommendations = consolidated.get("recommendations", {})
+        recommendations = _build_display_recommendations(consolidated)
         
         with st.expander("🤖 Enrichissement IA - Recommandations Complètes", expanded=False):
             st.markdown("""
@@ -1680,7 +1736,7 @@ with tab5:
                             patient_data=st.session_state.patient_info,
                             biology_data=st.session_state.biology_df.to_dict('records'),
                             microbiome_data=st.session_state.microbiome_data,
-                            recommendations=st.session_state.edited_recommendations if st.session_state.ai_enrichment_active else consolidated.get("recommendations", {}),
+                            recommendations=st.session_state.edited_recommendations if st.session_state.ai_enrichment_active else _build_display_recommendations(st.session_state.consolidated_recommendations),
                             cross_analysis=st.session_state.cross_analysis,
                             follow_up=st.session_state.follow_up,
                             bio_age_result=st.session_state.bio_age_result,
