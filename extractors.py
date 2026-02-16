@@ -1,5 +1,5 @@
 """
-UNILABS / ALGO-LIFE - Extractors v18.1 FINAL WITH EXCEL MICROBIOME SUPPORT
+ALGO-LIFE - Extractors v18.1 FINAL WITH EXCEL MICROBIOME SUPPORT
 ✅ Extraction PDF biologie (SYNLAB/UNILABS)
 ✅ Extraction PDF microbiome (IDK GutMAP)
 ✅ Extraction Excel biologie
@@ -706,17 +706,15 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
 
 
 def extract_biology_from_excel(excel_path, progress=None):
-    """Extrait biomarqueurs depuis Excel"""
-    try:
-        if progress:
-            progress.update(10, "Lecture Excel...")
-        
-        df = pd.read_excel(excel_path)
-        col_name = None
-        col_value = None
-        col_unit = None
-        col_ref = None
-        
+    """Extrait biomarqueurs depuis Excel.
+    ✅ FIX v18.2: Détection automatique de la ligne d'en-tête.
+    Supporte les fichiers avec un titre fusionné en ligne 1
+    (en-têtes réels en ligne 2, donc skiprows=1).
+    """
+    
+    def _detect_columns(df):
+        """Cherche les colonnes utiles dans un DataFrame, retourne (col_name, col_value, col_unit, col_ref)."""
+        col_name = col_value = col_unit = col_ref = None
         for col in df.columns:
             col_lower = str(col).lower()
             if "biomarqueur" in col_lower or "marqueur" in col_lower or "paramètre" in col_lower:
@@ -727,6 +725,25 @@ def extract_biology_from_excel(excel_path, progress=None):
                 col_unit = col
             elif "référence" in col_lower or "norme" in col_lower or "range" in col_lower:
                 col_ref = col
+        return col_name, col_value, col_unit, col_ref
+    
+    try:
+        if progress:
+            progress.update(10, "Lecture Excel...")
+        
+        # Tentative 1 : header en ligne 1 (standard)
+        df = pd.read_excel(excel_path)
+        col_name, col_value, col_unit, col_ref = _detect_columns(df)
+        
+        # Tentative 2 : header en ligne 2 (ligne 1 = titre décoratif/fusionné)
+        if not col_name or not col_value:
+            df = pd.read_excel(excel_path, skiprows=1)
+            col_name, col_value, col_unit, col_ref = _detect_columns(df)
+        
+        # Tentative 3 : header en ligne 3 (double titre)
+        if not col_name or not col_value:
+            df = pd.read_excel(excel_path, skiprows=2)
+            col_name, col_value, col_unit, col_ref = _detect_columns(df)
         
         if not col_name or not col_value:
             return {}
