@@ -4,6 +4,7 @@ UNILABS - Rules Engine v10.0
 ✅ Support multimodal (Bio + Microbiote + Cross-analysis)
 ✅ Segmentation exacte : Prioritaires, À surveiller, Nutrition, Micronutrition, Hygiène de vie, Examens complémentaires, Suivi
 ✅ Génération robuste avec matching Excel puissant
+✅ FIX v10.1: Correction clé "bacteria" → "bacteria_groups" (ligne 672)
 """
 
 from __future__ import annotations
@@ -668,8 +669,10 @@ class RulesEngine:
                 else:
                     dysbiosis_level = "Sévère"
             
-            # Interprétation groupes bactériens
-            for bacteria in microbiome_data.get("bacteria", []):
+            # ✅ FIX v10.1: "bacteria" → "bacteria_groups" pour correspondre
+            # à la structure générée par extract_idk_microbiome() et
+            # extract_microbiome_from_excel() dans extractors.py
+            for bacteria in microbiome_data.get("bacteria_groups", []):
                 interp = self.interpret_microbiome_group(bacteria)
                 microbiome_details.append(interp)
                 
