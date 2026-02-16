@@ -597,7 +597,7 @@ def _generate_excel_export() -> bytes:
 def _bio_df_to_dict(bio_df: pd.DataFrame) -> Dict[str, Any]:
     """
     Convertit le DataFrame biologie en dict PLAT {biomarqueur: valeur_float}
-    compatible avec RulesEngine._evaluate_bio_rule() qui fait float(value).
+    compatible avec RulesEngine qui fait float(value).
     """
     if bio_df is None or bio_df.empty:
         return {}
@@ -617,53 +617,29 @@ def _bio_df_to_dict(bio_df: pd.DataFrame) -> Dict[str, Any]:
 
 
 def _build_display_recommendations(consolidated: dict) -> dict:
-    """
-    Convertit la structure du moteur {all:[{priority,title,recommendations:{...}}]}
-    en dict lisible pour le Tab 3 : {Prioritaires:[...], Nutrition:[...], ...}
-    """
+    """Convertit {all:[{priority,title,recommendations}]} → sections lisibles pour Tab3."""
     all_recs = consolidated.get("all", [])
     if not all_recs:
         return {}
-
-    display = {
-        "Prioritaires": [],
-        "À surveiller": [],
-        "Nutrition": [],
-        "Micronutrition": [],
-        "Hygiène de vie": [],
-        "Examens complémentaires": [],
-        "Suivi": [],
-    }
-
+    display = {"Prioritaires":[],"À surveiller":[],"Nutrition":[],
+               "Micronutrition":[],"Hygiène de vie":[],"Suivi":[]}
     for rec in all_recs:
-        priority  = rec.get("priority", "LOW")
-        title     = rec.get("title", "")
-        recs      = rec.get("recommendations", {})
-        nutrition = str(recs.get("nutrition", "")).strip()
-        suppl     = str(recs.get("supplementation", "")).strip()
-        lifestyle = str(recs.get("lifestyle", "")).strip()
-        monitoring= str(recs.get("monitoring", "")).strip()
-        desc      = str(rec.get("description", "")).strip()
-
-        summary = title if title else rec.get("category", "")
-        if desc and desc != title:
-            summary += f" — {desc[:150]}"
-
-        if priority == "HIGH":
-            display["Prioritaires"].append(summary)
-        elif priority == "MEDIUM":
-            display["À surveiller"].append(summary)
-
-        if nutrition  and nutrition  not in ("", "nan"):
-            display["Nutrition"].append(f"[{title}] {nutrition}" if title else nutrition)
-        if suppl      and suppl      not in ("", "nan"):
-            display["Micronutrition"].append(f"[{title}] {suppl}" if title else suppl)
-        if lifestyle  and lifestyle  not in ("", "nan"):
-            display["Hygiène de vie"].append(f"[{title}] {lifestyle}" if title else lifestyle)
-        if monitoring and monitoring not in ("", "nan"):
-            display["Suivi"].append(f"[{title}] {monitoring}" if title else monitoring)
-
-    return {k: v for k, v in display.items() if v}
+        priority   = rec.get("priority","LOW")
+        title      = rec.get("title","")
+        recs       = rec.get("recommendations",{})
+        nutrition  = str(recs.get("nutrition","")).strip()
+        suppl      = str(recs.get("supplementation","")).strip()
+        lifestyle  = str(recs.get("lifestyle","")).strip()
+        monitoring = str(recs.get("monitoring","")).strip()
+        desc       = str(rec.get("description","")).strip()
+        summary    = title + (f" — {desc[:150]}" if desc and desc != title else "")
+        if priority == "HIGH":   display["Prioritaires"].append(summary)
+        elif priority == "MEDIUM": display["À surveiller"].append(summary)
+        if nutrition   not in ("","nan"): display["Nutrition"].append(nutrition)
+        if suppl       not in ("","nan"): display["Micronutrition"].append(suppl)
+        if lifestyle   not in ("","nan"): display["Hygiène de vie"].append(lifestyle)
+        if monitoring  not in ("","nan"): display["Suivi"].append(monitoring)
+    return {k:v for k,v in display.items() if v}
 
 
 @st.cache_resource
@@ -1030,16 +1006,15 @@ with tab1:
                         bacteria = _microbiome_get_groups(microbiome_dict)
                         st.session_state.microbiome_df = _microbiome_to_dataframe(bacteria)
                     
-                    # ── Appel engine avec bio_data (dict) ──
+                    # ── Moteur de règles ──────────────────────────────
                     engine = _get_rules_engine()
                     if engine:
                         consolidated = engine.generate_consolidated_recommendations(
                             bio_data=_bio_df_to_dict(st.session_state.biology_df),
-                            microbiome_data=microbiome_dict if microbiome_dict else None,
+                            microbiome_data=st.session_state.microbiome_data if st.session_state.microbiome_data else None,
                             patient_info=st.session_state.patient_info
                         )
                         st.session_state.consolidated_recommendations = consolidated
-                        st.session_state.cross_analysis = consolidated.get("cross_analysis", [])
                     
                     if not st.session_state.biology_df.empty:
                         markers = _extract_biomarkers_for_bfrail(st.session_state.biology_df)
@@ -1517,7 +1492,7 @@ with tab3:
             st.markdown("---")
             st.markdown("### 📋 Recommandations du Système de Règles")
         
-        if not recommendations:
+        if not any(recommendations.values()) if recommendations else True:
             st.info("ℹ️ Aucune recommandation générée par le système de règles")
         else:
             for section_key, section_label, icon in [
