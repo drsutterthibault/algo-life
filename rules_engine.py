@@ -492,6 +492,152 @@ class RulesEngine:
         )
 
     # ─────────────────────────────────────────
+    # Consolidated (alias enrichi pour app.py)
+    # ─────────────────────────────────────────
+
+    def generate_consolidated_recommendations(
+        self,
+        bio_data: Dict,
+        microbiome_data: Optional[Dict] = None,
+        epigenetic_data: Optional[Dict] = None,
+        dxa_data: Optional[Dict] = None,
+        patient_info: Optional[Dict] = None,
+    ) -> Dict:
+        """
+        Génère des recommandations consolidées multi-modales.
+        Alias enrichi de generate_recommendations, compatible avec app.py.
+
+        Args:
+            bio_data: Données biologiques {marqueur: valeur}
+            microbiome_data: Données microbiome (optionnel)
+            epigenetic_data: Données épigénétiques (optionnel)
+            dxa_data: Données DXA composition corporelle (optionnel)
+            patient_info: Informations patient (âge, sexe, etc.) (optionnel)
+
+        Returns:
+            Dictionnaire consolidé avec recommandations structurées
+        """
+        # Générer les recommandations de base
+        base_results = self.generate_recommendations(
+            bio_data=bio_data,
+            microbiome_data=microbiome_data,
+            epigenetic_data=epigenetic_data,
+            dxa_data=dxa_data,
+        )
+
+        # Enrichissement avec métadonnées patient
+        patient_info = patient_info or {}
+
+        # Construire les axes thérapeutiques consolidés
+        axes = self._build_therapeutic_axes(base_results["all"])
+
+        # Score global de santé (0-100)
+        health_score = self._compute_health_score(base_results)
+
+        consolidated = {
+            # ── Données brutes ──────────────────────────────
+            "total": base_results["total"],
+            "all": base_results["all"],
+            "by_priority": base_results["by_priority"],
+            "by_category": base_results["by_category"],
+            "summary": base_results["summary"],
+
+            # ── Enrichissements consolidés ──────────────────
+            "health_score": health_score,
+            "axes": axes,
+            "patient_info": patient_info,
+
+            # ── Recommandations par domaine ─────────────────
+            "nutrition_recommendations": self._extract_domain(base_results["all"], "nutrition"),
+            "supplementation_recommendations": self._extract_domain(base_results["all"], "supplementation"),
+            "lifestyle_recommendations": self._extract_domain(base_results["all"], "lifestyle"),
+            "monitoring_recommendations": self._extract_domain(base_results["all"], "monitoring"),
+
+            # ── Sources de données utilisées ────────────────
+            "data_sources": {
+                "biology": bio_data is not None and len(bio_data) > 0,
+                "microbiome": microbiome_data is not None and len(microbiome_data) > 0,
+                "epigenetics": epigenetic_data is not None and len(epigenetic_data) > 0,
+                "dxa": dxa_data is not None and len(dxa_data) > 0,
+            },
+
+            # ── Alertes prioritaires ─────────────────────────
+            "alerts": [
+                r for r in base_results["all"]
+                if r.get("priority") == "HIGH"
+            ],
+        }
+
+        return consolidated
+
+    def _build_therapeutic_axes(self, recommendations: List[Dict]) -> Dict:
+        """Regroupe les recommandations par axe thérapeutique."""
+        axes = {
+            "metabolisme": [],
+            "inflammation": [],
+            "hormones": [],
+            "micronutrition": [],
+            "microbiome": [],
+            "epigenetique": [],
+            "cardiovasculaire": [],
+            "autre": [],
+        }
+
+        axis_keywords = {
+            "metabolisme":    ["métabol", "metabol", "glyc", "insuline", "glucose", "lipide"],
+            "inflammation":   ["inflamm", "crp", "cytokine", "oxydatif", "oxidat"],
+            "hormones":       ["hormone", "thyroid", "cortisol", "testosteron", "oestrog", "estrog", "dhea"],
+            "micronutrition": ["vitamine", "vitamin", "mineral", "magnesium", "zinc", "fer", "omega"],
+            "microbiome":     ["microbiome", "bacterie", "bactérie", "probiot", "prebiot", "intestin"],
+            "epigenetique":   ["epigenet", "methylat", "age biolog"],
+            "cardiovasculaire": ["cardio", "cardiovasc", "tension", "cholesterol", "triglyc"],
+        }
+
+        for rec in recommendations:
+            cat = (rec.get("category", "") + " " + rec.get("title", "")).lower()
+            placed = False
+            for axis, keywords in axis_keywords.items():
+                if any(kw in cat for kw in keywords):
+                    axes[axis].append(rec)
+                    placed = True
+                    break
+            if not placed:
+                axes["autre"].append(rec)
+
+        # Supprimer les axes vides
+        return {k: v for k, v in axes.items() if v}
+
+    def _compute_health_score(self, results: Dict) -> int:
+        """Calcule un score de santé global (0-100, 100 = optimal)."""
+        total = results.get("total", 0)
+        if total == 0:
+            return 95
+
+        high   = len(results["by_priority"].get("high", []))
+        medium = len(results["by_priority"].get("medium", []))
+        low    = len(results["by_priority"].get("low", []))
+
+        # Pénalités : HIGH -8pts, MEDIUM -3pts, LOW -1pt
+        penalty = (high * 8) + (medium * 3) + (low * 1)
+        score = max(0, min(100, 100 - penalty))
+        return score
+
+    def _extract_domain(self, recommendations: List[Dict], domain: str) -> List[str]:
+        """Extrait les recommandations d'un domaine spécifique (nutrition, etc.)."""
+        extracted = []
+        for rec in recommendations:
+            recs = rec.get("recommendations", {})
+            value = recs.get(domain, "")
+            if value and str(value).strip():
+                extracted.append({
+                    "rule_id": rec.get("rule_id"),
+                    "priority": rec.get("priority"),
+                    "title": rec.get("title"),
+                    "text": str(value).strip(),
+                })
+        return extracted
+
+    # ─────────────────────────────────────────
     # Infos & debug
     # ─────────────────────────────────────────
 
