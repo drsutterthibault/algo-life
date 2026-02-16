@@ -1,0 +1,514 @@
+"""
+ALGO-LIFE - PDF to Excel Converter v1.0
+✅ Conversion PDF biologie → Excel format AlgoLife (avec titre + sections colorées)
+✅ Conversion PDF microbiote → Excel format AlgoLife
+✅ Détection automatique du type de rapport (bio vs microbiote)
+"""
+
+from __future__ import annotations
+
+import io
+import re
+from datetime import datetime
+from typing import Dict, Any, Optional, List
+
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+
+# ─── Palette couleurs ───────────────────────────────────────────────
+_HEADER_BG  = "1F4E79"
+_HEADER_FG  = "FFFFFF"
+_SEC_BG     = "D6E4F0"
+_BAS_BG     = "FFF2CC"
+_ELEVE_BG   = "FCE4D6"
+_NORMAL_BG  = "E2EFDA"
+_INCONNU_BG = "F3F4F6"
+_MICRO_SEC  = "E8D5F5"   # violet clair pour sections microbiote
+_MICRO_HDR  = "6B21A8"  # violet foncé
+
+_thin = Side(style="thin", color="AAAAAA")
+_border = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+
+
+def _apply_header(cell, bg=_HEADER_BG, fg=_HEADER_FG):
+    cell.font = Font(bold=True, color=fg, name="Arial", size=11)
+    cell.fill = PatternFill("solid", start_color=bg)
+    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell.border = _border
+
+
+def _apply_section(cell, label, bg=_SEC_BG, fg="1F4E79"):
+    cell.value = label
+    cell.font = Font(bold=True, color=fg, name="Arial", size=10)
+    cell.fill = PatternFill("solid", start_color=bg)
+    cell.alignment = Alignment(horizontal="left", vertical="center")
+    cell.border = _border
+
+
+def _apply_data(cell, status=None):
+    cell.font = Font(name="Arial", size=10)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.border = _border
+    bg = {"Bas": _BAS_BG, "Élevé": _ELEVE_BG, "Normal": _NORMAL_BG}.get(status, _INCONNU_BG)
+    cell.fill = PatternFill("solid", start_color=bg)
+
+
+def _apply_name(cell, status=None):
+    cell.font = Font(name="Arial", size=10, bold=(status in ["Bas", "Élevé"]))
+    cell.alignment = Alignment(horizontal="left", vertical="center")
+    cell.border = _border
+    bg = {"Bas": _BAS_BG, "Élevé": _ELEVE_BG, "Normal": _NORMAL_BG}.get(status, _INCONNU_BG)
+    cell.fill = PatternFill("solid", start_color=bg)
+
+
+# ════════════════════════════════════════════════════════════════════
+# BIOLOGIE → EXCEL
+# ════════════════════════════════════════════════════════════════════
+
+# Mapping catégorie → libellé de section dans l'Excel
+_CATEGORY_ORDER = [
+    ("Hématologie",    "HÉMATOLOGIE"),
+    ("Martial",        "BILAN MARTIAL / ÉRYTHROCYTAIRE"),
+    ("Hépatique",      "BILAN HÉPATIQUE / PANCRÉATIQUE"),
+    ("Rénal",          "BILAN RÉNAL"),
+    ("Lipidique",      "BILAN LIPIDIQUE"),
+    ("Glucidique",     "MÉTABOLISME GLUCIDIQUE"),
+    ("Inflammatoire",  "BILAN INFLAMMATOIRE"),
+    ("Hormonal",       "HORMONOLOGIE"),
+    ("Vitamines",      "VITAMINES & MICRONUTRIMENTS"),
+    ("Autres",         "AUTRES"),
+]
+
+# Heuristique : associe mots-clés du nom de biomarqueur → catégorie
+_CATEGORY_RULES = [
+    (["hématie", "hémoglobine", "hematocrite", "vgm", "tcmh", "ccmh", "idr",
+      "leucocyte", "neutrophile", "éosinophile", "basophile", "lymphocyte",
+      "monocyte", "plaquette", "vpm", "nfs", "globule"],
+     "Hématologie"),
+    (["fer ", "ferritine", "transferrine", "saturation", "martial", "érythro"],
+     "Martial"),
+    (["tgo", "tgp", "asat", "alat", "ggt", "phosphatase", "bilirubine",
+      "transaminase", "hépatique", "pancréat", "amylase", "lipase"],
+     "Hépatique"),
+    (["créatinine", "urée", "dfg", "acide urique", "rénal", "sodium",
+      "potassium", "chlore", "calcium", "phosphore", "magnésium"],
+     "Rénal"),
+    (["cholestérol", "ldl", "hdl", "triglycéride", "lipide", "lipidique",
+      "lipoprotéine", "apolipoprotéine"],
+     "Lipidique"),
+    (["glycémie", "glucose", "hba1c", "insuline", "peptide c", "fructosamine"],
+     "Glucidique"),
+    (["crp", "protéine c réactive", "fibrinogène", "orosomucoïde",
+      "inflammation", "ferritine élevée"],
+     "Inflammatoire"),
+    (["tsh", "t3", "t4", "thyroïde", "cortisol", "dhea", "testostérone",
+      "oestradiol", "progestérone", "hormone", "lh", "fsh", "prolactine"],
+     "Hormonal"),
+    (["vitamine", "vitamin", "zinc", "magnésium", "sélénium", "iode",
+      "folate", "b12", "b9", "b6", "b1", "oméga"],
+     "Vitamines"),
+]
+
+
+def _guess_category(name: str) -> str:
+    n = name.lower()
+    for keywords, cat in _CATEGORY_RULES:
+        if any(k in n for k in keywords):
+            return cat
+    return "Autres"
+
+
+def biology_dict_to_excel_bytes(
+    biology_dict: Dict[str, Any],
+    patient_name: str = "Patient",
+    exam_date: Optional[str] = None,
+    lab_name: str = ""
+) -> bytes:
+    """
+    Convertit un dictionnaire biologie (issu de extract_synlab_biology ou
+    extract_biology_from_excel) en fichier Excel formaté AlgoLife.
+
+    Returns:
+        bytes: contenu du fichier .xlsx prêt pour st.download_button
+    """
+    date_str = exam_date or datetime.now().strftime("%d/%m/%Y")
+    title = f"BILAN BIOLOGIQUE – {patient_name.upper()} – {date_str}"
+    if lab_name:
+        title += f"  |  {lab_name}"
+
+    # Regrouper par catégorie
+    by_cat: Dict[str, List[Dict]] = {}
+    for name, data in biology_dict.items():
+        if not isinstance(data, dict):
+            continue
+        biomarker = str(name).strip()
+        if not biomarker or biomarker.lower() == "nan":
+            continue
+
+        val    = data.get("value", data.get("Valeur", ""))
+        unit   = str(data.get("unit",  data.get("Unité",  ""))).strip()
+        ref    = str(data.get("reference", data.get("Référence", ""))).strip()
+        status = str(data.get("status",  data.get("Statut",  "Inconnu"))).strip()
+        cat    = str(data.get("category", data.get("Catégorie", ""))).strip()
+        if not cat or cat.lower() == "nan":
+            cat = _guess_category(biomarker)
+
+        by_cat.setdefault(cat, []).append({
+            "name": biomarker, "value": val,
+            "unit": unit, "ref": ref, "status": status
+        })
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Biologie"
+
+    # ── Ligne 1 : titre ──────────────────────────────────────────────
+    ws.row_dimensions[1].height = 22
+    ws.merge_cells("A1:G1")
+    t = ws["A1"]
+    t.value = title
+    t.font = Font(bold=True, color=_HEADER_FG, name="Arial", size=12)
+    t.fill = PatternFill("solid", start_color=_HEADER_BG)
+    t.alignment = Alignment(horizontal="center", vertical="center")
+
+    # ── Ligne 2 : en-têtes colonnes ──────────────────────────────────
+    ws.row_dimensions[2].height = 26
+    headers = ["Biomarqueur", "Valeur", "Unité", "Référence", "Statut", "Catégorie", "Commentaire"]
+    for c, h in enumerate(headers, 1):
+        _apply_header(ws.cell(row=2, column=c, value=h))
+
+    # ── Données par sections ─────────────────────────────────────────
+    row = 3
+
+    # Respecter l'ordre défini, puis dump "Autres" catégories inconnues
+    ordered_cats = [cat for cat, _ in _CATEGORY_ORDER if cat in by_cat]
+    remaining    = [cat for cat in by_cat if cat not in ordered_cats]
+    cat_sequence = [(cat, dict(_CATEGORY_ORDER).get(cat, cat.upper()))
+                    for cat in ordered_cats + remaining]
+
+    for cat_key, cat_label in cat_sequence:
+        items = by_cat.get(cat_key, [])
+        if not items:
+            continue
+
+        # Ligne section
+        ws.row_dimensions[row].height = 17
+        ws.merge_cells(f"A{row}:G{row}")
+        _apply_section(ws[f"A{row}"], f"  {cat_label}")
+        row += 1
+
+        for item in items:
+            ws.row_dimensions[row].height = 17
+            st = item["status"]
+            cells = [
+                ws.cell(row=row, column=1, value=item["name"]),
+                ws.cell(row=row, column=2, value=item["value"]),
+                ws.cell(row=row, column=3, value=item["unit"]),
+                ws.cell(row=row, column=4, value=item["ref"]),
+                ws.cell(row=row, column=5, value=st),
+                ws.cell(row=row, column=6, value=cat_key),
+                ws.cell(row=row, column=7, value=""),
+            ]
+            _apply_name(cells[0], st)
+            for c in cells[1:]:
+                _apply_data(c, st)
+            row += 1
+
+    # ── Feuille résumé anomalies ─────────────────────────────────────
+    ws2 = wb.create_sheet("Anomalies")
+    ws2.row_dimensions[1].height = 22
+    ws2.merge_cells("A1:E1")
+    t2 = ws2["A1"]
+    t2.value = f"ANOMALIES – {patient_name.upper()} – {date_str}"
+    t2.font = Font(bold=True, color=_HEADER_FG, name="Arial", size=12)
+    t2.fill = PatternFill("solid", start_color="C00000")
+    t2.alignment = Alignment(horizontal="center", vertical="center")
+
+    for c, h in enumerate(["Biomarqueur", "Valeur", "Unité", "Référence", "Statut"], 1):
+        _apply_header(ws2.cell(row=2, column=c))
+        ws2.cell(row=2, column=c).value = h
+
+    anom_row = 3
+    for cat_key, _ in cat_sequence:
+        for item in by_cat.get(cat_key, []):
+            if item["status"] in ["Bas", "Élevé"]:
+                ws2.row_dimensions[anom_row].height = 17
+                for c, v in enumerate([item["name"], item["value"],
+                                        item["unit"], item["ref"],
+                                        item["status"]], 1):
+                    cell = ws2.cell(row=anom_row, column=c, value=v)
+                    _apply_data(cell, item["status"])
+                    cell.alignment = Alignment(
+                        horizontal="left" if c == 1 else "center",
+                        vertical="center"
+                    )
+                anom_row += 1
+
+    if anom_row == 3:
+        ws2.cell(row=3, column=1, value="✅ Aucune anomalie détectée").font = \
+            Font(italic=True, color="065F46", name="Arial")
+
+    # ── Largeurs colonnes ────────────────────────────────────────────
+    for ws_obj in [ws, ws2]:
+        for i, w in enumerate([42, 10, 12, 18, 12, 18, 40], 1):
+            ws_obj.column_dimensions[get_column_letter(i)].width = w
+
+    ws.freeze_panes  = "A3"
+    ws2.freeze_panes = "A3"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ════════════════════════════════════════════════════════════════════
+# MICROBIOTE → EXCEL
+# ════════════════════════════════════════════════════════════════════
+
+def microbiome_dict_to_excel_bytes(
+    microbiome_dict: Dict[str, Any],
+    patient_name: str = "Patient",
+    exam_date: Optional[str] = None
+) -> bytes:
+    """
+    Convertit un dictionnaire microbiome (issu de extract_idk_microbiome)
+    en fichier Excel formaté AlgoLife (format attendu par extract_microbiome_from_excel).
+
+    Returns:
+        bytes: contenu du fichier .xlsx prêt pour st.download_button
+    """
+    date_str = exam_date or datetime.now().strftime("%d/%m/%Y")
+
+    wb = Workbook()
+
+    # ── Feuille 1 : Informations Patient ────────────────────────────
+    ws_info = wb.active
+    ws_info.title = "Informations Patient"
+    ws_info.column_dimensions["A"].width = 35
+    ws_info.column_dimensions["B"].width = 30
+
+    ws_info.merge_cells("A1:B1")
+    t = ws_info["A1"]
+    t.value = f"MICROBIOTE – {patient_name.upper()} – {date_str}"
+    t.font = Font(bold=True, color=_HEADER_FG, name="Arial", size=12)
+    t.fill = PatternFill("solid", start_color=_MICRO_HDR)
+    t.alignment = Alignment(horizontal="center", vertical="center")
+    ws_info.row_dimensions[1].height = 22
+
+    _apply_header(ws_info.cell(row=2, column=1, value="Champ"),
+                  bg=_MICRO_HDR)
+    _apply_header(ws_info.cell(row=2, column=2, value="Valeur"),
+                  bg=_MICRO_HDR)
+
+    di       = microbiome_dict.get("dysbiosis_index")
+    di_text  = microbiome_dict.get("dysbiosis_text", "")
+    diversity = microbiome_dict.get("diversity", "")
+
+    info_rows = [
+        ("Dysbiosis Index",  f"{di}/5 – {di_text}" if di is not None else "—"),
+        ("Diversité",        diversity or "—"),
+        ("Date analyse",     date_str),
+        ("Patient",          patient_name),
+    ]
+    for r, (champ, valeur) in enumerate(info_rows, 3):
+        ws_info.row_dimensions[r].height = 17
+        c1 = ws_info.cell(row=r, column=1, value=champ)
+        c2 = ws_info.cell(row=r, column=2, value=valeur)
+        for c in [c1, c2]:
+            c.font = Font(name="Arial", size=10)
+            c.border = _border
+            c.alignment = Alignment(horizontal="left", vertical="center")
+
+    # ── Feuille 2 : Biomarqueurs Base ────────────────────────────────
+    ws_bio = wb.create_sheet("Biomarqueurs Base")
+    ws_bio.merge_cells("A1:E1")
+    t2 = ws_bio["A1"]
+    t2.value = "BIOMARQUEURS DE BASE (SELLES)"
+    t2.font = Font(bold=True, color=_HEADER_FG, name="Arial", size=11)
+    t2.fill = PatternFill("solid", start_color=_MICRO_HDR)
+    t2.alignment = Alignment(horizontal="center", vertical="center")
+    ws_bio.row_dimensions[1].height = 20
+
+    for c, h in enumerate(["Biomarqueur", "Valeur", "Unité", "Référence", "Statut"], 1):
+        _apply_header(ws_bio.cell(row=2, column=c), bg=_MICRO_HDR)
+        ws_bio.cell(row=2, column=c).value = h
+
+    stool = microbiome_dict.get("stool_biomarkers", {})
+    sb_row = 3
+    for bname, bdata in (stool.items() if isinstance(stool, dict) else []):
+        ws_bio.row_dimensions[sb_row].height = 17
+        st_val = bdata.get("status", "Normal") if isinstance(bdata, dict) else "Normal"
+        vals = [
+            bname,
+            bdata.get("value", "") if isinstance(bdata, dict) else bdata,
+            bdata.get("unit",  "") if isinstance(bdata, dict) else "",
+            bdata.get("reference", "") if isinstance(bdata, dict) else "",
+            st_val,
+        ]
+        for c, v in enumerate(vals, 1):
+            cell = ws_bio.cell(row=sb_row, column=c, value=v)
+            _apply_data(cell, st_val)
+            cell.alignment = Alignment(
+                horizontal="left" if c == 1 else "center",
+                vertical="center"
+            )
+        sb_row += 1
+
+    if sb_row == 3:
+        ws_bio.cell(row=3, column=1,
+                    value="Aucun biomarqueur de selles disponible").font = \
+            Font(italic=True, color="6B7280", name="Arial")
+
+    for i, w in enumerate([35, 12, 10, 18, 14], 1):
+        ws_bio.column_dimensions[get_column_letter(i)].width = w
+    ws_bio.freeze_panes = "A3"
+
+    # ── Feuille 3 : Microbiome Détaillé ─────────────────────────────
+    ws_micro = wb.create_sheet("Microbiome Détaillé")
+    ws_micro.merge_cells("A1:G1")
+    t3 = ws_micro["A1"]
+    t3.value = "MICROBIOME DÉTAILLÉ – GROUPES & BACTÉRIES INDIVIDUELLES"
+    t3.font = Font(bold=True, color=_HEADER_FG, name="Arial", size=11)
+    t3.fill = PatternFill("solid", start_color=_MICRO_HDR)
+    t3.alignment = Alignment(horizontal="center", vertical="center")
+    ws_micro.row_dimensions[1].height = 20
+
+    headers_m = ["Catégorie", "Groupe", "No.", "Bactérie", "Position", "Statut", "Interprétation"]
+    for c, h in enumerate(headers_m, 1):
+        _apply_header(ws_micro.cell(row=2, column=c), bg=_MICRO_HDR)
+        ws_micro.cell(row=2, column=c).value = h
+
+    _STATUS_COLOR = {
+        "Strongly Reduced": "DBEAFE",
+        "Reduced":          "BFDBFE",
+        "Normal":           _NORMAL_BG,
+        "Slightly Elevated":"FEF3C7",
+        "Elevated":         _ELEVE_BG,
+        "Strongly Elevated":"FECACA",
+    }
+
+    micro_row = 3
+    bacteria_individual = microbiome_dict.get("bacteria_individual", [])
+    bacteria_groups     = microbiome_dict.get("bacteria_groups", [])
+
+    # Index groupe → nom
+    group_map = {g.get("category", ""): g.get("name", "") for g in bacteria_groups}
+
+    # Construire les données groupées
+    by_group: Dict[str, List] = {}
+    for b in bacteria_individual:
+        cat = b.get("category", "")
+        by_group.setdefault(cat, []).append(b)
+
+    # Si pas de bacteria_individual, fallback sur bacteria_groups seuls
+    if not by_group and bacteria_groups:
+        for g in bacteria_groups:
+            cat   = g.get("category", "")
+            gname = g.get("name", g.get("group", ""))
+            result = g.get("result", g.get("abundance", "Expected"))
+            pos = 0
+            if "Strongly" in result:   pos = 2
+            elif "Slightly" in result: pos = 1
+            elif "Deviating" in result: pos = 2
+
+            by_group.setdefault(cat, []).append({
+                "id": "",
+                "name": gname,
+                "category": cat,
+                "group": gname,
+                "abundance_level": pos,
+                "status": result
+            })
+
+    for cat_code in sorted(by_group.keys()):
+        group_name = group_map.get(cat_code, cat_code)
+        items = by_group[cat_code]
+
+        # Ligne de section groupe
+        ws_micro.row_dimensions[micro_row].height = 17
+        ws_micro.merge_cells(f"A{micro_row}:G{micro_row}")
+        _apply_section(
+            ws_micro[f"A{micro_row}"],
+            f"  {cat_code} — {group_name}",
+            bg=_MICRO_SEC, fg=_MICRO_HDR
+        )
+        micro_row += 1
+
+        for b in items:
+            ws_micro.row_dimensions[micro_row].height = 16
+            status = b.get("status", "Normal")
+            pos    = b.get("abundance_level", 0)
+            bg     = _STATUS_COLOR.get(status, _INCONNU_BG)
+
+            row_vals = [
+                b.get("category", cat_code),
+                b.get("group", group_name),
+                b.get("id", ""),
+                b.get("name", ""),
+                pos,
+                status,
+                "",
+            ]
+            for c, v in enumerate(row_vals, 1):
+                cell = ws_micro.cell(row=micro_row, column=c, value=v)
+                cell.font = Font(name="Arial", size=9)
+                cell.fill = PatternFill("solid", start_color=bg)
+                cell.alignment = Alignment(
+                    horizontal="left" if c in [2, 4] else "center",
+                    vertical="center"
+                )
+                cell.border = _border
+            micro_row += 1
+
+    for i, w in enumerate([14, 32, 6, 32, 10, 20, 30], 1):
+        ws_micro.column_dimensions[get_column_letter(i)].width = w
+    ws_micro.freeze_panes = "A3"
+
+    # ── Feuille 4 : Résumé Catégories ───────────────────────────────
+    ws_sum = wb.create_sheet("Résumé Catégories")
+    ws_sum.merge_cells("A1:D1")
+    t4 = ws_sum["A1"]
+    t4.value = "RÉSUMÉ PAR CATÉGORIES"
+    t4.font = Font(bold=True, color=_HEADER_FG, name="Arial", size=11)
+    t4.fill = PatternFill("solid", start_color=_MICRO_HDR)
+    t4.alignment = Alignment(horizontal="center", vertical="center")
+    ws_sum.row_dimensions[1].height = 20
+
+    for c, h in enumerate(["Catégorie", "Nom", "Résultat", "Nb bactéries"], 1):
+        _apply_header(ws_sum.cell(row=2, column=c), bg=_MICRO_HDR)
+        ws_sum.cell(row=2, column=c).value = h
+
+    sum_row = 3
+    for g in bacteria_groups:
+        ws_sum.row_dimensions[sum_row].height = 17
+        result = g.get("result", g.get("abundance", "Expected"))
+        bg = _NORMAL_BG
+        if "Strongly" in result or ("Deviating" in result and "Slightly" not in result):
+            bg = _ELEVE_BG
+        elif "Slightly" in result:
+            bg = _BAS_BG
+
+        for c, v in enumerate([
+            g.get("category", ""),
+            g.get("name", g.get("group", "")),
+            result,
+            len(by_group.get(g.get("category", ""), []))
+        ], 1):
+            cell = ws_sum.cell(row=sum_row, column=c, value=v)
+            cell.font = Font(name="Arial", size=10)
+            cell.fill = PatternFill("solid", start_color=bg)
+            cell.alignment = Alignment(horizontal="left" if c <= 2 else "center",
+                                        vertical="center")
+            cell.border = _border
+        sum_row += 1
+
+    for i, w in enumerate([12, 38, 22, 14], 1):
+        ws_sum.column_dimensions[get_column_letter(i)].width = w
+    ws_sum.freeze_panes = "A3"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
