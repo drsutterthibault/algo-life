@@ -533,7 +533,17 @@ def generate_multimodal_report(
     ai_enrichment = None
     if STREAMLIT_AVAILABLE and hasattr(st, 'session_state'):
         if st.session_state.get('ai_enrichment_active') and st.session_state.get('ai_enrichment_output'):
-            ai_enrichment = st.session_state.ai_enrichment_output
+            # Utiliser les recommandations éditées si disponibles, sinon l'output IA brut
+            raw_ai = st.session_state.ai_enrichment_output
+            edited = st.session_state.get('edited_recommendations', {})
+            ai_enrichment = {
+                'synthese_enrichie':        edited.get('synthese_enrichie', raw_ai.get('synthese_enrichie', '')),
+                'nutrition_enrichie':       edited.get('nutrition_enrichie', raw_ai.get('nutrition_enrichie', [])),
+                'micronutrition_enrichie':  edited.get('micronutrition_enrichie', raw_ai.get('micronutrition_enrichie', [])),
+                'lifestyle_enrichi':        edited.get('lifestyle_enrichi', raw_ai.get('lifestyle_enrichi', [])),
+                'activite_physique_enrichie': edited.get('activite_physique_enrichie', raw_ai.get('activite_physique_enrichie', [])),
+                'contexte_applique':        raw_ai.get('contexte_applique', ''),
+            }
 
     if output_path is None:
         import tempfile
@@ -560,7 +570,7 @@ def generate_multimodal_report(
         [[Paragraph("RAPPORT D'ANALYSES BIOLOGIQUES",
                     ParagraphStyle('CT2', fontName=_F(bold=True), fontSize=24,
                                    textColor=C['white'], alignment=TA_CENTER, leading=30))],
-         [Paragraph("Biologie Fonctionnelle &amp; Microbiote",
+         [Paragraph("Analyse Multimodale en Biologie Fonctionnelle",
                     ParagraphStyle('CS2', fontName=_F(), fontSize=13,
                                    textColor=colors.HexColor('#A5C8E8'),
                                    alignment=TA_CENTER, leading=18))]],
@@ -577,7 +587,7 @@ def generate_multimodal_report(
     story.append(Spacer(1, 0.5*cm))
 
     # ✅ Neutre (plus de Unilabs/EspaceLab)
-    story.append(_para("Rapport de Biologie Fonctionnelle &amp; Microbiote", S['cover_lab']))
+    story.append(_para("Analyse Multimodale en Biologie Fonctionnelle", S['cover_lab']))
     story.append(Spacer(1, 1.5*cm))
 
     # Fiche patient
@@ -999,6 +1009,12 @@ def generate_multimodal_report(
         story.extend(_reco_card('MICRONUTRITION (IA)',
             ai_enrichment.get('micronutrition_enrichie', []),
             'M>', C['blue_bg'], C['blue_lt'], S))
+        story.extend(_reco_card('HYGIENE DE VIE & BIEN-ETRE (IA)',
+            ai_enrichment.get('lifestyle_enrichi', []),
+            'L>', C['purple_bg'], C['purple'], S))
+        story.extend(_reco_card('ACTIVITE PHYSIQUE (IA)',
+            ai_enrichment.get('activite_physique_enrichie', []),
+            'A>', C['amber_bg'], C['amber'], S))
         story.append(PageBreak())
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1022,6 +1038,48 @@ def generate_multimodal_report(
 
         if suivi_rows:
             story.append(_kv_table(suivi_rows, col_w=(5*cm, W-5*cm)))
+            story.append(Spacer(1, 0.5*cm))
+
+        # Biomarqueurs à surveiller (du bilan actuel)
+        biomarkers_to_follow = follow_up.get('biomarkers_to_follow', [])
+        additional_biomarkers = follow_up.get('additional_biomarkers_to_follow', [])
+        all_follow_markers = list(biomarkers_to_follow) + list(additional_biomarkers)
+
+        if all_follow_markers:
+            story.append(_para('BIOMARQUEURS A SURVEILLER AU PROCHAIN BILAN', S['subsection']))
+            story.append(Spacer(1, 0.3*cm))
+
+            marker_rows = []
+            ps_marker = ParagraphStyle('MK', fontName=_F(), fontSize=9, leading=13,
+                                       textColor=C['gray_dark'])
+            ps_dot    = ParagraphStyle('MD', fontName=_F(bold=True), fontSize=9,
+                                       textColor=C['blue_lt'], alignment=TA_CENTER)
+            for marker in all_follow_markers:
+                label = 'Du bilan actuel' if marker in biomarkers_to_follow else 'Additionnel'
+                marker_rows.append([
+                    Paragraph('>', ps_dot),
+                    Paragraph(_clean(str(marker)), ps_marker),
+                    Paragraph(label, ParagraphStyle('ML', fontName=_F(italic=True),
+                              fontSize=8, textColor=C['gray'], alignment=TA_CENTER)),
+                ])
+
+            if marker_rows:
+                marker_tbl = Table(marker_rows, colWidths=[1*cm, W-4*cm, 3*cm])
+                marker_tbl.setStyle(TableStyle([
+                    ('BACKGROUND',    (0,0), (-1,-1), C['blue_bg']),
+                    ('TOPPADDING',    (0,0), (-1,-1), 7),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 7),
+                    ('LEFTPADDING',   (0,0), (0,-1),  6),
+                    ('LEFTPADDING',   (1,0), (1,-1),  8),
+                    ('RIGHTPADDING',  (0,0), (-1,-1), 8),
+                    ('LINEBELOW',     (0,0), (-1,-2), 0.2, C['gray_bd']),
+                    ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+                    ('ALIGN',         (0,0), (0,-1),  'CENTER'),
+                    ('ALIGN',         (2,0), (2,-1),  'CENTER'),
+                    ('BOX',           (0,0), (-1,-1), 0.5, C['blue_lt']),
+                ]))
+                story.append(marker_tbl)
+
         story.append(PageBreak())
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1077,3 +1135,4 @@ generate_report = generate_multimodal_report
 
 if __name__ == "__main__":
     print("PDF Generator ALGO-LIFE v2 — design pro, Liberation Sans, pas d emojis")
+    
