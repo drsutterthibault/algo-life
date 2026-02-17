@@ -1439,12 +1439,20 @@ with tab3:
                     """, unsafe_allow_html=True)
                     
                     with st.expander("✏️ Éditer les recommandations", expanded=False):
-                        for i, item in enumerate(st.session_state.edited_recommendations[items_key]):
+                        # Gestion suppression via pending delete pour éviter les conflits de clés
+                        ai_pending_key = f"_pending_del_ai_{items_key}"
+                        if ai_pending_key in st.session_state:
+                            idx_to_del = st.session_state.pop(ai_pending_key)
+                            if 0 <= idx_to_del < len(st.session_state.edited_recommendations[items_key]):
+                                st.session_state.edited_recommendations[items_key].pop(idx_to_del)
+                            st.rerun()
+
+                        for i in range(len(st.session_state.edited_recommendations[items_key])):
                             col1, col2 = st.columns([5, 1])
                             with col1:
                                 edited = st.text_area(
                                     f"Reco {i+1}",
-                                    value=item,
+                                    value=st.session_state.edited_recommendations[items_key][i],
                                     height=80,
                                     key=f"edit_{items_key}_{i}",
                                     label_visibility="collapsed"
@@ -1452,7 +1460,7 @@ with tab3:
                                 st.session_state.edited_recommendations[items_key][i] = edited
                             with col2:
                                 if st.button("🗑️", key=f"del_{items_key}_{i}", help="Supprimer"):
-                                    st.session_state.edited_recommendations[items_key].pop(i)
+                                    st.session_state[ai_pending_key] = i
                                     st.rerun()
                         
                         new_item = st.text_area(
@@ -1525,13 +1533,21 @@ with tab3:
 
                     st.markdown("---")
                     with st.expander("✏️ Éditer cette section", expanded=False):
-                        edited_section = list(st.session_state.rule_edited_recommendations[section_key])
-                        for i, item in enumerate(edited_section):
+                        # Gestion suppression : on stocke l'index à supprimer APRÈS la boucle
+                        pending_delete_key = f"_pending_del_{section_key}"
+                        if pending_delete_key in st.session_state:
+                            idx_to_del = st.session_state.pop(pending_delete_key)
+                            if 0 <= idx_to_del < len(st.session_state.rule_edited_recommendations[section_key]):
+                                st.session_state.rule_edited_recommendations[section_key].pop(idx_to_del)
+                            st.rerun()
+
+                        current_items = st.session_state.rule_edited_recommendations[section_key]
+                        for i in range(len(current_items)):
                             col_txt, col_del = st.columns([5, 1])
                             with col_txt:
                                 new_val = st.text_area(
                                     f"Item {i+1}",
-                                    value=item,
+                                    value=current_items[i],
                                     height=70,
                                     key=f"rule_edit_{section_key}_{i}",
                                     label_visibility="collapsed"
@@ -1539,7 +1555,7 @@ with tab3:
                                 st.session_state.rule_edited_recommendations[section_key][i] = new_val
                             with col_del:
                                 if st.button("🗑️", key=f"rule_del_{section_key}_{i}", help="Supprimer"):
-                                    st.session_state.rule_edited_recommendations[section_key].pop(i)
+                                    st.session_state[pending_delete_key] = i
                                     st.rerun()
 
                         new_item_rule = st.text_area(
