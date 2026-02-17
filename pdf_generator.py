@@ -183,7 +183,8 @@ def _parse_reference(ref_str):
     if not ref_str or str(ref_str).strip() == '':
         return None, None, None
     ref = str(ref_str).strip()
-    m = re.search(r'(\d+\.?\d*)\s*[-\u2013\u2014]\s*(\d+\.?\d*)', ref)
+    # Formats plage : "0.74 à 1.06", "40 - 62", "11.5 - 16.0", tirets longs
+    m = re.search(r'(\d+\.?\d*)\s*(?:[-\u2013\u2014]|\s+\u00e0\s+|à)\s*(\d+\.?\d*)', ref)
     if m:
         return _safe_float(m.group(1)), _safe_float(m.group(2)), 'range'
     m = re.search(r'[<\u2264]\s*(\d+\.?\d*)', ref)
@@ -1135,4 +1136,3 @@ generate_report = generate_multimodal_report
 
 if __name__ == "__main__":
     print("PDF Generator ALGO-LIFE v2 — design pro, Liberation Sans, pas d emojis")
-    
