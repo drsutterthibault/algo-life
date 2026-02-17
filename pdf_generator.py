@@ -3,6 +3,12 @@
 PDF Generator - ALGO-LIFE
 Design v2 : Liberation Sans, pas d'emojis, mise en page professionnelle
 Meme logique/donnees que v7, uniquement le rendu visuel est ameliore.
+
+PATCHES APPLIQUÉS (sans casser ta logique Bio/Microbiote/Reco/Cross) :
+1) Fix chevauchement biomarqueurs (barre Drawing + paddings cohérents, texte statut lisible)
+2) Suppression de toutes références Unilabs / EspaceLab
+3) Header/Footer désactivés sur la page 1 (couverture) pour éviter chevauchements
+4) _section_header accepte width (on passe W utile partout où possible)
 """
 
 import os
@@ -10,7 +16,7 @@ import re
 from datetime import datetime
 
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import cm
+from reportlab.lib.units import cm, mm
 from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
@@ -96,7 +102,7 @@ DEFAULT_LOGO = "/dna_logo.png"
 def _build_styles():
     _register_fonts()
     S = {}
-    base = getSampleStyleSheet()
+    _ = getSampleStyleSheet()
 
     S['cover_title'] = ParagraphStyle('CoverTitle',
         fontName=_F(bold=True), fontSize=28, leading=36,
@@ -108,7 +114,7 @@ def _build_styles():
 
     S['cover_lab'] = ParagraphStyle('CoverLab',
         fontName=_F(italic=True), fontSize=11, leading=14,
-        textColor=C['gray'], alignment=TA_CENTER, spaceAfter=18)
+        textColor=C['gray'], alignment=TA_CENTER, spaceAfter=20)
 
     S['section'] = ParagraphStyle('Section',
         fontName=_F(bold=True), fontSize=16, leading=20,
@@ -118,7 +124,7 @@ def _build_styles():
         fontName=_F(bold=True), fontSize=12, leading=16,
         textColor=C['blue'], spaceBefore=10, spaceAfter=6)
 
-    # IMPORTANT: leading un peu augmenté pour limiter les chevauchements
+    # leading un peu augmenté => moins de collisions en cas de texte dense
     S['body'] = ParagraphStyle('Body',
         fontName=_F(), fontSize=9.5, leading=14.5,
         textColor=C['gray_dark'], spaceAfter=4)
@@ -146,6 +152,18 @@ def _build_styles():
     S['reco_item_bold'] = ParagraphStyle('RecoItemBold',
         fontName=_F(bold=True), fontSize=9.5, leading=14.5,
         textColor=C['gray_dark'], spaceAfter=3)
+
+    S['tag_normal'] = ParagraphStyle('TagNormal',
+        fontName=_F(bold=True), fontSize=8,
+        textColor=C['green'], alignment=TA_CENTER)
+
+    S['tag_high'] = ParagraphStyle('TagHigh',
+        fontName=_F(bold=True), fontSize=8,
+        textColor=C['red'], alignment=TA_CENTER)
+
+    S['tag_low'] = ParagraphStyle('TagLow',
+        fontName=_F(bold=True), fontSize=8,
+        textColor=C['amber'], alignment=TA_CENTER)
 
     return S
 
@@ -177,6 +195,7 @@ def _parse_reference(ref_str):
     return None, None, None
 
 def _clean(text):
+    """Nettoie les caracteres Unicode problematiques pour ReportLab."""
     if not text:
         return ''
     subs = {
@@ -186,6 +205,7 @@ def _clean(text):
         '\u00b5': 'u', '\u03bc': 'u', '\u2192': '->', '\u2193': 'v',
         '\u2191': '^', '\u25ba': '>', '\u2022': '-', '\u00ae': '(R)',
         '\u2264': '<=', '\u2265': '>=', '\u00d7': 'x',
+        '\u26a0': '[!]', '\u2139': '[i]',
     }
     for bad, good in subs.items():
         text = text.replace(bad, good)
@@ -212,21 +232,18 @@ def _divider(color=None):
                       color=color or C['rule'], spaceAfter=6, spaceBefore=6)
 
 def _section_header(title, S, color=None, bg=None, width=None):
-    """Bande coloree pour les titres de section (width = largeur utile)."""
+    """Bande coloree pour les titres de section."""
     col = color or C['navy']
     bg_col = bg or C['blue_bg']
     t = _clean(title).replace('&', '&amp;')
-
-    if width is None:
-        width = 17.4 * cm  # fallback
+    w = width if width is not None else 17 * cm
 
     data = [[Paragraph(
         f'<font color="#{col.hexval()[2:].upper()}">{t}</font>',
         ParagraphStyle('SH', fontName=_F(bold=True), fontSize=14,
                        leading=18, textColor=col)
     )]]
-
-    tbl = Table(data, colWidths=[width])
+    tbl = Table(data, colWidths=[w])
     tbl.setStyle(TableStyle([
         ('BACKGROUND',    (0,0), (-1,-1), bg_col),
         ('LEFTPADDING',   (0,0), (-1,-1), 14),
@@ -238,6 +255,7 @@ def _section_header(title, S, color=None, bg=None, width=None):
     return tbl
 
 def _kv_table(rows, col_w=(9*cm, 8*cm), header=None, header_color=None):
+    """Tableau cle-valeur avec header optionnel."""
     hc = header_color or C['navy']
     data = []
     styles_t = [
@@ -278,6 +296,7 @@ def _kv_table(rows, col_w=(9*cm, 8*cm), header=None, header_color=None):
     return tbl
 
 def _status_colors(status):
+    """Retourne (label, text_color, bg_color) selon statut."""
     s = str(status).upper()
     if 'TRES' in s and any(x in s for x in ('ELEV', 'HIGH')):
         return 'TRES ELEVE', C['red'],   C['red_bg']
@@ -289,14 +308,17 @@ def _status_colors(status):
         return 'BAS',        C['amber'], C['amber_bg']
     return 'Normal',         C['green'], C['green_bg']
 
+
+# ✅ PATCH CHEVAUCHEMENT : barre dimensionnée selon paddings réels
 def _biomarker_card(name, value, unit, reference, status, S):
     """
-    Carte biomarqueur : 9cm | 5.5cm | 2.5cm
-    Ajustements anti-chevauchement : leading/padding légèrement augmentés.
+    Carte biomarqueur simple : 1 ligne, 3 colonnes.
+    NOM + VALEUR (9cm) | BARRE (5.5cm) | STATUT (2.5cm)
+    Total = 17cm. Aucune cellule vide, aucun SPAN.
     """
     lbl, col, bg = _status_colors(status)
 
-    clean_name = _clean(str(name))[:70]  # un peu plus permissif, mais Paragraph wrap gère
+    clean_name = _clean(str(name))[:55]
     val_str    = _clean(f"{value} {unit}".strip()) if value is not None else "N/A"
     ref_str    = f"Ref : {_clean(str(reference))}" if reference else ""
 
@@ -306,6 +328,8 @@ def _biomarker_card(name, value, unit, reference, status, S):
                              fontSize=12, textColor=col, leading=14, spaceAfter=2)
     ps_ref  = ParagraphStyle('BR', fontName=_F(italic=True),
                              fontSize=7.5, textColor=C['gray'], leading=10)
+
+    # texte blanc sur fond couleur
     ps_lbl  = ParagraphStyle('BL', fontName=_F(bold=True), fontSize=9,
                              textColor=C['white'], alignment=TA_CENTER, leading=11)
 
@@ -316,8 +340,14 @@ def _biomarker_card(name, value, unit, reference, status, S):
     if ref_str:
         left_content.append(Paragraph(ref_str, ps_ref))
 
+    # ---- Barre: largeur réelle dispo = colWidth - (padding L+R)
+    BAR_COL_W = 5.5 * cm
+    PAD_BAR_L = 6
+    PAD_BAR_R = 6
+    BAR_W = int(BAR_COL_W - (PAD_BAR_L + PAD_BAR_R))
+    BAR_H = 10
+
     min_val, max_val, ref_type = _parse_reference(reference)
-    BAR_W, BAR_H = 155, 10
     d = Drawing(BAR_W, BAR_H)
     d.add(Rect(0, 1, BAR_W, BAR_H-2, fillColor=C['gray_bd'], strokeColor=None))
 
@@ -331,6 +361,7 @@ def _biomarker_card(name, value, unit, reference, status, S):
             pos = 0.5
         d.add(Circle(BAR_W * pos, BAR_H / 2, 5,
                      fillColor=col, strokeColor=C['white'], strokeWidth=1.5))
+
     elif ref_type == 'max' and max_val:
         try:
             vf = _safe_float(value)
@@ -345,15 +376,16 @@ def _biomarker_card(name, value, unit, reference, status, S):
     card.setStyle(TableStyle([
         ('BACKGROUND',    (0,0), (1,0),  bg),
         ('BACKGROUND',    (2,0), (2,0),  col),
-
-        # padding un peu plus haut -> moins de chevauchement interne
-        ('TOPPADDING',    (0,0), (-1,-1), 10),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('TOPPADDING',    (0,0), (-1,-1), 9),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 9),
 
         ('LEFTPADDING',   (0,0), (0,0),  14),
-        ('LEFTPADDING',   (1,0), (1,0),  8),
+        ('RIGHTPADDING',  (0,0), (0,0),  8),
+
+        ('LEFTPADDING',   (1,0), (1,0),  PAD_BAR_L),
+        ('RIGHTPADDING',  (1,0), (1,0),  PAD_BAR_R),
+
         ('LEFTPADDING',   (2,0), (2,0),  4),
-        ('RIGHTPADDING',  (0,0), (1,0),  8),
         ('RIGHTPADDING',  (2,0), (2,0),  4),
 
         ('VALIGN',        (0,0), (1,0),  'MIDDLE'),
@@ -367,6 +399,7 @@ def _biomarker_card(name, value, unit, reference, status, S):
 
 
 def _reco_card(title, items, icon_char, bg, border, S, max_items=None):
+    """Carte recommandations : header coloré + tableau 2-col puce|texte."""
     if not items:
         return []
     elems = []
@@ -418,6 +451,7 @@ def _reco_card(title, items, icon_char, bg, border, S, max_items=None):
 
 
 def _priority_table(items, col, bg, border, label):
+    """Tableau priorité : une ligne par item avec étiquette et texte."""
     if not items:
         return []
     ps_lbl = ParagraphStyle('PL', fontName=_F(bold=True), fontSize=8,
@@ -426,7 +460,7 @@ def _priority_table(items, col, bg, border, label):
                             textColor=C['gray_dark'], leading=13)
     rows = []
     for item in items:
-        t = _clean(str(item)).strip()[:200]
+        t = _clean(str(item)).strip()[:150]
         rows.append([Paragraph(label, ps_lbl), Paragraph(t, ps_txt)])
 
     tbl = Table(rows, colWidths=[2*cm, 15*cm])
@@ -465,10 +499,9 @@ def _make_page_callbacks(patient_data):
         if pat:
             canvas.drawRightString(W - 1.5*cm, H - 0.85*cm, f"Patient: {_clean(str(pat))}")
 
-        # Pied de page
+        # Pied de page (sans Unilabs/EspaceLab)
         canvas.setFillColor(C['gray_bd'])
         canvas.rect(0, 0, W, 0.8*cm, fill=1, stroke=0)
-
         canvas.setFont(_F(italic=True), 7.5)
         canvas.setFillColor(C['gray'])
         canvas.drawString(1.5*cm, 0.25*cm, "ALGO-LIFE  |  bilan-hormonal.com")
@@ -476,7 +509,7 @@ def _make_page_callbacks(patient_data):
 
         canvas.restoreState()
 
-    # IMPORTANT: page 1 sans header/footer => évite chevauchement page de garde
+    # ✅ PAS de header/footer sur la couverture (page 1)
     def _first_page(canvas, doc):
         return
 
@@ -507,47 +540,47 @@ def generate_multimodal_report(
         output_path = os.path.join(tempfile.gettempdir(), 'rapport_algolife.pdf')
 
     pat = patient_data or {}
-
     first_cb, later_cb = _make_page_callbacks(pat)
 
-    # Marges : un peu plus safe vs header/footer
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
         leftMargin=1.8*cm, rightMargin=1.8*cm,
-        topMargin=2.0*cm, bottomMargin=1.4*cm,
+        topMargin=1.8*cm, bottomMargin=1.6*cm,
     )
 
     story = []
-    W = doc.width  # largeur utile (robuste si tu changes les marges)
+    W = doc.width  # largeur utile exacte
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PAGE DE GARDE
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    story.append(Spacer(1, 1.2*cm))
+    story.append(Spacer(1, 1.5*cm))
 
     cover_hdr = Table(
         [[Paragraph("RAPPORT D'ANALYSES BIOLOGIQUES",
                     ParagraphStyle('CT2', fontName=_F(bold=True), fontSize=24,
-                                   leading=30, textColor=C['white'], alignment=TA_CENTER))],
+                                   textColor=C['white'], alignment=TA_CENTER, leading=30))],
          [Paragraph("Biologie Fonctionnelle &amp; Microbiote",
                     ParagraphStyle('CS2', fontName=_F(), fontSize=13,
-                                   leading=18, textColor=colors.HexColor('#A5C8E8'),
-                                   alignment=TA_CENTER))]],
+                                   textColor=colors.HexColor('#A5C8E8'),
+                                   alignment=TA_CENTER, leading=18))]],
         colWidths=[W]
     )
     cover_hdr.setStyle(TableStyle([
         ('BACKGROUND',    (0,0), (-1,-1), C['navy']),
-        ('TOPPADDING',    (0,0), (-1,-1), 22),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 22),
-        ('LEFTPADDING',   (0,0), (-1,-1), 18),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 18),
+        ('TOPPADDING',    (0,0), (-1,-1), 20),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 20),
+        ('LEFTPADDING',   (0,0), (-1,-1), 20),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 20),
     ]))
     story.append(cover_hdr)
-    story.append(Spacer(1, 0.6*cm))
+    story.append(Spacer(1, 0.5*cm))
 
+    # ✅ Neutre (plus de Unilabs/EspaceLab)
     story.append(_para("Rapport de Biologie Fonctionnelle &amp; Microbiote", S['cover_lab']))
-    story.append(Spacer(1, 1.0*cm))
+    story.append(Spacer(1, 1.5*cm))
 
+    # Fiche patient
     pat_rows = [
         ('PATIENT',           pat.get('name', 'N/A')),
         ('SEXE',              pat.get('sex', 'N/A')),
@@ -563,7 +596,7 @@ def generate_multimodal_report(
 
     story.append(_kv_table(pat_rows, col_w=(6*cm, W-6*cm),
                            header='INFORMATIONS PATIENT', header_color=C['navy']))
-    story.append(Spacer(1, 0.9*cm))
+    story.append(Spacer(1, 1*cm))
     story.append(_para(
         f"Rapport genere le {datetime.now().strftime('%d/%m/%Y a %H:%M')}",
         S['caption']))
@@ -691,69 +724,346 @@ def generate_multimodal_report(
         story.append(PageBreak())
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # MICROBIOME + ANALYSES CROISEES + RECO + IA + SUIVI
+    # MICROBIOME (INTACT, comme ton code original)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # >>> ICI : je n’ai pas modifié ta logique (pour rester 100% compatible).
-    # Tu peux conserver exactement tes blocs existants, en remplaçant seulement
-    # les appels _section_header(..., width=W) quand tu veux éviter les décalages.
-    #
-    # Pour gagner de la place dans ce message, je laisse tes blocs inchangés,
-    # EXCEPTÉ la page finale (ci-dessous) + build (callback first/later).
-    #
-    # >>> COPIE/COLLE TES BLOCS MICROBIOME / CROSS / RECO / IA / FOLLOW_UP ICI
-    #
-    # (tu peux garder ton code tel quel)
+    if microbiome_data:
+        story.append(_section_header('ANALYSE MICROBIOTE', S, C['purple'], C['purple_bg'], width=W))
+        story.append(Spacer(1, 0.4*cm))
+
+        di        = microbiome_data.get('dysbiosis_index')
+        diversity = microbiome_data.get('diversity', 'N/A')
+
+        overview = [
+            ('Indice de dysbiose (DI)', f"{di}/5" if di is not None else 'N/A'),
+            ('Diversite bacterienne',   _clean(str(diversity))),
+        ]
+        story.append(_kv_table(overview, col_w=(9*cm, W-9*cm),
+                               header="VUE D'ENSEMBLE", header_color=C['purple']))
+        story.append(Spacer(1, 0.8*cm))
+
+        bacteria_groups = microbiome_data.get('bacteria_groups', [])
+        if bacteria_groups:
+            expected  = sum(1 for g in bacteria_groups
+                            if 'expected' in str(g.get('result') or g.get('abundance','')).lower()
+                            and 'slightly' not in str(g.get('result') or g.get('abundance','')).lower())
+            slightly  = sum(1 for g in bacteria_groups
+                            if 'slightly' in str(g.get('result') or g.get('abundance','')).lower())
+            deviating = sum(1 for g in bacteria_groups
+                            if 'deviating' in str(g.get('result') or g.get('abundance','')).lower()
+                            and 'slightly' not in str(g.get('result') or g.get('abundance','')).lower())
+
+            stat_data = [[
+                Paragraph('Attendus', ParagraphStyle('MH', fontName=_F(bold=True),
+                          fontSize=9, textColor=C['green'], alignment=TA_CENTER)),
+                Paragraph('Leg. deviants', ParagraphStyle('MH', fontName=_F(bold=True),
+                          fontSize=9, textColor=C['amber'], alignment=TA_CENTER)),
+                Paragraph('Deviants', ParagraphStyle('MH', fontName=_F(bold=True),
+                          fontSize=9, textColor=C['red'], alignment=TA_CENTER)),
+            ], [
+                Paragraph(str(expected),  ParagraphStyle('MV', fontName=_F(bold=True),
+                          fontSize=20, textColor=C['green'], alignment=TA_CENTER)),
+                Paragraph(str(slightly),  ParagraphStyle('MV', fontName=_F(bold=True),
+                          fontSize=20, textColor=C['amber'], alignment=TA_CENTER)),
+                Paragraph(str(deviating), ParagraphStyle('MV', fontName=_F(bold=True),
+                          fontSize=20, textColor=C['red'], alignment=TA_CENTER)),
+            ]]
+            stat_tbl = Table(stat_data, colWidths=[W/3]*3)
+            stat_tbl.setStyle(TableStyle([
+                ('BACKGROUND',    (0,0), (-1,-1), C['gray_lt']),
+                ('TOPPADDING',    (0,0), (-1,0), 10),
+                ('BOTTOMPADDING', (0,0), (-1,0), 4),
+                ('TOPPADDING',    (0,1), (-1,1), 4),
+                ('BOTTOMPADDING', (0,1), (-1,1), 12),
+                ('BOX',           (0,0), (-1,-1), 0.5, C['gray_bd']),
+                ('LINEAFTER',     (0,0), (1,-1), 0.3, C['gray_bd']),
+            ]))
+            story.append(stat_tbl)
+            story.append(Spacer(1, 0.8*cm))
+
+            story.append(_para('TABLEAU COMPLET DES GROUPES', S['subsection']))
+            story.append(Spacer(1, 0.3*cm))
+
+            def _result_color(result_str):
+                r = str(result_str).lower()
+                if 'expected' in r and 'slightly' not in r:
+                    return C['green_bg'], C['green']
+                if 'slightly' in r:
+                    return C['amber_bg'], C['amber']
+                if 'deviating' in r:
+                    return C['red_bg'], C['red']
+                return C['gray_lt'], C['gray']
+
+            grp_header = [
+                Paragraph('Cat.', ParagraphStyle('GH', fontName=_F(bold=True),
+                          fontSize=9, textColor=C['white'], alignment=TA_CENTER)),
+                Paragraph('Groupe bacterien', ParagraphStyle('GH', fontName=_F(bold=True),
+                          fontSize=9, textColor=C['white'])),
+                Paragraph('Resultat', ParagraphStyle('GH', fontName=_F(bold=True),
+                          fontSize=9, textColor=C['white'], alignment=TA_CENTER)),
+            ]
+            grp_data = [grp_header]
+            grp_styles = [
+                ('BACKGROUND',    (0,0), (-1,0), C['purple']),
+                ('FONTNAME',      (0,0), (-1,0), _F(bold=True)),
+                ('FONTSIZE',      (0,0), (-1,-1), 9),
+                ('TOPPADDING',    (0,0), (-1,-1), 7),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 7),
+                ('LEFTPADDING',   (0,0), (-1,-1), 10),
+                ('ALIGN',         (0,0), (0,-1), 'CENTER'),
+                ('ALIGN',         (2,0), (2,-1), 'CENTER'),
+                ('BOX',           (0,0), (-1,-1), 0.5, C['gray_bd']),
+                ('LINEBELOW',     (0,0), (-1,-1), 0.3, C['gray_bd']),
+                ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+            ]
+
+            for i, grp in enumerate(bacteria_groups, 1):
+                category = _clean(str(grp.get('category', 'N/A')))
+                name     = _clean(str(grp.get('name', grp.get('group', 'N/A'))))[:55]
+                result   = _clean(str(grp.get('result') or grp.get('abundance', 'N/A')))
+                bg_r, fg_r = _result_color(result)
+                grp_data.append([
+                    Paragraph(category, ParagraphStyle('GC', fontName=_F(bold=True),
+                              fontSize=9, alignment=TA_CENTER, textColor=C['gray_dark'])),
+                    Paragraph(name, ParagraphStyle('GN', fontName=_F(), fontSize=9,
+                              textColor=C['gray_dark'])),
+                    Paragraph(result, ParagraphStyle('GR', fontName=_F(bold=True),
+                              fontSize=8.5, textColor=fg_r, alignment=TA_CENTER)),
+                ])
+                grp_styles.append(('BACKGROUND', (0,i), (-1,i),
+                                   C['white'] if i % 2 == 0 else C['gray_lt']))
+                grp_styles.append(('BACKGROUND', (2,i), (2,i), bg_r))
+
+            grp_tbl = Table(grp_data, colWidths=[2*cm, W-6*cm, 4*cm])
+            grp_tbl.setStyle(TableStyle(grp_styles))
+            story.append(grp_tbl)
+            story.append(PageBreak())
+
+        # Biomarqueurs des selles
+        stool = microbiome_data.get('stool_biomarkers', {})
+        if stool:
+            story.append(_para('BIOMARQUEURS DES SELLES', S['subsection']))
+            story.append(Spacer(1, 0.3*cm))
+            for bm_name, bm_data in stool.items():
+                card = _biomarker_card(
+                    bm_name,
+                    bm_data.get('value'),
+                    str(bm_data.get('unit', '')),
+                    bm_data.get('reference', ''),
+                    bm_data.get('status', 'Normal'),
+                    S,
+                )
+                story.append(card)
+                story.append(Spacer(1, 4))
+            story.append(PageBreak())
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # PAGE FINALE (corrigée : pas de Spacer dans Table)
+    # ANALYSES CROISEES
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    story.append(Spacer(1, 1.5*cm))
+    if cross_analysis:
+        story.append(_section_header('ANALYSES CROISEES MULTIMODALES', S, C['teal'], C['teal_bg'], width=W))
+        story.append(Spacer(1, 0.3*cm))
+        story.append(_para(
+            'Correlations identifiees par le systeme expert entre les differentes sources de donnees.',
+            S['body_small']))
+        story.append(Spacer(1, 0.5*cm))
 
-    final_hdr = Table(
-        [[Paragraph('ALGO-LIFE © 2026', ParagraphStyle('FL',
+        for idx, analysis in enumerate(cross_analysis, 1):
+            titre = _clean(str(analysis.get('title') or analysis.get('titre', f'Analyse {idx}')))
+            desc  = _clean(str(analysis.get('description', '')))
+            severity = str(analysis.get('severity', 'info')).lower()
+            reco_list = analysis.get('recommendations', [])
+
+            sev_map = {
+                'critical': (C['red_bg'],    C['red'],    'CRITIQUE'),
+                'warning':  (C['amber_bg'],  C['amber'],  'ATTENTION'),
+            }
+            bg_sev, col_sev, lbl_sev = sev_map.get(severity, (C['blue_bg'], C['blue_lt'], 'INFO'))
+
+            blk = []
+            blk.append(Table([[
+                Paragraph(f'{idx}. {titre}', ParagraphStyle('AT',
+                    fontName=_F(bold=True), fontSize=10.5,
+                    textColor=col_sev)),
+                Paragraph(lbl_sev, ParagraphStyle('AL',
+                    fontName=_F(bold=True), fontSize=8,
+                    textColor=C['white'], alignment=TA_CENTER)),
+            ]], colWidths=[W-3*cm, 3*cm]))
+
+            if desc:
+                blk.append(Table([[Paragraph(desc[:400], ParagraphStyle('AD',
+                    fontName=_F(), fontSize=9, textColor=C['gray_dark'],
+                    leading=13))]],
+                    colWidths=[W]))
+                blk[-1].setStyle(TableStyle([
+                    ('BACKGROUND',    (0,0), (-1,-1), bg_sev),
+                    ('TOPPADDING',    (0,0), (-1,-1), 8),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                    ('LEFTPADDING',   (0,0), (-1,-1), 14),
+                    ('BOX',           (0,0), (-1,-1), 0.5, col_sev),
+                ]))
+
+            if reco_list:
+                reco_rows = [[Paragraph(f'- {_clean(str(r))[:200]}',
+                              ParagraphStyle('AR', fontName=_F(), fontSize=8.5,
+                                             textColor=C['gray_dark'], leading=12))]
+                             for r in reco_list]
+                reco_t = Table(reco_rows, colWidths=[W])
+                reco_t.setStyle(TableStyle([
+                    ('BACKGROUND',    (0,0), (-1,-1), C['gray_lt']),
+                    ('TOPPADDING',    (0,0), (-1,-1), 5),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                    ('LEFTPADDING',   (0,0), (-1,-1), 20),
+                    ('LINEBELOW',     (0,0), (-1,-2), 0.2, C['gray_bd']),
+                ]))
+                blk.append(reco_t)
+
+            story.extend(blk)
+            story.append(Spacer(1, 10))
+
+        story.append(PageBreak())
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # RECOMMANDATIONS
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if recommendations and isinstance(recommendations, dict):
+        story.append(_section_header('RECOMMANDATIONS PERSONNALISEES', S, C['blue'], C['blue_bg'], width=W))
+        story.append(_para('Generees par le Systeme Expert de Regles', S['caption']))
+        story.append(Spacer(1, 0.4*cm))
+
+        prio = recommendations.get('Prioritaires', [])
+        if prio:
+            story.append(_para('ACTIONS PRIORITAIRES', ParagraphStyle('AP',
+                fontName=_F(bold=True), fontSize=11, textColor=C['red'])))
+            story.append(Spacer(1, 0.2*cm))
+            story.extend(_priority_table(prio, C['red'], C['red_bg'], C['red'], '!'))
+            story.append(Spacer(1, 0.4*cm))
+
+        surveiller = recommendations.get('A surveiller', recommendations.get('À surveiller', []))
+        if surveiller:
+            story.append(_para('A SURVEILLER', ParagraphStyle('AS2',
+                fontName=_F(bold=True), fontSize=11, textColor=C['amber'])))
+            story.append(Spacer(1, 0.2*cm))
+            story.extend(_priority_table(surveiller, C['amber'], C['amber_bg'], C['amber'], '~'))
+            story.append(Spacer(1, 0.4*cm))
+
+        story.extend(_reco_card(
+            'NUTRITION & DIETETIQUE',
+            recommendations.get('Nutrition', []),
+            '', C['green_bg'], C['green'], S, max_items=30))
+
+        story.extend(_reco_card(
+            'MICRONUTRITION & SUPPLEMENTATION',
+            recommendations.get('Micronutrition', []),
+            '', C['blue_bg'], C['blue_lt'], S, max_items=30))
+
+        story.extend(_reco_card(
+            'HYGIENE DE VIE & SPORT',
+            recommendations.get('Hygiene de vie', recommendations.get('Hygiène de vie', [])),
+            '', C['purple_bg'], C['purple'], S, max_items=30))
+
+        story.extend(_reco_card(
+            'EXAMENS COMPLEMENTAIRES',
+            recommendations.get('Examens complementaires', []),
+            '', C['gray_lt'], C['gray'], S, max_items=20))
+
+        story.append(PageBreak())
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # IA ENRICHIE
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if ai_enrichment:
+        story.append(_section_header('RECOMMANDATIONS IA ENRICHIES', S, C['teal'], C['teal_bg'], width=W))
+        story.append(_para('Personnalisees par Intelligence Artificielle', S['caption']))
+        story.append(Spacer(1, 0.5*cm))
+
+        synthese = ai_enrichment.get('synthese_enrichie', '')
+        if synthese:
+            story.append(_para('Synthese personnalisee', S['subsection']))
+            tbl = Table([[Paragraph(_clean(str(synthese))[:500],
+                          ParagraphStyle('IA', fontName=_F(), fontSize=9,
+                                         leading=13, textColor=C['gray_dark']))]],
+                        colWidths=[W])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND',    (0,0), (-1,-1), C['teal_bg']),
+                ('TOPPADDING',    (0,0), (-1,-1), 12),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+                ('LEFTPADDING',   (0,0), (-1,-1), 14),
+                ('BOX',           (0,0), (-1,-1), 1, C['teal']),
+            ]))
+            story.append(tbl)
+            story.append(Spacer(1, 0.5*cm))
+
+        story.extend(_reco_card('NUTRITION (IA)',
+            ai_enrichment.get('nutrition_enrichie', []),
+            'N>', C['green_bg'], C['green'], S))
+        story.extend(_reco_card('MICRONUTRITION (IA)',
+            ai_enrichment.get('micronutrition_enrichie', []),
+            'M>', C['blue_bg'], C['blue_lt'], S))
+        story.append(PageBreak())
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # PLAN DE SUIVI
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if follow_up:
+        story.append(_section_header('PLAN DE SUIVI', S, C['navy'], C['blue_bg'], width=W))
+        story.append(Spacer(1, 0.4*cm))
+
+        next_date  = follow_up.get('next_date')
+        plan       = follow_up.get('plan', '')
+        objectives = follow_up.get('objectives', '')
+
+        suivi_rows = []
+        if next_date:
+            suivi_rows.append(('Prochain controle', _clean(str(next_date))))
+        if plan:
+            suivi_rows.append(('Plan detaille', _clean(str(plan))[:200]))
+        if objectives:
+            suivi_rows.append(('Objectifs mesurables', _clean(str(objectives))[:200]))
+
+        if suivi_rows:
+            story.append(_kv_table(suivi_rows, col_w=(5*cm, W-5*cm)))
+        story.append(PageBreak())
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # PAGE FINALE (sans Unilabs/EspaceLab)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    story.append(Spacer(1, 2*cm))
+
+    final_lines = [
+        Paragraph('ALGO-LIFE © 2026', ParagraphStyle('FL',
             fontName=_F(bold=True), fontSize=16, leading=20,
-            textColor=C['white'], alignment=TA_CENTER))]],
-        colWidths=[W]
-    )
-    final_hdr.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0), (-1,-1), C['navy']),
-        ('TOPPADDING',    (0,0), (-1,-1), 14),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-        ('LEFTPADDING',   (0,0), (-1,-1), 18),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 18),
-    ]))
-    story.append(final_hdr)
-
-    final_body = Table(
-        [[Paragraph('Analyse Multimodale en Biologie Fonctionnelle',
-            ParagraphStyle('FL2', fontName=_F(), fontSize=10, leading=14,
-            textColor=colors.HexColor('#A5C8E8'), alignment=TA_CENTER))],
-         [Paragraph('Dr Thibault SUTTER, PhD',
-            ParagraphStyle('FL3', fontName=_F(bold=True), fontSize=12, leading=16,
-            textColor=C['white'], alignment=TA_CENTER))],
-         [Paragraph('Biologiste specialise en biologie fonctionnelle',
-            ParagraphStyle('FL4', fontName=_F(), fontSize=9.5, leading=13,
-            textColor=colors.HexColor('#A5C8E8'), alignment=TA_CENTER))],
-         [Paragraph('Geneva, Switzerland  |  bilan-hormonal.com  |  ALGO-LIFE',
-            ParagraphStyle('FL6', fontName=_F(italic=True), fontSize=9, leading=12,
-            textColor=colors.HexColor('#7BA7C9'), alignment=TA_CENTER))],
-         [Paragraph('Ce rapport est genere par analyse multimodale (systeme de regles + IA). '
-                    'Il ne remplace pas un avis medical personnalise.',
+            textColor=C['white'], alignment=TA_CENTER)),
+        Paragraph('Analyse Multimodale en Biologie Fonctionnelle', ParagraphStyle('FL2',
+            fontName=_F(), fontSize=10, leading=14,
+            textColor=colors.HexColor('#A5C8E8'), alignment=TA_CENTER)),
+        Paragraph('Dr Thibault SUTTER, PhD', ParagraphStyle('FL3',
+            fontName=_F(bold=True), fontSize=12, leading=16,
+            textColor=C['white'], alignment=TA_CENTER)),
+        Paragraph('Biologiste specialise en biologie fonctionnelle', ParagraphStyle('FL4',
+            fontName=_F(), fontSize=9.5, leading=13,
+            textColor=colors.HexColor('#A5C8E8'), alignment=TA_CENTER)),
+        Paragraph('Geneva, Switzerland  |  bilan-hormonal.com  |  ALGO-LIFE', ParagraphStyle('FL6',
+            fontName=_F(italic=True), fontSize=9, leading=12,
+            textColor=colors.HexColor('#7BA7C9'), alignment=TA_CENTER)),
+        Paragraph('Ce rapport est genere par analyse multimodale (systeme de regles + IA). '
+                  'Il ne remplace pas un avis medical personnalise.',
             ParagraphStyle('FL7', fontName=_F(italic=True), fontSize=8, leading=11,
-            textColor=colors.HexColor('#7BA7C9'), alignment=TA_CENTER))]],
-        colWidths=[W]
-    )
-    final_body.setStyle(TableStyle([
+            textColor=colors.HexColor('#7BA7C9'), alignment=TA_CENTER)),
+    ]
+
+    # Table “propre” (pas de Spacer dans les cellules)
+    final_tbl = Table([[x] for x in final_lines], colWidths=[W])
+    final_tbl.setStyle(TableStyle([
         ('BACKGROUND',    (0,0), (-1,-1), C['navy']),
         ('TOPPADDING',    (0,0), (-1,-1), 10),
         ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-        ('LEFTPADDING',   (0,0), (-1,-1), 18),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 18),
+        ('LEFTPADDING',   (0,0), (-1,-1), 20),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 20),
         ('LINEBELOW',     (0,0), (-1,-2), 0.2, colors.HexColor('#1f3b6d')),
     ]))
-    story.append(final_body)
+    story.append(final_tbl)
 
-    # ── Build (IMPORTANT : callbacks différents page 1 vs suivantes) ─────────
+    # ── Build ────────────────────────────────────────────────────────────────
     doc.build(story, onFirstPage=first_cb, onLaterPages=later_cb)
 
     size_kb = os.path.getsize(output_path) / 1024
