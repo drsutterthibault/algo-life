@@ -1495,7 +1495,8 @@ with tab3:
         if not any(recommendations.values()) if recommendations else True:
             st.info("ℹ️ Aucune recommandation générée par le système de règles")
         else:
-            for section_key, section_label, icon in [
+            # ── Initialisation session_state pour édition mode règles ──
+            RULE_SECTIONS = [
                 ("Prioritaires", "Actions Prioritaires", "🔥"),
                 ("À surveiller", "À Surveiller", "⚠️"),
                 ("Nutrition", "Nutrition (Règles)", "🥗"),
@@ -1503,12 +1504,59 @@ with tab3:
                 ("Hygiène de vie", "Hygiène de Vie", "🏃"),
                 ("Examens complémentaires", "Examens Complémentaires", "🔬"),
                 ("Suivi", "Plan de Suivi", "📅"),
-            ]:
+            ]
+
+            if "rule_edited_recommendations" not in st.session_state:
+                st.session_state.rule_edited_recommendations = {}
+
+            for section_key, section_label, icon in RULE_SECTIONS:
                 items = recommendations.get(section_key, [])
-                if items:
-                    with st.expander(f"{icon} **{section_label}**", expanded=(section_key == "Prioritaires")):
-                        for i, item in enumerate(items, 1):
-                            st.markdown(f"**{i}.** {item}")
+                if not items:
+                    continue
+
+                # Initialiser la copie éditable si absente
+                if section_key not in st.session_state.rule_edited_recommendations:
+                    st.session_state.rule_edited_recommendations[section_key] = list(items)
+
+                with st.expander(f"{icon} **{section_label}** ({len(st.session_state.rule_edited_recommendations[section_key])} éléments)", expanded=(section_key == "Prioritaires")):
+                    # ── Affichage lecture des items édités ──
+                    for i, item in enumerate(st.session_state.rule_edited_recommendations[section_key], 1):
+                        st.markdown(f"**{i}.** {item}")
+
+                    st.markdown("---")
+                    with st.expander("✏️ Éditer cette section", expanded=False):
+                        edited_section = list(st.session_state.rule_edited_recommendations[section_key])
+                        for i, item in enumerate(edited_section):
+                            col_txt, col_del = st.columns([5, 1])
+                            with col_txt:
+                                new_val = st.text_area(
+                                    f"Item {i+1}",
+                                    value=item,
+                                    height=70,
+                                    key=f"rule_edit_{section_key}_{i}",
+                                    label_visibility="collapsed"
+                                )
+                                st.session_state.rule_edited_recommendations[section_key][i] = new_val
+                            with col_del:
+                                if st.button("🗑️", key=f"rule_del_{section_key}_{i}", help="Supprimer"):
+                                    st.session_state.rule_edited_recommendations[section_key].pop(i)
+                                    st.rerun()
+
+                        new_item_rule = st.text_area(
+                            "➕ Nouvelle recommandation",
+                            height=70,
+                            key=f"rule_new_{section_key}",
+                            placeholder="Entrez une nouvelle recommandation..."
+                        )
+                        if st.button(f"➕ Ajouter", key=f"rule_add_{section_key}"):
+                            if new_item_rule.strip():
+                                st.session_state.rule_edited_recommendations[section_key].append(new_item_rule.strip())
+                                st.success("✅ Recommandation ajoutée")
+                                st.rerun()
+
+            # Mettre à jour recommendations avec les valeurs éditées pour le PDF
+            if st.session_state.rule_edited_recommendations:
+                recommendations.update(st.session_state.rule_edited_recommendations)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -1710,7 +1758,10 @@ with tab5:
                             patient_data=st.session_state.patient_info,
                             biology_data=st.session_state.biology_df.to_dict('records'),
                             microbiome_data=st.session_state.microbiome_data,
-                            recommendations=st.session_state.edited_recommendations if st.session_state.ai_enrichment_active else _build_display_recommendations(st.session_state.consolidated_recommendations),
+                            recommendations=st.session_state.edited_recommendations if st.session_state.ai_enrichment_active else {
+                                **_build_display_recommendations(st.session_state.consolidated_recommendations),
+                                **st.session_state.get("rule_edited_recommendations", {})
+                            },
                             cross_analysis=st.session_state.cross_analysis,
                             follow_up=st.session_state.follow_up,
                             bio_age_result=st.session_state.bio_age_result,
