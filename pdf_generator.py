@@ -20,7 +20,7 @@ from reportlab.lib.units import cm, mm
 from reportlab.lib import colors
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, HRFlowable
+    PageBreak, HRFlowable, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -357,7 +357,7 @@ def _biomarker_card(name, value, unit, reference, status, S):
         try:
             vf = _safe_float(value)
             pos = (vf - min_val) / (max_val - min_val) if vf is not None else 0.5
-            pos = max(0.0, min(1.0, pos))
+            pos = max(0.04, min(pos, 0.96))
         except:
             pos = 0.5
         d.add(Circle(BAR_W * pos, BAR_H / 2, 5,
@@ -368,7 +368,12 @@ def _biomarker_card(name, value, unit, reference, status, S):
             vf = _safe_float(value)
             pos = min((vf / max_val) if vf else 0.5, 1.0)
             fill = C['green_lt'] if pos < 1 else col
+            d.add(Rect(0, 1, BAR_W, BAR_H-2, fillColor=C['green_lt'], strokeColor=None))
             d.add(Rect(0, 1, BAR_W * pos, BAR_H-2, fillColor=fill, strokeColor=None))
+            # Clamper le cercle pour qu'il reste visible même si valeur > max
+            circle_pos = max(0.04, min(pos, 0.96))
+            d.add(Circle(BAR_W * circle_pos, BAR_H / 2, 5,
+                         fillColor=col, strokeColor=C['white'], strokeWidth=1.5))
         except:
             pass
 
@@ -400,12 +405,30 @@ def _biomarker_card(name, value, unit, reference, status, S):
 
 
 def _reco_card(title, items, icon_char, bg, border, S, max_items=None):
-    """Carte recommandations : header coloré + tableau 2-col puce|texte."""
+    """Carte recommandations : header collé au premier item, puis items individuels non-coupables."""
     if not items:
         return []
-    elems = []
 
-    hdr = Table([[Paragraph(f'{_clean(title)}',
+    display = items[:max_items] if max_items else items
+    ps_txt = ParagraphStyle('RI', fontName=_F(), fontSize=8.5, leading=13,
+                            textColor=C['gray_dark'])
+    ps_dot = ParagraphStyle('RD', fontName=_F(bold=True), fontSize=9,
+                            textColor=border, alignment=TA_CENTER)
+
+    # Construire les lignes nettoyées
+    clean_rows = []
+    for item in display:
+        t = _clean(str(item)).strip()
+        if not t or t == '-':
+            continue
+        t = t if len(t) <= 400 else t[:397] + '...'
+        clean_rows.append(t)
+
+    if not clean_rows:
+        return []
+
+    # Header
+    hdr = Table([[Paragraph(_clean(title),
                             ParagraphStyle('RH', fontName=_F(bold=True),
                             fontSize=10.5, textColor=C['white'], leading=13))]],
                 colWidths=[17*cm])
@@ -415,71 +438,80 @@ def _reco_card(title, items, icon_char, bg, border, S, max_items=None):
         ('BOTTOMPADDING', (0,0), (-1,-1), 8),
         ('LEFTPADDING',   (0,0), (-1,-1), 16),
     ]))
-    elems.append(hdr)
 
-    display = items[:max_items] if max_items else items
-    rows = []
-    ps_txt = ParagraphStyle('RI', fontName=_F(), fontSize=8.5, leading=13,
-                            textColor=C['gray_dark'])
-    ps_dot = ParagraphStyle('RD', fontName=_F(bold=True), fontSize=9,
-                            textColor=border, alignment=TA_CENTER)
-    for item in display:
-        t = _clean(str(item)).strip()
-        if not t or t == '-':
-            continue
-        t = t[:400] if len(t) <= 400 else t[:397] + '...'
-        rows.append([Paragraph('-', ps_dot), Paragraph(t, ps_txt)])
-
-    if rows:
-        body = Table(rows, colWidths=[0.8*cm, 16.2*cm])
-        body.setStyle(TableStyle([
+    def _item_table(text, is_last=False):
+        """Table d'une seule ligne, non-coupable."""
+        tbl = Table(
+            [[Paragraph('-', ps_dot), Paragraph(text, ps_txt)]],
+            colWidths=[0.8*cm, 16.2*cm]
+        )
+        style_cmds = [
             ('BACKGROUND',    (0,0), (-1,-1), bg),
-            ('TOPPADDING',    (0,0), (-1,-1), 5),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('TOPPADDING',    (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
             ('LEFTPADDING',   (0,0), (0,-1),  3),
             ('RIGHTPADDING',  (0,0), (0,-1),  3),
             ('LEFTPADDING',   (1,0), (1,-1),  4),
             ('RIGHTPADDING',  (1,0), (1,-1),  10),
-            ('LINEBELOW',     (0,0), (-1,-2), 0.2, C['gray_bd']),
             ('VALIGN',        (0,0), (-1,-1), 'TOP'),
             ('ALIGN',         (0,0), (0,-1),  'CENTER'),
-            ('BOX',           (0,0), (-1,-1), 0.5, border),
-        ]))
-        elems.append(body)
+            ('LINEBEFORE',    (0,0), (0,-1),  0.5, border),
+            ('LINEAFTER',     (1,0), (1,-1),  0.5, border),
+        ]
+        if not is_last:
+            style_cmds.append(('LINEBELOW', (0,0), (-1,-1), 0.2, C['gray_bd']))
+        else:
+            style_cmds.append(('LINEBELOW', (0,0), (-1,-1), 0.5, border))
+        tbl.setStyle(TableStyle(style_cmds))
+        return tbl
+
+    elems = []
+
+    # Header + premier item groupés ensemble (ne pas couper entre eux)
+    first_item_tbl = _item_table(clean_rows[0], is_last=(len(clean_rows) == 1))
+    elems.append(KeepTogether([hdr, first_item_tbl]))
+
+    # Items suivants : chacun non-coupable individuellement
+    for i, text in enumerate(clean_rows[1:], 1):
+        is_last = (i == len(clean_rows) - 1)
+        elems.append(_item_table(text, is_last=is_last))
 
     elems.append(Spacer(1, 8))
     return elems
 
 
 def _priority_table(items, col, bg, border, label):
-    """Tableau priorité : une ligne par item avec étiquette et texte."""
+    """Tableau priorité : chaque item dans sa propre table non-coupable."""
     if not items:
         return []
     ps_lbl = ParagraphStyle('PL', fontName=_F(bold=True), fontSize=8,
                             textColor=col, alignment=TA_CENTER)
     ps_txt = ParagraphStyle('PT', fontName=_F(bold=True), fontSize=9,
                             textColor=C['gray_dark'], leading=13)
-    rows = []
+
+    elems = []
     for item in items:
         t = _clean(str(item)).strip()[:150]
-        rows.append([Paragraph(label, ps_lbl), Paragraph(t, ps_txt)])
+        tbl = Table([[Paragraph(label, ps_lbl), Paragraph(t, ps_txt)]],
+                    colWidths=[2*cm, 15*cm])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND',    (0,0), (-1,-1), bg),
+            ('BACKGROUND',    (0,0), (0,-1),  colors.HexColor('#FFF')),
+            ('TOPPADDING',    (0,0), (-1,-1), 7),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 7),
+            ('LEFTPADDING',   (0,0), (0,-1),  6),
+            ('LEFTPADDING',   (1,0), (1,-1),  12),
+            ('RIGHTPADDING',  (0,0), (-1,-1), 10),
+            ('LINEBELOW',     (0,0), (-1,-1), 0.3, C['gray_bd']),
+            ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN',         (0,0), (0,-1),  'CENTER'),
+            ('BOX',           (0,0), (-1,-1), 1.5, border),
+            ('LINEAFTER',     (0,0), (0,-1),  0.5, border),
+        ]))
+        elems.append(tbl)
 
-    tbl = Table(rows, colWidths=[2*cm, 15*cm])
-    tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0), (-1,-1), bg),
-        ('BACKGROUND',    (0,0), (0,-1), colors.HexColor('#FFF')),
-        ('TOPPADDING',    (0,0), (-1,-1), 7),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 7),
-        ('LEFTPADDING',   (0,0), (0,-1), 6),
-        ('LEFTPADDING',   (1,0), (1,-1), 12),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 10),
-        ('LINEBELOW',     (0,0), (-1,-2), 0.3, C['gray_bd']),
-        ('VALIGN',        (0,0), (-1,-1), 'MIDDLE'),
-        ('ALIGN',         (0,0), (0,-1), 'CENTER'),
-        ('BOX',           (0,0), (-1,-1), 1.5, border),
-        ('LINEAFTER',     (0,0), (0,-1), 0.5, border),
-    ]))
-    return [tbl, Spacer(1, 6)]
+    elems.append(Spacer(1, 6))
+    return elems
 
 
 # ── Callbacks page (en-tete / pied) ─────────────────────────────────────────
@@ -705,8 +737,7 @@ def generate_multimodal_report(
                 bio.get('Statut', 'Normal'),
                 S,
             )
-            story.append(card)
-            story.append(Spacer(1, 4))
+            story.append(KeepTogether([card, Spacer(1, 4)]))
 
         story.append(PageBreak())
 
@@ -863,8 +894,7 @@ def generate_multimodal_report(
                     bm_data.get('status', 'Normal'),
                     S,
                 )
-                story.append(card)
-                story.append(Spacer(1, 4))
+                story.append(KeepTogether([card, Spacer(1, 4)]))
             story.append(PageBreak())
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -928,7 +958,7 @@ def generate_multimodal_report(
                 ]))
                 blk.append(reco_t)
 
-            story.extend(blk)
+            story.append(KeepTogether(blk))
             story.append(Spacer(1, 10))
 
         story.append(PageBreak())
