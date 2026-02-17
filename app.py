@@ -1422,6 +1422,16 @@ with tab3:
             
             st.markdown("---")
             
+            def _delete_ai_item(items_key, idx):
+                """Callback : lit d'abord toutes les valeurs éditées, puis supprime."""
+                items = st.session_state.edited_recommendations[items_key]
+                for j in range(len(items)):
+                    widget_key = f"edit_{items_key}_{j}"
+                    if widget_key in st.session_state:
+                        items[j] = st.session_state[widget_key]
+                if 0 <= idx < len(items):
+                    items.pop(idx)
+
             def display_editable_section(title, icon, items_key, color_gradient, border_color):
                 items = ai_out.get(items_key, [])
                 if items:
@@ -1439,29 +1449,26 @@ with tab3:
                     """, unsafe_allow_html=True)
                     
                     with st.expander("✏️ Éditer les recommandations", expanded=False):
-                        # Gestion suppression via pending delete pour éviter les conflits de clés
-                        ai_pending_key = f"_pending_del_ai_{items_key}"
-                        if ai_pending_key in st.session_state:
-                            idx_to_del = st.session_state.pop(ai_pending_key)
-                            if 0 <= idx_to_del < len(st.session_state.edited_recommendations[items_key]):
-                                st.session_state.edited_recommendations[items_key].pop(idx_to_del)
-                            st.rerun()
-
-                        for i in range(len(st.session_state.edited_recommendations[items_key])):
+                        current = st.session_state.edited_recommendations[items_key]
+                        for i in range(len(current)):
                             col1, col2 = st.columns([5, 1])
                             with col1:
                                 edited = st.text_area(
                                     f"Reco {i+1}",
-                                    value=st.session_state.edited_recommendations[items_key][i],
+                                    value=current[i],
                                     height=80,
                                     key=f"edit_{items_key}_{i}",
                                     label_visibility="collapsed"
                                 )
-                                st.session_state.edited_recommendations[items_key][i] = edited
+                                current[i] = edited
                             with col2:
-                                if st.button("🗑️", key=f"del_{items_key}_{i}", help="Supprimer"):
-                                    st.session_state[ai_pending_key] = i
-                                    st.rerun()
+                                st.button(
+                                    "🗑️",
+                                    key=f"del_{items_key}_{i}",
+                                    help="Supprimer",
+                                    on_click=_delete_ai_item,
+                                    args=(items_key, i)
+                                )
                         
                         new_item = st.text_area(
                             "➕ Ajouter une nouvelle recommandation",
@@ -1471,9 +1478,8 @@ with tab3:
                         )
                         if st.button(f"➕ Ajouter", key=f"add_{items_key}"):
                             if new_item.strip():
-                                st.session_state.edited_recommendations[items_key].append(new_item.strip())
+                                current.append(new_item.strip())
                                 st.success("✅ Recommandation ajoutée")
-                                st.rerun()
                     
                     for i, item in enumerate(st.session_state.edited_recommendations[items_key], 1):
                         st.markdown(f"""
@@ -1517,6 +1523,17 @@ with tab3:
             if "rule_edited_recommendations" not in st.session_state:
                 st.session_state.rule_edited_recommendations = {}
 
+            def _delete_rule_item(section_key, idx):
+                """Callback : lit d'abord toutes les valeurs éditées, puis supprime."""
+                items = st.session_state.rule_edited_recommendations[section_key]
+                # Sauvegarder les valeurs actuelles des text_areas avant suppression
+                for j in range(len(items)):
+                    widget_key = f"rule_edit_{section_key}_{j}"
+                    if widget_key in st.session_state:
+                        items[j] = st.session_state[widget_key]
+                if 0 <= idx < len(items):
+                    items.pop(idx)
+
             for section_key, section_label, icon in RULE_SECTIONS:
                 items = recommendations.get(section_key, [])
                 if not items:
@@ -1526,22 +1543,15 @@ with tab3:
                 if section_key not in st.session_state.rule_edited_recommendations:
                     st.session_state.rule_edited_recommendations[section_key] = list(items)
 
-                with st.expander(f"{icon} **{section_label}** ({len(st.session_state.rule_edited_recommendations[section_key])} éléments)", expanded=(section_key == "Prioritaires")):
+                current_items = st.session_state.rule_edited_recommendations[section_key]
+
+                with st.expander(f"{icon} **{section_label}** ({len(current_items)} éléments)", expanded=(section_key == "Prioritaires")):
                     # ── Affichage lecture des items édités ──
-                    for i, item in enumerate(st.session_state.rule_edited_recommendations[section_key], 1):
+                    for i, item in enumerate(current_items, 1):
                         st.markdown(f"**{i}.** {item}")
 
                     st.markdown("---")
                     with st.expander("✏️ Éditer cette section", expanded=False):
-                        # Gestion suppression : on stocke l'index à supprimer APRÈS la boucle
-                        pending_delete_key = f"_pending_del_{section_key}"
-                        if pending_delete_key in st.session_state:
-                            idx_to_del = st.session_state.pop(pending_delete_key)
-                            if 0 <= idx_to_del < len(st.session_state.rule_edited_recommendations[section_key]):
-                                st.session_state.rule_edited_recommendations[section_key].pop(idx_to_del)
-                            st.rerun()
-
-                        current_items = st.session_state.rule_edited_recommendations[section_key]
                         for i in range(len(current_items)):
                             col_txt, col_del = st.columns([5, 1])
                             with col_txt:
@@ -1552,11 +1562,15 @@ with tab3:
                                     key=f"rule_edit_{section_key}_{i}",
                                     label_visibility="collapsed"
                                 )
-                                st.session_state.rule_edited_recommendations[section_key][i] = new_val
+                                current_items[i] = new_val
                             with col_del:
-                                if st.button("🗑️", key=f"rule_del_{section_key}_{i}", help="Supprimer"):
-                                    st.session_state[pending_delete_key] = i
-                                    st.rerun()
+                                st.button(
+                                    "🗑️",
+                                    key=f"rule_del_{section_key}_{i}",
+                                    help="Supprimer",
+                                    on_click=_delete_rule_item,
+                                    args=(section_key, i)
+                                )
 
                         new_item_rule = st.text_area(
                             "➕ Nouvelle recommandation",
@@ -1566,9 +1580,8 @@ with tab3:
                         )
                         if st.button(f"➕ Ajouter", key=f"rule_add_{section_key}"):
                             if new_item_rule.strip():
-                                st.session_state.rule_edited_recommendations[section_key].append(new_item_rule.strip())
+                                current_items.append(new_item_rule.strip())
                                 st.success("✅ Recommandation ajoutée")
-                                st.rerun()
 
             # Mettre à jour recommendations avec les valeurs éditées pour le PDF
             if st.session_state.rule_edited_recommendations:
