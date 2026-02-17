@@ -1422,15 +1422,30 @@ with tab3:
             
             st.markdown("---")
             
-            def _delete_ai_item(items_key, idx):
-                """Callback : lit d'abord toutes les valeurs éditées, puis supprime."""
-                items = st.session_state.edited_recommendations[items_key]
-                for j in range(len(items)):
-                    widget_key = f"edit_{items_key}_{j}"
-                    if widget_key in st.session_state:
-                        items[j] = st.session_state[widget_key]
-                if 0 <= idx < len(items):
-                    items.pop(idx)
+            def _delete_ai_items(items_key, sel_keys):
+                selected_indices = [
+                    i for i, k in enumerate(sel_keys)
+                    if st.session_state.get(k, False)
+                ]
+                if selected_indices:
+                    lst = st.session_state.edited_recommendations[items_key]
+                    for idx in sorted(selected_indices, reverse=True):
+                        if 0 <= idx < len(lst):
+                            lst.pop(idx)
+                    for k in sel_keys:
+                        st.session_state.pop(k, None)
+
+            def _save_ai_item(items_key, idx, val_key):
+                val = st.session_state.get(val_key, "").strip()
+                lst = st.session_state.edited_recommendations[items_key]
+                if val and 0 <= idx < len(lst):
+                    lst[idx] = val
+
+            def _add_ai_item(items_key, new_key):
+                val = st.session_state.get(new_key, "").strip()
+                if val:
+                    st.session_state.edited_recommendations[items_key].append(val)
+                    st.session_state[new_key] = ""
 
             def display_editable_section(title, icon, items_key, color_gradient, border_color):
                 items = ai_out.get(items_key, [])
@@ -1447,41 +1462,11 @@ with tab3:
                             </h3>
                         </div>
                     """, unsafe_allow_html=True)
-                    
-                    with st.expander("✏️ Éditer les recommandations", expanded=False):
-                        current = st.session_state.edited_recommendations[items_key]
-                        for i in range(len(current)):
-                            col1, col2 = st.columns([5, 1])
-                            with col1:
-                                edited = st.text_area(
-                                    f"Reco {i+1}",
-                                    value=current[i],
-                                    height=80,
-                                    key=f"edit_{items_key}_{i}",
-                                    label_visibility="collapsed"
-                                )
-                                current[i] = edited
-                            with col2:
-                                st.button(
-                                    "🗑️",
-                                    key=f"del_{items_key}_{i}",
-                                    help="Supprimer",
-                                    on_click=_delete_ai_item,
-                                    args=(items_key, i)
-                                )
-                        
-                        new_item = st.text_area(
-                            "➕ Ajouter une nouvelle recommandation",
-                            height=80,
-                            key=f"new_{items_key}",
-                            placeholder="Entrez une nouvelle recommandation..."
-                        )
-                        if st.button(f"➕ Ajouter", key=f"add_{items_key}"):
-                            if new_item.strip():
-                                current.append(new_item.strip())
-                                st.success("✅ Recommandation ajoutée")
-                    
-                    for i, item in enumerate(st.session_state.edited_recommendations[items_key], 1):
+
+                    current = st.session_state.edited_recommendations[items_key]
+
+                    # ── Vue lecture ──
+                    for i, item in enumerate(current, 1):
                         st.markdown(f"""
                             <div style="background: white; padding: 15px 20px; border-radius: 10px;
                                         border-left: 4px solid {border_color}; margin: 12px 0;
@@ -1491,6 +1476,54 @@ with tab3:
                                 </p>
                             </div>
                         """, unsafe_allow_html=True)
+
+                    with st.expander("✏️ Éditer les recommandations", expanded=False):
+
+                        # ── SÉLECTION MULTIPLE + SUPPRESSION ──
+                        st.markdown("**Sélectionner pour supprimer :**")
+                        sel_keys = [f"ai_chk_{items_key}_{i}" for i in range(len(current))]
+                        for i, item in enumerate(current):
+                            st.checkbox(
+                                f"{i+1}. {item[:80]}{'...' if len(item) > 80 else ''}",
+                                key=sel_keys[i],
+                                value=False
+                            )
+                        n_sel = sum(1 for k in sel_keys if st.session_state.get(k, False))
+                        st.button(
+                            f"🗑️ Supprimer {n_sel} sélectionné(s)" if n_sel else "🗑️ Supprimer la sélection",
+                            key=f"ai_del_sel_{items_key}",
+                            type="primary" if n_sel else "secondary",
+                            disabled=(n_sel == 0),
+                            on_click=_delete_ai_items,
+                            args=(items_key, sel_keys)
+                        )
+
+                        st.markdown("---")
+
+                        # ── MODIFIER UN ITEM ──
+                        st.markdown("**Modifier un item :**")
+                        if current:
+                            idx_opts = {f"{i+1}. {item[:60]}{'...' if len(item)>60 else ''}": i for i, item in enumerate(current)}
+                            chosen_lbl = st.selectbox("Choisir un item", list(idx_opts.keys()), key=f"ai_sel_{items_key}")
+                            chosen_idx = idx_opts[chosen_lbl]
+                            ai_val_key = f"ai_edit_val_{items_key}"
+                            st.text_area("Nouvelle valeur", value=current[chosen_idx], height=80, key=ai_val_key)
+                            st.button(
+                                "💾 Sauvegarder",
+                                key=f"ai_save_{items_key}",
+                                on_click=_save_ai_item,
+                                args=(items_key, chosen_idx, ai_val_key)
+                            )
+
+                        st.markdown("---")
+
+                        # ── AJOUTER ──
+                        st.markdown("**Ajouter une recommandation :**")
+                        ai_new_key = f"ai_new_{items_key}"
+                        st.text_area("Nouvelle recommandation", height=70, key=ai_new_key,
+                                     placeholder="Entrez une nouvelle recommandation...", label_visibility="collapsed")
+                        st.button("➕ Ajouter", key=f"ai_add_{items_key}",
+                                  on_click=_add_ai_item, args=(items_key, ai_new_key))
             
             display_editable_section("Nutrition Personnalisée (IA)", "🥗", "nutrition_enrichie",
                                     "linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%)", "#22c55e")
@@ -1509,7 +1542,6 @@ with tab3:
         if not any(recommendations.values()) if recommendations else True:
             st.info("ℹ️ Aucune recommandation générée par le système de règles")
         else:
-            # ── Initialisation session_state pour édition mode règles ──
             RULE_SECTIONS = [
                 ("Prioritaires", "Actions Prioritaires", "🔥"),
                 ("À surveiller", "À Surveiller", "⚠️"),
@@ -1523,65 +1555,107 @@ with tab3:
             if "rule_edited_recommendations" not in st.session_state:
                 st.session_state.rule_edited_recommendations = {}
 
-            def _delete_rule_item(section_key, idx):
-                """Callback : lit d'abord toutes les valeurs éditées, puis supprime."""
-                items = st.session_state.rule_edited_recommendations[section_key]
-                # Sauvegarder les valeurs actuelles des text_areas avant suppression
-                for j in range(len(items)):
-                    widget_key = f"rule_edit_{section_key}_{j}"
-                    if widget_key in st.session_state:
-                        items[j] = st.session_state[widget_key]
-                if 0 <= idx < len(items):
-                    items.pop(idx)
-
             for section_key, section_label, icon in RULE_SECTIONS:
-                items = recommendations.get(section_key, [])
-                if not items:
+                orig_items = recommendations.get(section_key, [])
+                if not orig_items:
                     continue
 
-                # Initialiser la copie éditable si absente
+                # Initialiser UNE SEULE FOIS depuis les recommandations originales
                 if section_key not in st.session_state.rule_edited_recommendations:
-                    st.session_state.rule_edited_recommendations[section_key] = list(items)
+                    st.session_state.rule_edited_recommendations[section_key] = list(orig_items)
 
                 current_items = st.session_state.rule_edited_recommendations[section_key]
 
                 with st.expander(f"{icon} **{section_label}** ({len(current_items)} éléments)", expanded=(section_key == "Prioritaires")):
-                    # ── Affichage lecture des items édités ──
+
+                    # ── Vue lecture ──
                     for i, item in enumerate(current_items, 1):
                         st.markdown(f"**{i}.** {item}")
 
                     st.markdown("---")
                     with st.expander("✏️ Éditer cette section", expanded=False):
-                        for i in range(len(current_items)):
-                            col_txt, col_del = st.columns([5, 1])
-                            with col_txt:
-                                new_val = st.text_area(
-                                    f"Item {i+1}",
-                                    value=current_items[i],
-                                    height=70,
-                                    key=f"rule_edit_{section_key}_{i}",
-                                    label_visibility="collapsed"
-                                )
-                                current_items[i] = new_val
-                            with col_del:
-                                st.button(
-                                    "🗑️",
-                                    key=f"rule_del_{section_key}_{i}",
-                                    help="Supprimer",
-                                    on_click=_delete_rule_item,
-                                    args=(section_key, i)
-                                )
 
+                        # ── SÉLECTION MULTIPLE + SUPPRESSION GROUPÉE ──
+                        st.markdown("**Sélectionner pour supprimer :**")
+                        sel_keys = [f"chk_{section_key}_{i}" for i in range(len(current_items))]
+                        
+                        for i, item in enumerate(current_items):
+                            st.checkbox(
+                                f"{i+1}. {item[:80]}{'...' if len(item) > 80 else ''}",
+                                key=sel_keys[i],
+                                value=False
+                            )
+
+                        def _do_delete(sk=section_key, skeys=sel_keys):
+                            selected_indices = [
+                                i for i, k in enumerate(skeys)
+                                if st.session_state.get(k, False)
+                            ]
+                            if selected_indices:
+                                lst = st.session_state.rule_edited_recommendations[sk]
+                                # Supprimer en ordre inverse pour ne pas décaler les index
+                                for idx in sorted(selected_indices, reverse=True):
+                                    if 0 <= idx < len(lst):
+                                        lst.pop(idx)
+                                # Effacer les clés checkbox pour éviter résidus
+                                for k in skeys:
+                                    st.session_state.pop(k, None)
+
+                        n_selected = sum(1 for k in sel_keys if st.session_state.get(k, False))
+                        st.button(
+                            f"🗑️ Supprimer {n_selected} sélectionné(s)" if n_selected else "🗑️ Supprimer la sélection",
+                            key=f"del_sel_{section_key}",
+                            type="primary" if n_selected else "secondary",
+                            disabled=(n_selected == 0),
+                            on_click=_do_delete
+                        )
+
+                        st.markdown("---")
+
+                        # ── MODIFIER UN ITEM ──
+                        st.markdown("**Modifier un item :**")
+                        idx_options = {f"{i+1}. {item[:60]}...": i for i, item in enumerate(current_items)} if current_items else {}
+                        if idx_options:
+                            chosen_label = st.selectbox("Choisir un item à modifier", list(idx_options.keys()), key=f"sel_edit_{section_key}")
+                            chosen_idx = idx_options[chosen_label]
+                            edited_val = st.text_area(
+                                "Nouvelle valeur",
+                                value=current_items[chosen_idx],
+                                height=80,
+                                key=f"edit_val_{section_key}"
+                            )
+
+                        def _do_save(sk, ci, ev_key):
+                            val = st.session_state.get(ev_key, "").strip()
+                            if val and ci is not None and 0 <= ci < len(st.session_state.rule_edited_recommendations[sk]):
+                                st.session_state.rule_edited_recommendations[sk][ci] = val
+
+                        st.button(
+                            "💾 Sauvegarder la modification",
+                            key=f"save_edit_{section_key}",
+                            on_click=_do_save,
+                            args=(section_key, chosen_idx, f"edit_val_{section_key}")
+                        )
+
+                        st.markdown("---")
+
+                        # ── AJOUTER ──
+                        st.markdown("**Ajouter une recommandation :**")
                         new_item_rule = st.text_area(
-                            "➕ Nouvelle recommandation",
+                            "Nouvelle recommandation",
                             height=70,
                             key=f"rule_new_{section_key}",
-                            placeholder="Entrez une nouvelle recommandation..."
+                            placeholder="Entrez une nouvelle recommandation...",
+                            label_visibility="collapsed"
                         )
-                        if st.button(f"➕ Ajouter", key=f"rule_add_{section_key}"):
-                            if new_item_rule.strip():
-                                current_items.append(new_item_rule.strip())
-                                st.success("✅ Recommandation ajoutée")
+
+                        def _do_add(sk=section_key, nk=f"rule_new_{section_key}"):
+                            val = st.session_state.get(nk, "").strip()
+                            if val:
+                                st.session_state.rule_edited_recommendations[sk].append(val)
+                                st.session_state[nk] = ""
+
+                        st.button("➕ Ajouter", key=f"rule_add_{section_key}", on_click=_do_add)
 
             # Mettre à jour recommendations avec les valeurs éditées pour le PDF
             if st.session_state.rule_edited_recommendations:
