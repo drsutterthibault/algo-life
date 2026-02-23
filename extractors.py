@@ -860,21 +860,36 @@ def extract_biology_from_excel(excel_path, progress=None):
     try:
         if progress:
             progress.update(10, "Lecture Excel...")
-        
+
+        excel_file = pd.ExcelFile(excel_path)
+        sheet_names = excel_file.sheet_names
+
+        # Cherche le bon onglet : "Biomarqueurs Base" en priorité, sinon sheet 0
+        target_sheet = None
+        for candidate in ["Biomarqueurs Base", "Biologie", "Biology", "Bilan"]:
+            if candidate in sheet_names:
+                target_sheet = candidate
+                break
+
+        def _try_read(skip):
+            if target_sheet:
+                return pd.read_excel(excel_file, sheet_name=target_sheet, skiprows=skip)
+            return pd.read_excel(excel_file, skiprows=skip)
+
         # Tentative 1 : header en ligne 1 (standard)
-        df = pd.read_excel(excel_path)
+        df = _try_read(0)
         col_name, col_value, col_unit, col_ref = _detect_columns(df)
-        
-        # Tentative 2 : header en ligne 2 (ligne 1 = titre décoratif/fusionné)
+
+        # Tentative 2 : header en ligne 2 (titre décoratif)
         if not col_name or not col_value:
-            df = pd.read_excel(excel_path, skiprows=1)
+            df = _try_read(1)
             col_name, col_value, col_unit, col_ref = _detect_columns(df)
-        
-        # Tentative 3 : header en ligne 3 (double titre)
+
+        # Tentative 3 : header en ligne 3 (titre + ligne vide)
         if not col_name or not col_value:
-            df = pd.read_excel(excel_path, skiprows=2)
+            df = _try_read(2)
             col_name, col_value, col_unit, col_ref = _detect_columns(df)
-        
+
         if not col_name or not col_value:
             return {}
         
