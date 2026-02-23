@@ -691,6 +691,416 @@ st.set_page_config(
 
 init_session_state()
 
+# ═════════════════════════════════════════════════════════════════════
+# PREMIUM CSS THEME
+# ═════════════════════════════════════════════════════════════════════
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
+
+/* ── Root variables ── */
+:root {
+    --primary: #0284c7;
+    --primary-light: #38bdf8;
+    --primary-dark: #0369a1;
+    --accent: #06b6d4;
+    --accent2: #818cf8;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --bg: #f0f4f8;
+    --surface: #ffffff;
+    --surface2: #f8fafc;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+    --shadow-lg: 0 10px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06);
+    --radius: 14px;
+    --radius-sm: 8px;
+}
+
+/* ── Global reset ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', system-ui, sans-serif !important;
+    color: var(--text) !important;
+}
+
+/* ── App background ── */
+.stApp {
+    background: linear-gradient(145deg, #e8f0f7 0%, #eef2f8 40%, #e6edf5 100%) !important;
+    background-attachment: fixed !important;
+    min-height: 100vh;
+}
+
+/* ── Main container ── */
+.main .block-container {
+    background: transparent !important;
+    padding: 1.5rem 2rem 3rem 2rem !important;
+    max-width: 1400px !important;
+}
+
+/* ── Headings ── */
+h1, h2, h3, h4 {
+    font-family: 'Sora', sans-serif !important;
+    letter-spacing: -0.02em !important;
+}
+
+/* ── Horizontal rule ── */
+hr {
+    border: none !important;
+    border-top: 1px solid var(--border) !important;
+    margin: 1.5rem 0 !important;
+    opacity: 0.6 !important;
+}
+
+/* ═══ TABS ═══ */
+.stTabs [data-baseweb="tab-list"] {
+    background: var(--surface) !important;
+    border-radius: var(--radius) !important;
+    padding: 6px !important;
+    gap: 4px !important;
+    box-shadow: var(--shadow-sm) !important;
+    border: 1px solid var(--border) !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 10px !important;
+    color: var(--text-muted) !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 13.5px !important;
+    padding: 8px 16px !important;
+    transition: all 0.2s ease !important;
+    border: none !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%) !important;
+    color: white !important;
+    box-shadow: 0 2px 10px rgba(2, 132, 199, 0.35) !important;
+    font-weight: 600 !important;
+}
+
+.stTabs [data-baseweb="tab-highlight"] {
+    display: none !important;
+}
+
+/* ═══ BUTTONS ═══ */
+.stButton > button {
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    border-radius: 10px !important;
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    letter-spacing: 0.01em !important;
+    border: none !important;
+    cursor: pointer !important;
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #ef4444 0%, #f97316 100%) !important;
+    color: white !important;
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35) !important;
+    padding: 10px 20px !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 22px rgba(239, 68, 68, 0.45) !important;
+}
+
+.stButton > button[kind="secondary"] {
+    background: white !important;
+    color: var(--primary) !important;
+    border: 1.5px solid var(--border) !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+
+.stButton > button[kind="secondary"]:hover {
+    background: #f0f9ff !important;
+    border-color: var(--primary-light) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ═══ INPUTS ═══ */
+.stSelectbox > div > div,
+.stDateInput > div > div > input,
+.stNumberInput > div > div > input,
+.stTextArea > div > div > textarea,
+.stTextInput > div > div > input {
+    background: var(--surface) !important;
+    border: 1.5px solid var(--border) !important;
+    border-radius: 10px !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 14px !important;
+    color: var(--text) !important;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+.stSelectbox > div > div:hover,
+.stNumberInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus,
+.stTextInput > div > div > input:focus {
+    border-color: var(--primary-light) !important;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15) !important;
+    outline: none !important;
+}
+
+/* ── Labels ── */
+.stSelectbox label, .stDateInput label, .stNumberInput label,
+.stTextArea label, .stTextInput label, .stMultiSelect label {
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    color: var(--text-muted) !important;
+    letter-spacing: 0.02em !important;
+    text-transform: uppercase !important;
+    margin-bottom: 4px !important;
+}
+
+/* ── Number input +/- buttons ── */
+.stNumberInput button {
+    background: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text-muted) !important;
+    border-radius: 6px !important;
+}
+
+/* ═══ METRICS ═══ */
+[data-testid="metric-container"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 16px 20px !important;
+    box-shadow: var(--shadow-sm) !important;
+    transition: all 0.2s ease !important;
+}
+
+[data-testid="metric-container"]:hover {
+    box-shadow: var(--shadow-md) !important;
+    transform: translateY(-2px) !important;
+}
+
+[data-testid="metric-container"] [data-testid="stMetricLabel"] {
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: var(--text-muted) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+
+[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-family: 'Sora', sans-serif !important;
+    font-size: 26px !important;
+    font-weight: 700 !important;
+    color: var(--text) !important;
+}
+
+/* ═══ DATAFRAMES / TABLES ═══ */
+.stDataFrame {
+    border-radius: var(--radius) !important;
+    overflow: hidden !important;
+    box-shadow: var(--shadow-sm) !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* ═══ FILE UPLOADER ═══ */
+.stFileUploader > div {
+    background: var(--surface) !important;
+    border: 2px dashed var(--border) !important;
+    border-radius: var(--radius) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stFileUploader > div:hover {
+    border-color: var(--primary-light) !important;
+    background: #f0f9ff !important;
+}
+
+/* ═══ MULTISELECT ═══ */
+.stMultiSelect [data-baseweb="tag"] {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%) !important;
+    border-radius: 6px !important;
+    color: white !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+}
+
+/* ═══ EXPANDER ═══ */
+.streamlit-expanderHeader {
+    background: var(--surface) !important;
+    border-radius: var(--radius-sm) !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 500 !important;
+    border: 1px solid var(--border) !important;
+}
+
+/* ═══ SUCCESS / ERROR / WARNING ═══ */
+.stSuccess {
+    background: #ecfdf5 !important;
+    border: 1px solid #6ee7b7 !important;
+    border-radius: var(--radius-sm) !important;
+    color: #065f46 !important;
+}
+
+.stError {
+    background: #fef2f2 !important;
+    border: 1px solid #fca5a5 !important;
+    border-radius: var(--radius-sm) !important;
+}
+
+.stWarning {
+    background: #fffbeb !important;
+    border: 1px solid #fde68a !important;
+    border-radius: var(--radius-sm) !important;
+}
+
+/* ═══ CAPTION / SMALL TEXT ═══ */
+.stCaption, .caption {
+    font-size: 12px !important;
+    color: var(--text-muted) !important;
+    font-style: italic !important;
+}
+
+/* ═══ SPINNER ═══ */
+.stSpinner > div {
+    border-top-color: var(--primary) !important;
+}
+
+/* ═══ SCROLLBAR ═══ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ═══ SECTION CARDS (replaces inline div backgrounds) ═══ */
+.algo-card {
+    background: var(--surface) !important;
+    border-radius: var(--radius) !important;
+    border: 1px solid var(--border) !important;
+    padding: 24px 28px !important;
+    box-shadow: var(--shadow-sm) !important;
+    margin-bottom: 20px !important;
+}
+
+.algo-section-header {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    padding: 18px 24px;
+    border-radius: 12px;
+    border-left: 4px solid var(--primary);
+    margin-bottom: 24px;
+}
+
+/* ═══ HEADER GLASSMORPHISM ═══ */
+.algo-header-glass {
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255,255,255,0.7);
+    border-radius: 0 0 16px 16px;
+    padding: 12px 24px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    margin-bottom: 8px;
+}
+
+/* ═══ IMPORT ZONE cards ═══ */
+.import-card-success {
+    background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    border: 2px solid #10b981;
+    border-radius: 14px;
+    padding: 28px 20px;
+    text-align: center;
+    box-shadow: 0 6px 20px rgba(16,185,129,0.15);
+    transition: transform 0.2s ease;
+}
+
+.import-card-success:hover { transform: translateY(-3px); }
+
+.import-card-micro {
+    background: linear-gradient(135deg, #ede9fe 0%, #c7d2fe 100%);
+    border: 2px solid #818cf8;
+    border-radius: 14px;
+    padding: 28px 20px;
+    text-align: center;
+    box-shadow: 0 6px 20px rgba(129,140,248,0.15);
+}
+
+.import-card-disabled {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 2px dashed #d1d5db;
+    border-radius: 14px;
+    padding: 28px 20px;
+    text-align: center;
+    opacity: 0.65;
+}
+
+/* ═══ GUIDE CARDS ═══ */
+.guide-card-blue {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    padding: 20px;
+    border-radius: 12px;
+    border-left: 4px solid var(--primary);
+    border-top: 1px solid rgba(147,197,253,0.4);
+    box-shadow: 0 2px 8px rgba(59,130,246,0.08);
+}
+
+.guide-card-amber {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    padding: 20px;
+    border-radius: 12px;
+    border-left: 4px solid #f59e0b;
+    border-top: 1px solid rgba(253,230,138,0.4);
+    box-shadow: 0 2px 8px rgba(245,158,11,0.08);
+}
+
+.guide-card-green {
+    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    padding: 20px;
+    border-radius: 12px;
+    border-left: 4px solid #10b981;
+    border-top: 1px solid rgba(167,243,208,0.4);
+    box-shadow: 0 2px 8px rgba(16,185,129,0.08);
+}
+
+/* ═══ DOSSIER BADGE ═══ */
+.dossier-badge {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    padding: 14px 20px;
+    border-radius: 12px;
+    border: 1.5px solid var(--border);
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+}
+
+/* ═══ LOGO BADGE ═══ */
+.logo-icon {
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);
+    border-radius: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(14,165,233,0.35);
+    font-size: 26px;
+    flex-shrink: 0;
+}
+
+/* ═══ LANCER BUTTON SPECIAL ═══ */
+.stButton > button[data-testid="stBaseButton-primary"] {
+    font-size: 16px !important;
+    padding: 14px 28px !important;
+    letter-spacing: 0.02em !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────────────────────────────────
@@ -698,17 +1108,13 @@ col_header1, col_header2, col_header3 = st.columns([2, 6, 2])
 
 with col_header1:
     st.markdown("""
-        <div style="display: flex; align-items: center; gap: 15px; padding: 15px 0;">
-            <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%);
-                        border-radius: 12px; display: flex; align-items: center; justify-content: center;
-                        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);">
-                <span style="font-size: 28px;">🧬</span>
-            </div>
+        <div style="display: flex; align-items: center; gap: 15px; padding: 12px 0;">
+            <div class="logo-icon">🧬</div>
             <div>
-                <h2 style="margin: 0; color: #0f172a; font-size: 24px; font-weight: 700; letter-spacing: 1px;">
+                <h2 style="margin: 0; color: #0f172a; font-size: 22px; font-weight: 800; letter-spacing: -0.03em; font-family: 'Sora', sans-serif;">
                     ALGO-LIFE
                 </h2>
-                <p style="margin: 0; color: #64748b; font-size: 12px; letter-spacing: 0.5px;">
+                <p style="margin: 0; color: #94a3b8; font-size: 10px; letter-spacing: 0.12em; font-weight: 600; text-transform: uppercase;">
                     PLATEFORME MÉDECIN
                 </p>
             </div>
@@ -717,13 +1123,13 @@ with col_header1:
 
 with col_header2:
     st.markdown("""
-        <div style="display: flex; align-items: center; justify-content: center; height: 80px;">
-            <h1 style="color: #0f172a; margin: 0; font-size: 28px; font-weight: 600;">
+        <div style="display: flex; align-items: center; justify-content: center; height: 72px; gap: 14px;">
+            <h1 style="color: #0f172a; margin: 0; font-size: 26px; font-weight: 700; font-family: 'Sora', sans-serif; letter-spacing: -0.02em;">
                 Nouvelle Analyse
             </h1>
-            <span style="background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 12px;
-                         font-size: 11px; font-weight: 600; margin-left: 15px; letter-spacing: 0.5px;">
-                Beta v1.0
+            <span style="background: linear-gradient(135deg, #0ea5e9, #06b6d4); color: white; padding: 4px 12px; border-radius: 20px;
+                         font-size: 10px; font-weight: 700; letter-spacing: 0.08em; box-shadow: 0 2px 8px rgba(14,165,233,0.3);">
+                BETA v1.0
             </span>
         </div>
     """, unsafe_allow_html=True)
@@ -742,10 +1148,14 @@ with col_header3:
             <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 8px;">
                 <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #0ea5e9, #06b6d4);
                             border-radius: 50%; display: flex; align-items: center; justify-content: center;
-                            color: white; font-weight: 700; font-size: 14px; box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);">
+                            color: white; font-weight: 800; font-size: 13px; font-family: 'Sora',sans-serif;
+                            box-shadow: 0 3px 10px rgba(14, 165, 233, 0.4);">
                     T
                 </div>
-                <span style="color: #0f172a; font-weight: 600; font-size: 14px;">Thibault SUTTER</span>
+                <div>
+                    <p style="margin: 0; color: #0f172a; font-weight: 600; font-size: 13px; font-family: 'DM Sans',sans-serif;">Thibault SUTTER</p>
+                    <p style="margin: 0; color: #94a3b8; font-size: 10px; letter-spacing: 0.05em;">Dr. PhD Biologie</p>
+                </div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -772,11 +1182,11 @@ with tab1:
         
         with col_guide1:
             st.markdown("""
-                <div style="background: #f0f9ff; padding: 20px; border-radius: 12px; border-left: 4px solid #0ea5e9;">
-                    <h3 style="color: #0369a1; margin: 0 0 10px 0; font-size: 16px; font-weight: 700;">
+                <div class="guide-card-blue">
+                    <h3 style="color: #1e40af; margin: 0 0 10px 0; font-size: 15px; font-weight: 700; font-family: 'Sora', sans-serif;">
                         1️⃣ Renseignez le patient
                     </h3>
-                    <p style="color: #0f172a; margin: 0; font-size: 14px; line-height: 1.6;">
+                    <p style="color: #334155; margin: 0; font-size: 14px; line-height: 1.6;">
                         Remplissez les informations contextuelles ci-dessous pour calibrer l'analyse.
                     </p>
                 </div>
@@ -784,11 +1194,11 @@ with tab1:
         
         with col_guide2:
             st.markdown("""
-                <div style="background: #fef3c7; padding: 20px; border-radius: 12px; border-left: 4px solid #f59e0b;">
-                    <h3 style="color: #92400e; margin: 0 0 10px 0; font-size: 16px; font-weight: 700;">
+                <div class="guide-card-amber">
+                    <h3 style="color: #92400e; margin: 0 0 10px 0; font-size: 15px; font-weight: 700; font-family: 'Sora', sans-serif;">
                         2️⃣ Importez les données
                     </h3>
-                    <p style="color: #0f172a; margin: 0; font-size: 14px; line-height: 1.6;">
+                    <p style="color: #334155; margin: 0; font-size: 14px; line-height: 1.6;">
                         Téléversez PDF ou Excel (Bio, Micro) pour une analyse croisée.
                     </p>
                 </div>
@@ -796,11 +1206,11 @@ with tab1:
         
         with col_guide3:
             st.markdown("""
-                <div style="background: #f0fdf4; padding: 20px; border-radius: 12px; border-left: 4px solid #10b981;">
-                    <h3 style="color: #065f46; margin: 0 0 10px 0; font-size: 16px; font-weight: 700;">
+                <div class="guide-card-green">
+                    <h3 style="color: #065f46; margin: 0 0 10px 0; font-size: 15px; font-weight: 700; font-family: 'Sora', sans-serif;">
                         3️⃣ Lancement IA
                     </h3>
-                    <p style="color: #0f172a; margin: 0; font-size: 14px; line-height: 1.6;">
+                    <p style="color: #334155; margin: 0; font-size: 14px; line-height: 1.6;">
                         L'IA croise les données et génère une interprétation globale instantanée.
                     </p>
                 </div>
@@ -810,9 +1220,8 @@ with tab1:
     
     # Information Patient
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); 
-                    padding: 20px 25px; border-radius: 12px; border-left: 4px solid #0ea5e9; margin-bottom: 30px;">
-            <h3 style="color: #0f172a; margin: 0 0 5px 0; font-size: 18px; font-weight: 700;">
+        <div class="algo-section-header">
+            <h3 style="color: #0f172a; margin: 0 0 3px 0; font-size: 17px; font-weight: 700; font-family: 'Sora', sans-serif;">
                 👤 Information Patient
             </h3>
         </div>
@@ -832,10 +1241,9 @@ with tab1:
     with col_patient2:
         st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
         st.markdown(f"""
-            <div style="background: white; padding: 15px 20px; border-radius: 10px; border: 2px solid #e2e8f0;
-                        text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.05);">
-                <p style="margin: 0; color: #64748b; font-size: 12px; font-weight: 600;">DOSSIER</p>
-                <p style="margin: 5px 0 0 0; color: #0f172a; font-size: 20px; font-weight: 700;">#New</p>
+            <div class="dossier-badge">
+                <p style="margin: 0; color: #94a3b8; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;">DOSSIER</p>
+                <p style="margin: 6px 0 0 0; color: #0f172a; font-size: 22px; font-weight: 800; font-family: 'Sora', sans-serif;">#New</p>
             </div>
         """, unsafe_allow_html=True)
     
@@ -890,9 +1298,8 @@ with tab1:
     st.markdown("---")
     
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); 
-                    padding: 20px 25px; border-radius: 12px; border-left: 4px solid #0ea5e9; margin-bottom: 25px;">
-            <h3 style="color: #0f172a; margin: 0 0 5px 0; font-size: 18px; font-weight: 700;">
+        <div class="algo-section-header" style="margin-bottom: 25px;">
+            <h3 style="color: #0f172a; margin: 0 0 4px 0; font-size: 17px; font-weight: 700; font-family: 'Sora', sans-serif;">
                 📄 Zone d'importation Multimodale
             </h3>
             <p style="color: #64748b; margin: 0; font-size: 13px;">
@@ -908,15 +1315,12 @@ with tab1:
         bio_status = f"✅ Extraction réussie\n{bio_count} biomarqueurs extraits\nCliquez pour changer de fichier" if st.session_state.data_extracted and bio_count > 0 else "Téléversez PDF ou Excel"
         
         st.markdown(f"""
-            <div style="background: {'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)' if bio_count > 0 else 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)'}; 
-                        padding: 25px 20px; border-radius: 12px; border: 2px solid {'#10b981' if bio_count > 0 else '#d1d5db'};
-                        text-align: center; min-height: 180px; display: flex; flex-direction: column; justify-content: center;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-                <div style="font-size: 48px; margin-bottom: 15px;">{'✅' if bio_count > 0 else '📄'}</div>
-                <h4 style="color: #0f172a; margin: 0 0 10px 0; font-size: 16px; font-weight: 700;">
+            <div class="{'import-card-success' if bio_count > 0 else 'import-card-disabled'}" style="min-height: 170px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="font-size: 44px; margin-bottom: 12px;">{'✅' if bio_count > 0 else '🔬'}</div>
+                <h4 style="color: #0f172a; margin: 0 0 8px 0; font-size: 15px; font-weight: 700; font-family: 'Sora', sans-serif;">
                     {'Extraction réussie' if bio_count > 0 else 'Analyse Biologie'}
                 </h4>
-                <p style="color: #64748b; margin: 0; font-size: 12px; line-height: 1.5;">
+                <p style="color: {'#065f46' if bio_count > 0 else '#64748b'}; margin: 0; font-size: 12px; line-height: 1.5;">
                     {bio_status}
                 </p>
             </div>
@@ -931,15 +1335,12 @@ with tab1:
         micro_status = f"✅ Extraction réussie\n{micro_count} groupes extraits\nCliquez pour changer" if micro_count > 0 else "Téléversez PDF ou Excel"
         
         st.markdown(f"""
-            <div style="background: {'linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)' if micro_count > 0 else 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)'}; 
-                        padding: 25px 20px; border-radius: 12px; border: 2px solid {'#6366f1' if micro_count > 0 else '#d1d5db'};
-                        text-align: center; min-height: 180px; display: flex; flex-direction: column; justify-content: center;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-                <div style="font-size: 48px; margin-bottom: 15px;">{'✅' if micro_count > 0 else '📄'}</div>
-                <h4 style="color: #0f172a; margin: 0 0 10px 0; font-size: 16px; font-weight: 700;">
+            <div class="{'import-card-micro' if micro_count > 0 else 'import-card-disabled'}" style="min-height: 170px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="font-size: 44px; margin-bottom: 12px;">{'✅' if micro_count > 0 else '🦠'}</div>
+                <h4 style="color: #0f172a; margin: 0 0 8px 0; font-size: 15px; font-weight: 700; font-family: 'Sora', sans-serif;">
                     {'Extraction réussie' if micro_count > 0 else 'Analyse Microbiote'}
                 </h4>
-                <p style="color: #64748b; margin: 0; font-size: 12px; line-height: 1.5;">
+                <p style="color: {'#312e81' if micro_count > 0 else '#64748b'}; margin: 0; font-size: 12px; line-height: 1.5;">
                     {micro_status}
                 </p>
             </div>
@@ -951,12 +1352,9 @@ with tab1:
     
     with col_import3:
         st.markdown("""
-            <div style="background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%); 
-                        padding: 25px 20px; border-radius: 12px; border: 2px solid #d1d5db;
-                        text-align: center; min-height: 180px; display: flex; flex-direction: column; justify-content: center;
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-                <div style="font-size: 48px; margin-bottom: 15px;">📄</div>
-                <h4 style="color: #0f172a; margin: 0 0 10px 0; font-size: 16px; font-weight: 700;">
+            <div class="import-card-disabled" style="min-height: 170px; display: flex; flex-direction: column; justify-content: center;">
+                <div style="font-size: 44px; margin-bottom: 12px;">🧬</div>
+                <h4 style="color: #0f172a; margin: 0 0 8px 0; font-size: 15px; font-weight: 700; font-family: 'Sora', sans-serif;">
                     Analyse Épigénétique
                 </h4>
                 <p style="color: #64748b; margin: 0; font-size: 12px; line-height: 1.5;">
