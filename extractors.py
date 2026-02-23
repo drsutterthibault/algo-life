@@ -344,6 +344,167 @@ def extract_synlab_biology(pdf_path, progress=None):
     return out
 
 
+def extract_lims_biology(pdf_path, progress=None):
+    """
+    Extrait les biomarqueurs d'un PDF LIMS (mbnext group Europe)
+    Format spécifique: colonnes "Résultats | Unités | Valeurs de référence"
+    Gère les symboles ▲/▼ avant les valeurs hors normes
+    Supporte: HÉMATOLOGIE, BIOCHIMIE, INFLAMMATION, LIPIDES, STRESS OXYDATIF,
+              ACIDES BILIAIRES sériques, BIOCHIMIE URINAIRE
+    """
+    if progress:
+        progress.update(5, "Lecture PDF LIMS...")
+
+    text = _read_pdf_text(pdf_path)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    out = {}
+
+    if progress:
+        progress.update(15, "Parsing biomarqueurs LIMS...")
+
+    # Sections à ignorer (titres décoratifs, métadonnées)
+    LIMS_SECTION_HEADERS = {
+        "informations générales", "hématologie", "biochimie hématologique",
+        "inflammation", "marqueurs cardiaques", "bilan lipidique",
+        "statut du stress oxydatif", "oligoéléments et protéines",
+        "enzymes et coenzymes antioxydantes", "acides biliaires",
+        "biochimie urinaire", "polymorphisme fut2",
+        "analyses", "résultats", "valeurs de référence", "antérieur",
+        "normal", "complet",
+    }
+
+    LIMS_NOISE = re.compile(
+        r"(LIMS\s+Site|Fond\s+des|Tél\s*:|E-Mail|Page\s+\d|N°\s*Réf|Votre\s+référence"
+        r"|Date\s+Prescription|Date\s+Réception|Date\s+Impression|Né\s+le|Sexe\s*:"
+        r"|CHASSAGNE|KONATE|boulevard|galerie|PARIS|FRANCE|Confraternellement"
+        r"|Protocole\s+validé|biologistes|Résultat\s+modifié|Hors\s+bornes"
+        r"|Ajout\s+biologiste|Ajout\s+prescripteur|Effectué\s+par|sauvage"
+        r"|homozygote|sécréteur|Interprétation|électroniquement)",
+        re.IGNORECASE
+    )
+
+    # Patterns principaux LIMS
+    # Format: "Nom ▲|▼ valeur unité ref_min - ref_max"   (hors norme)
+    # Format: "Nom valeur unité ref_min - ref_max"         (normal)
+    # Format: "Nom <0.001 unité ref_min - ref_max"         (< valeur)
+    # Format: "Nom NORMAL"                                  (qualitatif)
+
+    # Pattern 1: valeur numérique + unité + plage référence
+    pat_num_range = re.compile(
+        r"^(?P<n>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\.\(\)/éèêëàâùûüîïôç']{2,60}?)\s+"
+        r"[▲▼]?\s*"
+        r"(?P<value>[<>]?\s*\d+(?:[.,]\d+)?)\s+"
+        r"(?P<unit>[a-zA-ZµμÎ¼/%]+(?:[/·][a-zA-Z]+)?)?\s*"
+        r"(?P<ref>\d+(?:[.,]\d+)?\s*[-–—]\s*\d+(?:[.,]\d+)?)\s*$",
+        re.UNICODE
+    )
+
+    # Pattern 2: valeur numérique + unité + référence "< X" ou "> X"
+    pat_num_limit = re.compile(
+        r"^(?P<n>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\.\(\)/éèêëàâùûüîïôç']{2,60}?)\s+"
+        r"[▲▼]?\s*"
+        r"(?P<value>[<>]?\s*\d+(?:[.,]\d+)?)\s+"
+        r"(?P<unit>[a-zA-ZµμÎ¼/%]+(?:[/·][a-zA-Z]+)?)?\s*"
+        r"(?P<ref>[<>≤≥]\s*\d+(?:[.,]\d+)?)\s*$",
+        re.UNICODE
+    )
+
+    # Pattern 3: valeur qualitative (NORMAL, etc.)
+    pat_qualitative = re.compile(
+        r"^(?P<n>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-éèàâ]{2,50}?)\s+"
+        r"(?P<value>NORMAL|NÉGATIF|POSITIF|ABSENT|PRÉSENT)\s*$",
+        re.UNICODE | re.IGNORECASE
+    )
+
+    # Pattern 4: FUT2 génotype
+    pat_fut2 = re.compile(
+        r"^(?P<n>(?:FUT2\s+)?(?:Génotype|Profil)[^:]{0,60}?)\s+"
+        r"(?P<value>(?:sauvage|homozygote|hétérozygote|sécréteur|non-sécréteur).{0,60})\s*$",
+        re.UNICODE | re.IGNORECASE
+    )
+
+    for ln in lines:
+        # Filtre bruit LIMS
+        if LIMS_NOISE.search(ln):
+            continue
+        ln_lower = ln.lower().strip()
+        if ln_lower in LIMS_SECTION_HEADERS:
+            continue
+        if len(ln) < 5:
+            continue
+
+        # FUT2
+        m = pat_fut2.match(ln)
+        if m:
+            name = "FUT2 " + m.group("n").strip().title()
+            out[name] = {
+                "value": m.group("value").strip(),
+                "unit": "",
+                "reference": "Profil sécréteur",
+                "status": "Normal"
+            }
+            continue
+
+        # Qualitatif
+        m = pat_qualitative.match(ln)
+        if m:
+            name = m.group("n").strip()
+            val = m.group("value").strip().upper()
+            status = "Normal" if val == "NORMAL" else "Inconnu"
+            out[name] = {"value": val, "unit": "", "reference": "", "status": status}
+            continue
+
+        # Numérique + plage
+        m = pat_num_range.match(ln)
+        if m:
+            name = m.group("n").strip()
+            raw_val = m.group("value").replace(" ", "")
+            unit = (m.group("unit") or "").strip()
+            ref = _clean_ref(m.group("ref"))
+            value_float = _safe_float(raw_val)
+            status = determine_biomarker_status(value_float, ref, name)
+            out[name] = {"value": value_float if value_float is not None else raw_val,
+                         "unit": unit, "reference": ref, "status": status}
+            continue
+
+        # Numérique + limite < ou >
+        m = pat_num_limit.match(ln)
+        if m:
+            name = m.group("n").strip()
+            raw_val = m.group("value").replace(" ", "")
+            unit = (m.group("unit") or "").strip()
+            ref = _clean_ref(m.group("ref"))
+            value_float = _safe_float(raw_val)
+            status = determine_biomarker_status(value_float, ref, name)
+            out[name] = {"value": value_float if value_float is not None else raw_val,
+                         "unit": unit, "reference": ref, "status": status}
+            continue
+
+    if progress:
+        progress.update(30, f"LIMS: {len(out)} biomarqueurs")
+
+    return out
+
+
+def detect_pdf_lab_format(pdf_path):
+    """Détecte automatiquement le format du PDF labo (Synlab/Unilabs vs LIMS vs autre)"""
+    try:
+        text = _read_pdf_text(pdf_path)
+        text_upper = text.upper()
+        if "LIMS" in text_upper and ("LOUVAIN" in text_upper or "MBNEXT" in text_upper):
+            return "lims"
+        if "SYNLAB" in text_upper:
+            return "synlab"
+        if "UNILABS" in text_upper:
+            return "unilabs"
+        # Heuristique: si on voit le format "Résultats Unités Valeurs de référence"
+        if "VALEURS DE RÉFÉRENCE" in text_upper and "DATE PRESCRIPTION" in text_upper:
+            return "lims"
+        return "synlab"  # fallback
+    except Exception:
+        return "synlab"
+
+
 def _extract_bacterial_groups_v2(text):
     """Extraction des 12 groupes bactériens standards"""
     
