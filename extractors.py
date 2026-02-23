@@ -691,6 +691,42 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
     if m_pro:
         metabolites["propionate"] = _safe_float(m_pro.group(1))
     
+    # ===== STOOL BIOMARKERS (IDK PDF) =====
+    stool_biomarkers = {}
+    
+    # Format IDK: "NomBiomarqueur\nVALEUR unit\nRef : REFERENCE\n"
+    # Ex: "alpha-1-Antitrypsin im Stuhl\n9.7 mg/dl\nRef : < 26.8"
+    stool_pattern = re.compile(
+        r"([\w\-\s]+im\s+Stuhl)\s+"          # nom biomarqueur (contient "im Stuhl")
+        r"([<>]?\s*[\d]+(?:[.,]\d+)?)\s*"    # valeur (avec optionnel < ou >)
+        r"([\w/%µμ]+(?:/\w+)?)?\s*"          # unité
+        r"Ref\s*:\s*([^\n]+)",                # référence
+        re.IGNORECASE
+    )
+    
+    for m in stool_pattern.finditer(text):
+        name = m.group(1).strip()
+        value_raw = m.group(2).strip()
+        unit = (m.group(3) or "").strip()
+        ref = _clean_ref(m.group(4).strip())
+        
+        # Cas valeur "<X" (ex: sIgA "<149.6") → valeur numérique extraite, statut Bas si ref min
+        value_float = _safe_float(value_raw)
+        
+        status = determine_biomarker_status(value_float, ref, name)
+        
+        # Cas spécial : valeur préfixée par "<" → comparer au seuil bas de la référence
+        if value_raw.startswith("<") and status == "Inconnu":
+            # On ne peut pas déterminer précisément, laisser tel quel
+            status = "Bas"
+        
+        stool_biomarkers[name] = {
+            "value": value_float if value_float is not None else value_raw,
+            "unit": unit,
+            "reference": ref,
+            "status": status
+        }
+
     if progress:
         progress.update(100, "Extraction terminée")
     
@@ -701,7 +737,8 @@ def extract_idk_microbiome(pdf_path, excel_path=None, enable_graphical_detection
         "diversity_metrics": diversity_metrics if diversity_metrics else None,
         "bacteria_individual": bacteria_individual,
         "bacteria_groups": bacteria_groups,
-        "metabolites": metabolites if metabolites else None
+        "metabolites": metabolites if metabolites else None,
+        "stool_biomarkers": stool_biomarkers
     }
 
 
