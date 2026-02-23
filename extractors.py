@@ -860,11 +860,14 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
                 if not biomarker or biomarker == "nan" or pd.isna(biomarker) or biomarker.lower() == "biomarqueur":
                     continue
                 
+                raw_value = row[1] if 1 in row.index else None
+                raw_ref = str(row[3]) if 3 in row.index else ""
+                computed_status = determine_biomarker_status(raw_value, raw_ref, biomarker)
                 result["stool_biomarkers"][biomarker] = {
-                    "value": row[1] if 1 in row.index else None,
+                    "value": raw_value,
                     "unit": str(row[2]) if 2 in row.index else "",
-                    "reference": str(row[3]) if 3 in row.index else "",
-                    "status": str(row[4]) if 4 in row.index else "Normal"
+                    "reference": raw_ref,
+                    "status": computed_status if computed_status != "Inconnu" else (str(row[4]) if 4 in row.index else "Normal")
                 }
         
         # ===== 3. MICROBIOME DÉTAILLÉ =====
