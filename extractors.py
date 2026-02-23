@@ -346,11 +346,9 @@ def extract_synlab_biology(pdf_path, progress=None):
 
 def extract_lims_biology(pdf_path, progress=None):
     """
-    Extrait les biomarqueurs d'un PDF LIMS (mbnext group Europe)
-    Format spécifique: colonnes "Résultats | Unités | Valeurs de référence"
-    Gère les symboles ▲/▼ avant les valeurs hors normes
-    Supporte: HÉMATOLOGIE, BIOCHIMIE, INFLAMMATION, LIPIDES, STRESS OXYDATIF,
-              ACIDES BILIAIRES sériques, BIOCHIMIE URINAIRE
+    Extrait les biomarqueurs d'un PDF LIMS (mbnext group Europe / Louvain-la-Neuve).
+    Format: "Nom [▲|▼] valeur unité référence"
+    Supporte plages (X - Y), limites (< X ou > X), qualitatifs (NORMAL), FUT2.
     """
     if progress:
         progress.update(5, "Lecture PDF LIMS...")
@@ -362,73 +360,36 @@ def extract_lims_biology(pdf_path, progress=None):
     if progress:
         progress.update(15, "Parsing biomarqueurs LIMS...")
 
-    # Sections à ignorer (titres décoratifs, métadonnées)
-    LIMS_SECTION_HEADERS = {
-        "informations générales", "hématologie", "biochimie hématologique",
-        "inflammation", "marqueurs cardiaques", "bilan lipidique",
-        "statut du stress oxydatif", "oligoéléments et protéines",
-        "enzymes et coenzymes antioxydantes", "acides biliaires",
-        "biochimie urinaire", "polymorphisme fut2",
-        "analyses", "résultats", "valeurs de référence", "antérieur",
-        "normal", "complet",
-    }
-
-    LIMS_NOISE = re.compile(
+    # Lignes bruit à ignorer
+    NOISE_RE = re.compile(
         r"(LIMS\s+Site|Fond\s+des|Tél\s*:|E-Mail|Page\s+\d|N°\s*Réf|Votre\s+référence"
-        r"|Date\s+Prescription|Date\s+Réception|Date\s+Impression|Né\s+le|Sexe\s*:"
-        r"|CHASSAGNE|KONATE|boulevard|galerie|PARIS|FRANCE|Confraternellement"
-        r"|Protocole\s+validé|biologistes|Résultat\s+modifié|Hors\s+bornes"
-        r"|Ajout\s+biologiste|Ajout\s+prescripteur|Effectué\s+par|sauvage"
-        r"|homozygote|sécréteur|Interprétation|électroniquement)",
+        r"|Date\s+(?:Prescription|Réception|Impression)|Né\s+le|Sexe\s*:"
+        r"|boulevard|galerie|PARIS|FRANCE|Confraternellement|Protocole\s+validé"
+        r"|biologistes|Résultat\s+modifié|Hors\s+bornes|Ajout\s+biologiste"
+        r"|Ajout\s+prescripteur|Effectué\s+par|électroniquement"
+        r"|ANALYSES|Résultats|Valeurs\s+de\s+référence|Antérieur|COMPLET"
+        r"|INFORMATIONS\s+GÉNÉRALES|HÉMATOLOGIE|BIOCHIMIE|INFLAMMATION"
+        r"|MARQUEURS\s+CARDIAQUES|BILAN\s+LIPIDIQUE|STATUT\s+DU\s+STRESS"
+        r"|Oligoéléments\s+et\s+protéines|Enzymes\s+et\s+coenzymes"
+        r"|ACIDES\s+BILIAIRES|BIOCHIMIE\s+URINAIRE|POLYMORPHISME)",
         re.IGNORECASE
     )
 
-    # Patterns principaux LIMS
-    # Format: "Nom ▲|▼ valeur unité ref_min - ref_max"   (hors norme)
-    # Format: "Nom valeur unité ref_min - ref_max"         (normal)
-    # Format: "Nom <0.001 unité ref_min - ref_max"         (< valeur)
-    # Format: "Nom NORMAL"                                  (qualitatif)
-
-    # Pattern 1: valeur numérique + unité + plage référence
-    pat_num_range = re.compile(
-        r"^(?P<n>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\.\(\)/éèêëàâùûüîïôç']{2,60}?)\s+"
-        r"[▲▼]?\s*"
-        r"(?P<value>[<>]?\s*\d+(?:[.,]\d+)?)\s+"
-        r"(?P<unit>[a-zA-ZµμÎ¼/%]+(?:[/·][a-zA-Z]+)?)?\s*"
-        r"(?P<ref>\d+(?:[.,]\d+)?\s*[-–—]\s*\d+(?:[.,]\d+)?)\s*$",
-        re.UNICODE
+    # Pattern 1: "Nom [▲▼] valeur unité min - max"
+    pat_range = re.compile(
+        r"^(.+?)\s+[▲▼]?\s*([<>]?\s*\d+(?:[.,]\d+)?)\s+([^\s]+)\s+(\d+(?:[.,]\d+)?\s*[-–]\s*\d+(?:[.,]\d+)?)\s*$"
     )
-
-    # Pattern 2: valeur numérique + unité + référence "< X" ou "> X"
-    pat_num_limit = re.compile(
-        r"^(?P<n>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\.\(\)/éèêëàâùûüîïôç']{2,60}?)\s+"
-        r"[▲▼]?\s*"
-        r"(?P<value>[<>]?\s*\d+(?:[.,]\d+)?)\s+"
-        r"(?P<unit>[a-zA-ZµμÎ¼/%]+(?:[/·][a-zA-Z]+)?)?\s*"
-        r"(?P<ref>[<>≤≥]\s*\d+(?:[.,]\d+)?)\s*$",
-        re.UNICODE
+    # Pattern 2: "Nom [▲▼] valeur unité < X" ou "> X"
+    pat_limit = re.compile(
+        r"^(.+?)\s+[▲▼]?\s*([<>]?\s*\d+(?:[.,]\d+)?)\s+([^\s]+)\s+([<>≤≥]\s*\d+(?:[.,]\d+)?)\s*$"
     )
-
-    # Pattern 3: valeur qualitative (NORMAL, etc.)
-    pat_qualitative = re.compile(
-        r"^(?P<n>[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-éèàâ]{2,50}?)\s+"
-        r"(?P<value>NORMAL|NÉGATIF|POSITIF|ABSENT|PRÉSENT)\s*$",
-        re.UNICODE | re.IGNORECASE
-    )
-
-    # Pattern 4: FUT2 génotype
-    pat_fut2 = re.compile(
-        r"^(?P<n>(?:FUT2\s+)?(?:Génotype|Profil)[^:]{0,60}?)\s+"
-        r"(?P<value>(?:sauvage|homozygote|hétérozygote|sécréteur|non-sécréteur).{0,60})\s*$",
-        re.UNICODE | re.IGNORECASE
-    )
+    # Pattern 3: qualitatif "Nom NORMAL"
+    pat_qual = re.compile(r"^(.+?)\s+(NORMAL|NÉGATIF|POSITIF|ABSENT|PRÉSENT)\s*$", re.IGNORECASE)
+    # Pattern 4: FUT2 génotype "(A385T) Génotype sauvage homozygote AA"
+    pat_fut2 = re.compile(r"^\(([^)]+)\)\s+(Génotype.+)$", re.IGNORECASE)
 
     for ln in lines:
-        # Filtre bruit LIMS
-        if LIMS_NOISE.search(ln):
-            continue
-        ln_lower = ln.lower().strip()
-        if ln_lower in LIMS_SECTION_HEADERS:
+        if NOISE_RE.search(ln):
             continue
         if len(ln) < 5:
             continue
@@ -436,48 +397,34 @@ def extract_lims_biology(pdf_path, progress=None):
         # FUT2
         m = pat_fut2.match(ln)
         if m:
-            name = "FUT2 " + m.group("n").strip().title()
-            out[name] = {
-                "value": m.group("value").strip(),
-                "unit": "",
-                "reference": "Profil sécréteur",
-                "status": "Normal"
-            }
+            name = f"FUT2 {m.group(1)}"
+            out[name] = {"value": m.group(2).strip(), "unit": "", "reference": "", "status": "Normal"}
+            continue
+
+        # Plage numérique
+        m = pat_range.match(ln)
+        if m:
+            name, raw_val, unit, ref = m.group(1).strip(), m.group(2).replace(" ",""), m.group(3), _clean_ref(m.group(4))
+            v = _safe_float(raw_val)
+            out[name] = {"value": v if v is not None else raw_val, "unit": unit,
+                         "reference": ref, "status": determine_biomarker_status(v, ref, name)}
+            continue
+
+        # Limite < ou >
+        m = pat_limit.match(ln)
+        if m:
+            name, raw_val, unit, ref = m.group(1).strip(), m.group(2).replace(" ",""), m.group(3), _clean_ref(m.group(4))
+            v = _safe_float(raw_val)
+            out[name] = {"value": v if v is not None else raw_val, "unit": unit,
+                         "reference": ref, "status": determine_biomarker_status(v, ref, name)}
             continue
 
         # Qualitatif
-        m = pat_qualitative.match(ln)
+        m = pat_qual.match(ln)
         if m:
-            name = m.group("n").strip()
-            val = m.group("value").strip().upper()
-            status = "Normal" if val == "NORMAL" else "Inconnu"
-            out[name] = {"value": val, "unit": "", "reference": "", "status": status}
-            continue
-
-        # Numérique + plage
-        m = pat_num_range.match(ln)
-        if m:
-            name = m.group("n").strip()
-            raw_val = m.group("value").replace(" ", "")
-            unit = (m.group("unit") or "").strip()
-            ref = _clean_ref(m.group("ref"))
-            value_float = _safe_float(raw_val)
-            status = determine_biomarker_status(value_float, ref, name)
-            out[name] = {"value": value_float if value_float is not None else raw_val,
-                         "unit": unit, "reference": ref, "status": status}
-            continue
-
-        # Numérique + limite < ou >
-        m = pat_num_limit.match(ln)
-        if m:
-            name = m.group("n").strip()
-            raw_val = m.group("value").replace(" ", "")
-            unit = (m.group("unit") or "").strip()
-            ref = _clean_ref(m.group("ref"))
-            value_float = _safe_float(raw_val)
-            status = determine_biomarker_status(value_float, ref, name)
-            out[name] = {"value": value_float if value_float is not None else raw_val,
-                         "unit": unit, "reference": ref, "status": status}
+            name = m.group(1).strip()
+            val = m.group(2).strip().upper()
+            out[name] = {"value": val, "unit": "", "reference": "", "status": "Normal"}
             continue
 
     if progress:
@@ -998,8 +945,8 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
         
         # ===== 1. INFORMATIONS PATIENT =====
         if "Informations Patient" in sheet_names:
-            # ✅ CORRECTION: skiprows=1 pour ignorer titre, header=None pour indices numériques
-            df_info = pd.read_excel(excel_file, "Informations Patient", skiprows=1, header=None)
+            # skiprows=2: ligne 0=titre, ligne 1=vide, ligne 2=en-têtes
+            df_info = pd.read_excel(excel_file, "Informations Patient", skiprows=2, header=None)
             
             for _, row in df_info.iterrows():
                 # Utiliser indices numériques [0] et [1]
@@ -1033,8 +980,8 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
         
         # ===== 2. BIOMARQUEURS BASE =====
         if "Biomarqueurs Base" in sheet_names:
-            # ✅ CORRECTION: skiprows=1 pour ignorer titre, header=None pour indices numériques
-            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", skiprows=1, header=None)
+            # skiprows=2: ligne 0=titre, ligne 1=vide, ligne 2=en-têtes
+            df_bio = pd.read_excel(excel_file, "Biomarqueurs Base", skiprows=2, header=None)
             
             for _, row in df_bio.iterrows():
                 # Utiliser indices numériques [0]=Bio, [1]=Valeur, [2]=Unité, [3]=Référence, [4]=Statut
@@ -1055,83 +1002,82 @@ def extract_microbiome_from_excel(excel_path: str) -> Dict[str, Any]:
         
         # ===== 3. MICROBIOME DÉTAILLÉ =====
         if "Microbiome Détaillé" in sheet_names:
-            # ✅ CORRECTION: skiprows=1 pour ignorer titre, header=None pour indices numériques
-            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", skiprows=1, header=None)
+            # skiprows=2: ligne 0=titre, ligne 1=vide, ligne 2=en-têtes → on skip 2 lignes
+            # Structure réelle: [0]=Catégorie [1]=Groupe [2]=Bactérie/Genre [3]=Valeur(%) [4]=Référence [5]=Statut [6]=Interprétation
+            df_micro = pd.read_excel(excel_file, "Microbiome Détaillé", skiprows=2, header=None)
             
             categories_map = {}
             
             for _, row in df_micro.iterrows():
-                # Indices: [0]=Catégorie, [1]=Groupe, [2]=No., [3]=Bactérie, [4]=Position, [5]=Statut, [6]=Interprétation
-                category = str(row[0]) if 0 in row.index else ""
-                groupe = str(row[1]) if 1 in row.index else ""
-                no = str(row[2]) if 2 in row.index else ""
-                bacterie = str(row[3]) if 3 in row.index else ""
-                position = row[4] if 4 in row.index else 0
-                statut = str(row[5]) if 5 in row.index else "Normal"
+                category  = str(row[0]) if 0 in row.index else ""
+                groupe    = str(row[1]) if 1 in row.index else ""
+                bacterie  = str(row[2]) if 2 in row.index else ""
+                valeur    = row[3]      if 3 in row.index else None
+                ref       = str(row[4]) if 4 in row.index else ""
+                statut    = str(row[5]) if 5 in row.index else "Normal"
+                interp    = str(row[6]) if 6 in row.index else ""
                 
                 # Ignorer en-têtes et lignes vides
-                if not category or category == "nan" or pd.isna(category) or category.lower() == "catégorie":
+                if not category or category in ("nan", "Catégorie") or str(category).startswith("ANALYSE"):
                     continue
-                
-                # ✅ IMPORTANT: Dans l'Excel:
-                # - "Catégorie" = nom long (ex: "A. Broad commensals")
-                # - "Groupe" = code court (ex: "A1")
-                # On inverse pour correspondre au format attendu
-                group_code = groupe  # "A1"
-                group_name = category  # "A. Broad commensals"
+                try:
+                    if pd.isna(category):
+                        continue
+                except Exception:
+                    pass
+
+                group_code = groupe    # ex: "MUCO", "REG", "IDX"
+                group_name = category  # ex: "Muconutritif", "Régulateur"
                 
                 if group_code not in categories_map:
                     categories_map[group_code] = {
-                        "category": group_code,  # "A1"
-                        "group": group_name,  # "A. Broad commensals"
+                        "category": group_code,
+                        "group": group_name,
                         "bacteria_count": 0,
                         "normal_count": 0,
                         "abnormal_count": 0,
-                        "bacteria": []
                     }
                 
                 cat_info = categories_map[group_code]
                 cat_info["bacteria_count"] += 1
                 
-                try:
-                    position = int(position)
-                except:
-                    position = 0
-                
-                if position == 0:
-                    cat_info["normal_count"] += 1
-                else:
-                    cat_info["abnormal_count"] += 1
-                
-                abundance_level = position
-                
-                if abundance_level <= -2:
-                    status = "Strongly Reduced"
-                elif abundance_level == -1:
-                    status = "Reduced"
-                elif abundance_level == 0:
+                # Déduire statut depuis la colonne Statut texte
+                statut_lower = statut.strip().lower()
+                if statut_lower in ("normal", "info"):
                     status = "Normal"
-                elif abundance_level == 1:
-                    status = "Slightly Elevated"
-                elif abundance_level == 2:
+                    cat_info["normal_count"] += 1
+                elif statut_lower in ("élevé", "eleve", "elevated", "high"):
                     status = "Elevated"
+                    cat_info["abnormal_count"] += 1
+                elif statut_lower in ("bas", "low", "reduced"):
+                    status = "Reduced"
+                    cat_info["abnormal_count"] += 1
                 else:
-                    status = "Strongly Elevated"
+                    status = "Normal"
+                    cat_info["normal_count"] += 1
+                
+                # Valeur numérique
+                val_float = _safe_float(str(valeur).replace("<", "").replace(">", "").strip()) if valeur is not None else None
                 
                 result["bacteria_individual"].append({
-                    "id": no,
+                    "id": groupe,
                     "name": bacterie,
-                    "category": group_code,  # "A1" au lieu de "A. Broad commensals"
-                    "group": group_name,  # "A. Broad commensals"
-                    "abundance_level": abundance_level,
-                    "status": status
+                    "category": group_code,
+                    "group": group_name,
+                    "value": val_float,
+                    "reference": _clean_ref(ref),
+                    "abundance_level": 1 if status == "Elevated" else (-1 if status == "Reduced" else 0),
+                    "status": status,
+                    "interpretation": interp
                 })
             
             # Générer bacteria_groups à partir des catégories
             for cat_code, cat_info in categories_map.items():
-                if cat_info["abnormal_count"] == 0:
+                abnormal = cat_info["abnormal_count"]
+                total = cat_info["bacteria_count"]
+                if abnormal == 0:
                     group_result = "Expected"
-                elif cat_info["abnormal_count"] <= cat_info["bacteria_count"] * 0.3:
+                elif abnormal <= total * 0.3:
                     group_result = "Slightly Deviating"
                 else:
                     group_result = "Deviating"
