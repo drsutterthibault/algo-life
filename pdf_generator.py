@@ -298,7 +298,9 @@ def _kv_table(rows, col_w=(9*cm, 8*cm), header=None, header_color=None):
 
 def _status_colors(status):
     """Retourne (label, text_color, bg_color) selon statut."""
-    s = str(status).upper()
+    import unicodedata
+    # Normalisation Unicode : É -> E, È -> E, etc. pour que ÉLEVÉ → ELEVE
+    s = unicodedata.normalize('NFD', str(status)).encode('ascii', 'ignore').decode('ascii').upper()
     if 'TRES' in s and any(x in s for x in ('ELEV', 'HIGH')):
         return 'TRES ELEVE', C['red'],   C['red_bg']
     if any(x in s for x in ('ELEV', 'HIGH')):
