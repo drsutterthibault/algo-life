@@ -221,7 +221,8 @@ def ai_enrich_recommendations(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from extractors import extract_synlab_biology, extract_idk_microbiome, extract_microbiome_from_excel
+from extractors import (extract_synlab_biology, extract_lims_biology, detect_pdf_lab_format,
+                        extract_idk_microbiome, extract_microbiome_from_excel)
 from rules_engine import RulesEngine
 
 try:
@@ -1379,7 +1380,11 @@ with tab1:
                     
                     if bio_pdf:
                         bio_path = _file_to_temp_path(bio_pdf, ".pdf")
-                        biology_dict = extract_synlab_biology(bio_path)
+                        lab_format = detect_pdf_lab_format(bio_path)
+                        if lab_format == "lims":
+                            biology_dict = extract_lims_biology(bio_path)
+                        else:
+                            biology_dict = extract_synlab_biology(bio_path)
                     
                     if bio_excel:
                         bio_excel_path = _file_to_temp_path(bio_excel, ".xlsx")
