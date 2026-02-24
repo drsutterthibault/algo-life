@@ -693,39 +693,43 @@ st.set_page_config(
 init_session_state()
 
 # ═════════════════════════════════════════════════════════════════════
-# PREMIUM CSS THEME — LIGHT FUTURISTIC MEDICAL
+# PREMIUM CSS THEME — IVORY · SAPPHIRE · PLATINUM
 # ═════════════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Figtree:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap');
 
-/* ── Root variables ── */
+/* ── Root variables — Ivory · Sapphire · Platinum ── */
 :root {
-    --primary: #0ea5e9;
-    --primary-mid: #38bdf8;
-    --primary-light: #e0f2fe;
-    --accent: #6366f1;
-    --accent-light: #eef2ff;
-    --teal: #14b8a6;
-    --success: #10b981;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --bg: #f7f9fc;
-    --bg2: #f0f4f8;
+    --sapphire: #1a56db;
+    --sapphire-mid: #3b6de8;
+    --sapphire-light: #eff3fe;
+    --sapphire-pale: #f5f7ff;
+    --platinum: #5c6a84;
+    --platinum-light: #8494ae;
+    --gold: #c9a84c;
+    --gold-light: #f5edda;
+    --success: #059669;
+    --success-light: #ecfdf5;
+    --warning: #d97706;
+    --warning-light: #fffbeb;
+    --danger: #dc2626;
+    --danger-light: #fef2f2;
+    --bg: #fafbfe;
     --surface: #ffffff;
-    --surface2: #fafbfd;
-    --surface3: #f2f5f9;
-    --border: #e8edf3;
-    --border-mid: #d4dce8;
-    --text: #0b1120;
-    --text-secondary: #4a5568;
-    --text-muted: #8fa0b4;
-    --shadow-xs: 0 1px 3px rgba(14,100,200,0.06);
-    --shadow-sm: 0 2px 12px rgba(14,100,200,0.07), 0 1px 3px rgba(0,0,0,0.04);
-    --shadow-md: 0 8px 28px rgba(14,100,200,0.1), 0 2px 8px rgba(0,0,0,0.05);
-    --shadow-lg: 0 20px 60px rgba(14,100,200,0.12), 0 4px 16px rgba(0,0,0,0.06);
-    --radius: 14px;
-    --radius-sm: 9px;
+    --surface2: #f7f8fc;
+    --surface3: #eef1f8;
+    --border: #e4e9f2;
+    --border-mid: #c8d0e0;
+    --text: #0f1a2e;
+    --text-secondary: #3d4f6b;
+    --text-muted: #7a8fa8;
+    --shadow-xs: 0 1px 2px rgba(26,86,219,0.04), 0 1px 4px rgba(0,0,0,0.04);
+    --shadow-sm: 0 2px 8px rgba(26,86,219,0.06), 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-md: 0 8px 24px rgba(26,86,219,0.09), 0 2px 8px rgba(0,0,0,0.06);
+    --shadow-lg: 0 20px 48px rgba(26,86,219,0.11), 0 4px 14px rgba(0,0,0,0.07);
+    --radius: 16px;
+    --radius-sm: 10px;
     --radius-xs: 6px;
 }
 
@@ -733,36 +737,35 @@ st.markdown("""
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body, [class*="css"] {
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
+    font-family: 'DM Sans', system-ui, sans-serif !important;
     color: var(--text) !important;
 }
 
-/* ── App background — très légère texture azurée ── */
+/* ── App background — ivoire perlé avec nuance saphir ── */
 .stApp {
     background: var(--bg) !important;
     background-image:
-        radial-gradient(ellipse 90% 60% at 15% -5%, rgba(56,189,248,0.07) 0%, transparent 55%),
-        radial-gradient(ellipse 70% 50% at 88% 105%, rgba(99,102,241,0.05) 0%, transparent 55%),
-        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(20,184,166,0.03) 0%, transparent 60%) !important;
+        radial-gradient(ellipse 100% 55% at 0% 0%, rgba(26,86,219,0.045) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 100% 100%, rgba(201,168,76,0.03) 0%, transparent 55%) !important;
     background-attachment: fixed !important;
     min-height: 100vh;
 }
 
-/* ── Hide streamlit default chrome ── */
+/* ── Hide streamlit chrome ── */
 #MainMenu, footer, header { visibility: hidden !important; }
 [data-testid="stToolbar"] { display: none !important; }
 
 /* ── Main container ── */
 .main .block-container {
     background: transparent !important;
-    padding: 0 2.5rem 4rem 2.5rem !important;
+    padding: 0 2.5rem 5rem 2.5rem !important;
     max-width: 1440px !important;
 }
 
 /* ── Headings ── */
 h1, h2, h3, h4 {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
-    letter-spacing: -0.025em !important;
+    font-family: 'Bricolage Grotesque', sans-serif !important;
+    letter-spacing: -0.02em !important;
     color: var(--text) !important;
 }
 
@@ -770,10 +773,10 @@ h1, h2, h3, h4 {
 hr {
     border: none !important;
     border-top: 1px solid var(--border) !important;
-    margin: 1.5rem 0 !important;
+    margin: 2rem 0 !important;
 }
 
-/* ═══ TABS ═══ */
+/* ═══ TABS — ligne saphir sous l'actif ═══ */
 .stTabs [data-baseweb="tab-list"] {
     background: var(--surface) !important;
     border-radius: var(--radius) !important;
@@ -787,57 +790,56 @@ hr {
     background: transparent !important;
     border-radius: var(--radius-sm) !important;
     color: var(--text-muted) !important;
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'DM Sans', sans-serif !important;
     font-weight: 500 !important;
-    font-size: 13px !important;
-    padding: 9px 18px !important;
+    font-size: 13.5px !important;
+    padding: 9px 20px !important;
     transition: all 0.18s ease !important;
     border: none !important;
-    letter-spacing: 0.005em !important;
 }
 
 .stTabs [data-baseweb="tab"]:hover {
     color: var(--text-secondary) !important;
-    background: var(--surface3) !important;
+    background: var(--sapphire-pale) !important;
 }
 
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%) !important;
-    color: white !important;
-    box-shadow: 0 4px 14px rgba(14,165,233,0.28) !important;
-    font-weight: 600 !important;
+    background: var(--sapphire-light) !important;
+    color: var(--sapphire) !important;
+    box-shadow: none !important;
+    font-weight: 700 !important;
+    position: relative !important;
 }
 
 .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
-
 .stTabs [data-baseweb="tab-panel"] {
     background: transparent !important;
-    padding-top: 1.5rem !important;
+    padding-top: 1.75rem !important;
 }
 
 /* ═══ BUTTONS ═══ */
 .stButton > button {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'DM Sans', sans-serif !important;
     font-weight: 600 !important;
     font-size: 13.5px !important;
     border-radius: var(--radius-sm) !important;
     transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    letter-spacing: 0.01em !important;
+    letter-spacing: 0.015em !important;
     cursor: pointer !important;
 }
 
 .stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%) !important;
+    background: var(--sapphire) !important;
     color: white !important;
     border: none !important;
-    box-shadow: 0 4px 16px rgba(14,165,233,0.3) !important;
-    padding: 10px 20px !important;
+    box-shadow: 0 4px 14px rgba(26,86,219,0.28) !important;
+    padding: 10px 22px !important;
 }
 
 .stButton > button[kind="primary"]:hover {
-    box-shadow: 0 8px 24px rgba(14,165,233,0.4) !important;
+    background: var(--sapphire-mid) !important;
+    box-shadow: 0 8px 22px rgba(26,86,219,0.36) !important;
     transform: translateY(-1px) !important;
-    filter: brightness(1.05) !important;
 }
 
 .stButton > button[kind="secondary"] {
@@ -848,9 +850,9 @@ hr {
 }
 
 .stButton > button[kind="secondary"]:hover {
-    background: var(--surface3) !important;
-    color: var(--text) !important;
-    border-color: var(--primary-mid) !important;
+    background: var(--sapphire-pale) !important;
+    color: var(--sapphire) !important;
+    border-color: rgba(26,86,219,0.3) !important;
     transform: translateY(-1px) !important;
 }
 
@@ -863,7 +865,7 @@ hr {
     background: var(--surface) !important;
     border: 1.5px solid var(--border) !important;
     border-radius: var(--radius-sm) !important;
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'DM Sans', sans-serif !important;
     font-size: 14px !important;
     color: var(--text) !important;
     transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
@@ -874,26 +876,26 @@ hr {
 .stNumberInput > div > div > input:focus,
 .stTextArea > div > div > textarea:focus,
 .stTextInput > div > div > input:focus {
-    border-color: var(--primary-mid) !important;
-    box-shadow: 0 0 0 3px rgba(56,189,248,0.12) !important;
+    border-color: var(--sapphire-mid) !important;
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.1) !important;
     outline: none !important;
 }
 
 /* ── Labels ── */
 .stSelectbox label, .stDateInput label, .stNumberInput label,
 .stTextArea label, .stTextInput label, .stMultiSelect label {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'DM Sans', sans-serif !important;
     font-weight: 600 !important;
     font-size: 11px !important;
     color: var(--text-muted) !important;
-    letter-spacing: 0.09em !important;
+    letter-spacing: 0.08em !important;
     text-transform: uppercase !important;
     margin-bottom: 4px !important;
 }
 
-/* ── Number input +/- buttons ── */
+/* ── Number input +/- ── */
 .stNumberInput button {
-    background: var(--surface3) !important;
+    background: var(--surface2) !important;
     border: 1px solid var(--border) !important;
     color: var(--text-secondary) !important;
     border-radius: var(--radius-xs) !important;
@@ -904,49 +906,48 @@ hr {
     background: var(--surface) !important;
     border: 1px solid var(--border) !important;
     border-radius: var(--radius) !important;
-    padding: 20px 24px !important;
+    padding: 22px 26px !important;
     box-shadow: var(--shadow-sm) !important;
     transition: all 0.22s ease !important;
-    position: relative;
-    overflow: hidden;
+    position: relative !important;
+    overflow: hidden !important;
 }
 
-[data-testid="metric-container"]::after {
+[data-testid="metric-container"]::before {
     content: '';
     position: absolute;
-    top: 0; left: 0;
-    width: 3px; height: 100%;
-    background: linear-gradient(180deg, var(--primary), var(--accent));
-    border-radius: 0 0 0 var(--radius);
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--sapphire), var(--gold));
     opacity: 0;
     transition: opacity 0.22s ease;
 }
 
-[data-testid="metric-container"]:hover::after { opacity: 1; }
+[data-testid="metric-container"]:hover::before { opacity: 1; }
 [data-testid="metric-container"]:hover {
     box-shadow: var(--shadow-md) !important;
     transform: translateY(-2px) !important;
-    border-color: var(--border-mid) !important;
+    border-color: rgba(26,86,219,0.15) !important;
 }
 
 [data-testid="metric-container"] [data-testid="stMetricLabel"] {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
-    font-size: 10px !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 10.5px !important;
     font-weight: 700 !important;
     color: var(--text-muted) !important;
     text-transform: uppercase !important;
-    letter-spacing: 0.1em !important;
+    letter-spacing: 0.09em !important;
 }
 
 [data-testid="metric-container"] [data-testid="stMetricValue"] {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
-    font-size: 28px !important;
+    font-family: 'Bricolage Grotesque', sans-serif !important;
+    font-size: 30px !important;
     font-weight: 700 !important;
     color: var(--text) !important;
     letter-spacing: -0.03em !important;
 }
 
-/* ═══ DATAFRAMES / TABLES ═══ */
+/* ═══ DATAFRAMES ═══ */
 .stDataFrame {
     border-radius: var(--radius) !important;
     overflow: hidden !important;
@@ -963,17 +964,17 @@ hr {
 }
 
 .stFileUploader > div:hover {
-    border-color: var(--primary-mid) !important;
-    background: rgba(56,189,248,0.03) !important;
-    box-shadow: 0 0 0 3px rgba(56,189,248,0.07) !important;
+    border-color: var(--sapphire-mid) !important;
+    background: var(--sapphire-pale) !important;
+    box-shadow: 0 0 0 3px rgba(26,86,219,0.08) !important;
 }
 
 /* ═══ MULTISELECT ═══ */
 .stMultiSelect [data-baseweb="tag"] {
-    background: var(--primary-light) !important;
-    border: 1px solid rgba(14,165,233,0.2) !important;
+    background: var(--sapphire-light) !important;
+    border: 1px solid rgba(26,86,219,0.2) !important;
     border-radius: var(--radius-xs) !important;
-    color: var(--primary) !important;
+    color: var(--sapphire) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
 }
@@ -982,7 +983,7 @@ hr {
 .streamlit-expanderHeader {
     background: var(--surface) !important;
     border-radius: var(--radius-sm) !important;
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'DM Sans', sans-serif !important;
     font-weight: 500 !important;
     border: 1px solid var(--border) !important;
     color: var(--text-secondary) !important;
@@ -995,139 +996,124 @@ hr {
     border-radius: 0 0 var(--radius-sm) var(--radius-sm) !important;
 }
 
-/* ═══ SUCCESS / ERROR / WARNING ═══ */
+/* ═══ ALERTS ═══ */
 .stSuccess {
-    background: #f0fdf9 !important;
-    border: 1px solid rgba(16,185,129,0.25) !important;
+    background: var(--success-light) !important;
+    border: 1px solid rgba(5,150,105,0.2) !important;
     border-radius: var(--radius-sm) !important;
-    color: #047857 !important;
+    color: #065f46 !important;
 }
 
 .stError {
-    background: #fff5f5 !important;
-    border: 1px solid rgba(239,68,68,0.2) !important;
+    background: var(--danger-light) !important;
+    border: 1px solid rgba(220,38,38,0.2) !important;
     border-radius: var(--radius-sm) !important;
 }
 
 .stWarning {
-    background: #fffbf0 !important;
-    border: 1px solid rgba(245,158,11,0.25) !important;
+    background: var(--warning-light) !important;
+    border: 1px solid rgba(217,119,6,0.2) !important;
     border-radius: var(--radius-sm) !important;
 }
 
 .stInfo {
-    background: #f0f9ff !important;
-    border: 1px solid rgba(14,165,233,0.2) !important;
+    background: var(--sapphire-pale) !important;
+    border: 1px solid rgba(26,86,219,0.15) !important;
     border-radius: var(--radius-sm) !important;
-    color: #0369a1 !important;
+    color: var(--sapphire) !important;
 }
 
-/* ═══ CAPTION / SMALL TEXT ═══ */
-.stCaption, .caption {
-    font-size: 12px !important;
-    color: var(--text-muted) !important;
-}
+/* ═══ MISC ═══ */
+.stCaption, .caption { font-size: 12px !important; color: var(--text-muted) !important; }
+.stSpinner > div { border-top-color: var(--sapphire) !important; }
 
-/* ═══ SPINNER ═══ */
-.stSpinner > div {
-    border-top-color: var(--primary) !important;
-}
-
-/* ═══ SCROLLBAR ═══ */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d0dae6; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #a8b8cc; }
+::-webkit-scrollbar-thumb { background: #c8d0e0; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a0b0c8; }
 
-/* ═══ SECTION CARDS ═══ */
+/* ═══ CARDS ═══ */
 .algo-card {
     background: var(--surface) !important;
     border-radius: var(--radius) !important;
     border: 1px solid var(--border) !important;
-    padding: 24px 28px !important;
+    padding: 26px 30px !important;
     box-shadow: var(--shadow-sm) !important;
     margin-bottom: 16px !important;
 }
 
 .algo-section-header {
     background: var(--surface);
-    padding: 16px 22px;
+    padding: 18px 24px;
     border-radius: var(--radius);
-    border-left: 3px solid var(--primary);
-    margin-bottom: 20px;
+    border-left: 3px solid var(--sapphire);
+    margin-bottom: 22px;
     box-shadow: var(--shadow-xs);
     border: 1px solid var(--border);
 }
 
-/* ═══ HEADER GLASSMORPHISM ═══ */
 .algo-header-glass {
-    background: rgba(255,255,255,0.9);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--border);
-    border-radius: 0 0 16px 16px;
     padding: 14px 28px;
     box-shadow: var(--shadow-sm);
-    margin-bottom: 8px;
 }
 
-/* ═══ IMPORT ZONE cards ═══ */
+/* ═══ IMPORT CARDS ═══ */
 .import-card-success {
-    background: linear-gradient(135deg, #f0fdf9 0%, #e6fbf4 100%);
-    border: 1px solid rgba(16,185,129,0.2);
+    background: var(--success-light);
+    border: 1px solid rgba(5,150,105,0.2);
     border-radius: var(--radius);
-    padding: 28px 20px;
+    padding: 30px 22px;
     text-align: center;
     box-shadow: var(--shadow-sm);
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-
-.import-card-success:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
+.import-card-success:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 
 .import-card-micro {
-    background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
-    border: 1px solid rgba(99,102,241,0.2);
+    background: var(--sapphire-pale);
+    border: 1px solid rgba(26,86,219,0.15);
     border-radius: var(--radius);
-    padding: 28px 20px;
+    padding: 30px 22px;
     text-align: center;
     box-shadow: var(--shadow-sm);
 }
 
 .import-card-disabled {
-    background: var(--surface3);
+    background: var(--surface2);
     border: 1px dashed var(--border-mid);
     border-radius: var(--radius);
-    padding: 28px 20px;
+    padding: 30px 22px;
     text-align: center;
     opacity: 0.5;
 }
 
 /* ═══ GUIDE CARDS ═══ */
 .guide-card-blue {
-    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    background: var(--sapphire-pale);
     padding: 20px;
     border-radius: var(--radius);
-    border-left: 3px solid var(--primary);
-    border: 1px solid rgba(14,165,233,0.15);
+    border: 1px solid rgba(26,86,219,0.12);
+    border-left: 3px solid var(--sapphire);
 }
 
 .guide-card-amber {
-    background: linear-gradient(135deg, #fffbf0 0%, #fef3c7 100%);
+    background: var(--warning-light);
     padding: 20px;
     border-radius: var(--radius);
+    border: 1px solid rgba(217,119,6,0.15);
     border-left: 3px solid var(--warning);
-    border: 1px solid rgba(245,158,11,0.18);
 }
 
 .guide-card-green {
-    background: linear-gradient(135deg, #f0fdf9 0%, #dcfce7 100%);
+    background: var(--success-light);
     padding: 20px;
     border-radius: var(--radius);
+    border: 1px solid rgba(5,150,105,0.15);
     border-left: 3px solid var(--success);
-    border: 1px solid rgba(16,185,129,0.18);
 }
 
 /* ═══ DOSSIER BADGE ═══ */
@@ -1140,64 +1126,69 @@ hr {
     box-shadow: var(--shadow-xs);
 }
 
-/* ═══ LOGO BADGE ═══ */
+/* ═══ LOGO ZONE ═══ */
 .logo-icon {
-    width: 54px;
-    height: 54px;
+    width: 58px; height: 58px;
     background: transparent;
-    border-radius: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: none;
-    font-size: 0;
-    flex-shrink: 0;
-    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; position: relative;
 }
 
-/* ═══ DNA FUTURISTIC ANIMATION ═══ */
-@keyframes dna-pulse {
-    0%, 100% { filter: drop-shadow(0 0 4px rgba(14,165,233,0.5)) drop-shadow(0 0 10px rgba(99,102,241,0.3)); }
-    50% { filter: drop-shadow(0 0 8px rgba(14,165,233,0.8)) drop-shadow(0 0 20px rgba(99,102,241,0.5)); }
-}
-
+/* ═══ DNA ANIMATIONS ═══ */
 @keyframes dna-float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-3px); }
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    33% { transform: translateY(-2.5px) rotate(0.5deg); }
+    66% { transform: translateY(-1px) rotate(-0.3deg); }
 }
 
-@keyframes bridge-scan {
-    0% { opacity: 0.3; }
-    50% { opacity: 0.9; }
-    100% { opacity: 0.3; }
+@keyframes dna-glow-pulse {
+    0%, 100% {
+        filter: drop-shadow(0 0 3px rgba(26,86,219,0.35))
+                drop-shadow(0 0 8px rgba(26,86,219,0.15));
+    }
+    50% {
+        filter: drop-shadow(0 0 6px rgba(26,86,219,0.55))
+                drop-shadow(0 0 16px rgba(26,86,219,0.25))
+                drop-shadow(0 0 2px rgba(201,168,76,0.2));
+    }
+}
+
+@keyframes bridge-wave {
+    0%, 100% { opacity: 0.25; stroke-width: 1.4; }
+    50% { opacity: 1; stroke-width: 1.8; }
+}
+
+@keyframes dot-pulse {
+    0%, 100% { r: 2.2; opacity: 0.6; }
+    50% { r: 3; opacity: 1; }
 }
 
 .logo-dna-svg {
-    animation: dna-float 4s ease-in-out infinite, dna-pulse 3s ease-in-out infinite;
+    animation: dna-float 5s ease-in-out infinite, dna-glow-pulse 3.5s ease-in-out infinite;
 }
 
-.logo-dna-svg .bridge { animation: bridge-scan 2s ease-in-out infinite; }
-.logo-dna-svg .bridge:nth-child(3) { animation-delay: 0.4s; }
-.logo-dna-svg .bridge:nth-child(4) { animation-delay: 0.8s; }
-.logo-dna-svg .bridge:nth-child(5) { animation-delay: 1.2s; }
-.logo-dna-svg .bridge:nth-child(6) { animation-delay: 1.6s; }
-.logo-dna-svg .bridge:nth-child(7) { animation-delay: 2.0s; }
+.logo-dna-svg .bridge-1 { animation: bridge-wave 2.2s ease-in-out infinite; animation-delay: 0s; }
+.logo-dna-svg .bridge-2 { animation: bridge-wave 2.2s ease-in-out infinite; animation-delay: 0.44s; }
+.logo-dna-svg .bridge-3 { animation: bridge-wave 2.2s ease-in-out infinite; animation-delay: 0.88s; }
+.logo-dna-svg .bridge-4 { animation: bridge-wave 2.2s ease-in-out infinite; animation-delay: 1.32s; }
+.logo-dna-svg .bridge-5 { animation: bridge-wave 2.2s ease-in-out infinite; animation-delay: 1.76s; }
 
-/* ═══ LANCER BUTTON SPECIAL ═══ */
+/* ═══ BUTTON SPECIAL ═══ */
 .stButton > button[data-testid="stBaseButton-primary"] {
     font-size: 14px !important;
     padding: 12px 24px !important;
     letter-spacing: 0.02em !important;
 }
 
-/* ═══ MARKDOWN TEXT ═══ */
+/* ═══ MARKDOWN ═══ */
 [data-testid="stMarkdownContainer"] p {
     color: var(--text-secondary);
-    line-height: 1.7;
+    line-height: 1.75;
     font-size: 14px;
 }
 
 [data-testid="stMarkdownContainer"] h3 {
+    font-family: 'Bricolage Grotesque', sans-serif !important;
     font-size: 15px !important;
     font-weight: 700 !important;
     color: var(--text) !important;
@@ -1208,9 +1199,9 @@ hr {
 }
 
 code {
-    background: var(--surface3) !important;
-    border: 1px solid var(--border) !important;
-    color: var(--primary) !important;
+    background: var(--sapphire-pale) !important;
+    border: 1px solid rgba(26,86,219,0.12) !important;
+    color: var(--sapphire) !important;
     border-radius: 4px !important;
     font-size: 12px !important;
 }
@@ -1225,58 +1216,62 @@ col_header1, col_header2, col_header3 = st.columns([2, 6, 2])
 
 with col_header1:
     st.markdown("""
-        <div style="display: flex; align-items: center; gap: 14px; padding: 18px 0;">
+        <div style="display: flex; align-items: center; gap: 16px; padding: 16px 0;">
             <div class="logo-icon">
-                <svg class="logo-dna-svg" width="50" height="54" viewBox="0 0 50 54" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg class="logo-dna-svg" width="52" height="56" viewBox="0 0 52 56" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <defs>
-                    <linearGradient id="dna-s1" x1="0" y1="0" x2="0" y2="54" gradientUnits="userSpaceOnUse">
-                      <stop offset="0%" stop-color="#0ea5e9"/>
-                      <stop offset="50%" stop-color="#6366f1"/>
-                      <stop offset="100%" stop-color="#14b8a6"/>
+                    <linearGradient id="s1" x1="26" y1="2" x2="26" y2="54" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stop-color="#1a56db"/>
+                      <stop offset="55%" stop-color="#3b6de8"/>
+                      <stop offset="100%" stop-color="#c9a84c"/>
                     </linearGradient>
-                    <linearGradient id="dna-s2" x1="0" y1="0" x2="0" y2="54" gradientUnits="userSpaceOnUse">
-                      <stop offset="0%" stop-color="#14b8a6"/>
-                      <stop offset="50%" stop-color="#0ea5e9"/>
-                      <stop offset="100%" stop-color="#6366f1"/>
+                    <linearGradient id="s2" x1="26" y1="2" x2="26" y2="54" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stop-color="#c9a84c"/>
+                      <stop offset="45%" stop-color="#3b6de8"/>
+                      <stop offset="100%" stop-color="#1a56db"/>
                     </linearGradient>
-                    <linearGradient id="dna-b" x1="0" y1="0" x2="50" y2="0" gradientUnits="userSpaceOnUse">
-                      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.6"/>
-                      <stop offset="50%" stop-color="#6366f1" stop-opacity="0.9"/>
-                      <stop offset="100%" stop-color="#14b8a6" stop-opacity="0.6"/>
+                    <linearGradient id="br" x1="6" y1="28" x2="46" y2="28" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stop-color="#1a56db" stop-opacity="0.4"/>
+                      <stop offset="50%" stop-color="#3b6de8" stop-opacity="0.95"/>
+                      <stop offset="100%" stop-color="#1a56db" stop-opacity="0.4"/>
                     </linearGradient>
-                    <filter id="dna-glow">
-                      <feGaussianBlur stdDeviation="1.5" result="blur"/>
-                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    <filter id="glow-s" x="-30%" y="-10%" width="160%" height="120%">
+                      <feGaussianBlur stdDeviation="2" result="b"/>
+                      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                    <filter id="glow-b" x="-20%" y="-80%" width="140%" height="260%">
+                      <feGaussianBlur stdDeviation="1" result="b"/>
+                      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
                     </filter>
                   </defs>
-                  <!-- Strand 1 -->
-                  <path d="M13 3 C20 3, 30 10, 37 17 C44 24, 44 32, 37 39 C30 46, 20 51, 13 51"
-                        stroke="url(#dna-s1)" stroke-width="2.8" stroke-linecap="round" fill="none"
-                        filter="url(#dna-glow)"/>
-                  <!-- Strand 2 -->
-                  <path d="M37 3 C30 3, 20 10, 13 17 C6 24, 6 32, 13 39 C20 46, 30 51, 37 51"
-                        stroke="url(#dna-s2)" stroke-width="2.8" stroke-linecap="round" fill="none"
-                        filter="url(#dna-glow)"/>
-                  <!-- Bridges -->
-                  <line class="bridge" x1="15" y1="12" x2="35" y2="12" stroke="url(#dna-b)" stroke-width="1.6" stroke-linecap="round"/>
-                  <line class="bridge" x1="11.5" y1="20" x2="38.5" y2="20" stroke="url(#dna-b)" stroke-width="1.6" stroke-linecap="round"/>
-                  <line class="bridge" x1="13" y1="28" x2="37" y2="28" stroke="url(#dna-b)" stroke-width="1.6" stroke-linecap="round"/>
-                  <line class="bridge" x1="11.5" y1="36" x2="38.5" y2="36" stroke="url(#dna-b)" stroke-width="1.6" stroke-linecap="round"/>
-                  <line class="bridge" x1="15" y1="44" x2="35" y2="44" stroke="url(#dna-b)" stroke-width="1.6" stroke-linecap="round"/>
-                  <!-- Node dots -->
-                  <circle cx="25" cy="3" r="2.2" fill="#0ea5e9" opacity="0.7"/>
-                  <circle cx="25" cy="51" r="2.2" fill="#14b8a6" opacity="0.7"/>
+                  <!-- Strand A -->
+                  <path d="M14 3 C22 3,32 11,38 18 C44 25,44 31,38 38 C32 45,22 53,14 53"
+                    stroke="url(#s1)" stroke-width="3" stroke-linecap="round" fill="none" filter="url(#glow-s)"/>
+                  <!-- Strand B -->
+                  <path d="M38 3 C30 3,20 11,14 18 C8 25,8 31,14 38 C20 45,30 53,38 53"
+                    stroke="url(#s2)" stroke-width="3" stroke-linecap="round" fill="none" filter="url(#glow-s)"/>
+                  <!-- Bridges — each with unique class for staggered animation -->
+                  <line class="bridge-1" x1="16" y1="12" x2="36" y2="12" stroke="url(#br)" stroke-width="1.5" stroke-linecap="round" filter="url(#glow-b)"/>
+                  <line class="bridge-2" x1="11.5" y1="21" x2="40.5" y2="21" stroke="url(#br)" stroke-width="1.5" stroke-linecap="round" filter="url(#glow-b)"/>
+                  <line class="bridge-3" x1="13" y1="29" x2="39" y2="29" stroke="url(#br)" stroke-width="1.5" stroke-linecap="round" filter="url(#glow-b)"/>
+                  <line class="bridge-4" x1="11.5" y1="37" x2="40.5" y2="37" stroke="url(#br)" stroke-width="1.5" stroke-linecap="round" filter="url(#glow-b)"/>
+                  <line class="bridge-5" x1="16" y1="46" x2="36" y2="46" stroke="url(#br)" stroke-width="1.5" stroke-linecap="round" filter="url(#glow-b)"/>
+                  <!-- Terminal dots -->
+                  <circle cx="26" cy="3" r="2.5" fill="#1a56db" opacity="0.75"/>
+                  <circle cx="26" cy="53" r="2.5" fill="#c9a84c" opacity="0.75"/>
                 </svg>
             </div>
             <div>
-                <h2 style="margin: 0; color: #0b1120; font-size: 20px; font-weight: 800; letter-spacing: 0.06em;
-                           font-family: 'Plus Jakarta Sans', sans-serif; text-transform: uppercase;
-                           background: linear-gradient(135deg, #0ea5e9, #6366f1); -webkit-background-clip: text;
-                           -webkit-text-fill-color: transparent; background-clip: text;">
-                    ALGO-LIFE
-                </h2>
-                <p style="margin: 0; color: #8fa0b4; font-size: 9px; letter-spacing: 0.2em; font-weight: 600;
-                           text-transform: uppercase; font-family: 'Plus Jakarta Sans', sans-serif;">
+                <div style="display: flex; align-items: baseline; gap: 6px;">
+                    <h2 style="margin: 0; font-size: 21px; font-weight: 800; letter-spacing: 0.05em;
+                               font-family: 'Bricolage Grotesque', sans-serif; text-transform: uppercase;
+                               background: linear-gradient(125deg, #1a56db 0%, #3b6de8 60%, #c9a84c 100%);
+                               -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                        ALGO-LIFE
+                    </h2>
+                </div>
+                <p style="margin: 2px 0 0 0; color: #7a8fa8; font-size: 8.5px; letter-spacing: 0.22em;
+                           font-weight: 600; text-transform: uppercase; font-family: 'DM Sans', sans-serif;">
                     PLATEFORME MÉDECIN
                 </p>
             </div>
@@ -1286,15 +1281,15 @@ with col_header1:
 with col_header2:
     st.markdown("""
         <div style="display: flex; align-items: center; justify-content: center; height: 72px; gap: 12px;">
-            <h1 style="color: #0b1120; margin: 0; font-size: 22px; font-weight: 700;
-                       font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: -0.02em;">
+            <h1 style="color: #0f1a2e; margin: 0; font-size: 21px; font-weight: 700;
+                       font-family: 'Bricolage Grotesque', sans-serif; letter-spacing: -0.02em;">
                 Nouvelle Analyse
             </h1>
-            <span style="background: linear-gradient(135deg, rgba(14,165,233,0.1), rgba(99,102,241,0.12));
-                         color: #0ea5e9; padding: 3px 10px; border-radius: 5px;
-                         font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
-                         border: 1px solid rgba(14,165,233,0.22);
-                         font-family: 'Plus Jakarta Sans', sans-serif; text-transform: uppercase;">
+            <span style="background: linear-gradient(125deg, #eff3fe, #f5f7ff);
+                         color: #1a56db; padding: 4px 11px; border-radius: 6px;
+                         font-size: 9px; font-weight: 700; letter-spacing: 0.15em;
+                         border: 1px solid rgba(26,86,219,0.18);
+                         font-family: 'DM Sans', sans-serif; text-transform: uppercase;">
                 BETA v1.0
             </span>
         </div>
@@ -1311,21 +1306,21 @@ with col_header3:
             st.rerun()
     with col_btn2:
         st.markdown("""
-            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 8px;">
-                <div style="width: 34px; height: 34px;
-                            background: linear-gradient(135deg, #e0f2fe, #ede9fe);
-                            border: 1.5px solid rgba(14,165,233,0.2);
+            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 11px; padding: 8px 0;">
+                <div style="width: 36px; height: 36px;
+                            background: linear-gradient(135deg, #eff3fe 0%, #f5f0e8 100%);
+                            border: 1.5px solid rgba(26,86,219,0.18);
                             border-radius: 50%; display: flex; align-items: center; justify-content: center;
-                            color: #0ea5e9; font-weight: 700; font-size: 13px;
-                            font-family: 'Plus Jakarta Sans', sans-serif;
-                            box-shadow: 0 2px 8px rgba(14,165,233,0.15);">
+                            color: #1a56db; font-weight: 700; font-size: 13px;
+                            font-family: 'DM Sans', sans-serif;
+                            box-shadow: 0 2px 8px rgba(26,86,219,0.12);">
                     T
                 </div>
                 <div>
-                    <p style="margin: 0; color: #0b1120; font-weight: 600; font-size: 13px;
-                               font-family: 'Plus Jakarta Sans', sans-serif;">Thibault SUTTER</p>
-                    <p style="margin: 0; color: #8fa0b4; font-size: 10px; letter-spacing: 0.05em;
-                               font-family: 'Plus Jakarta Sans', sans-serif;">Dr. PhD Biologie</p>
+                    <p style="margin: 0; color: #0f1a2e; font-weight: 600; font-size: 13px;
+                               font-family: 'DM Sans', sans-serif; letter-spacing: -0.01em;">Thibault SUTTER</p>
+                    <p style="margin: 1px 0 0 0; color: #7a8fa8; font-size: 10px; letter-spacing: 0.04em;
+                               font-family: 'DM Sans', sans-serif;">Dr. PhD Biologie</p>
                 </div>
             </div>
         """, unsafe_allow_html=True)
@@ -2459,12 +2454,12 @@ with tab5:
 # FOOTER
 # ═════════════════════════════════════════════════════════════════════
 st.markdown("""
-    <div style="text-align: center; padding: 40px 0 20px 0; border-top: 1px solid #e8edf3; margin-top: 20px;">
-        <p style="margin: 0; color: #c5d0dc; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-                   font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 600;">
+    <div style="text-align: center; padding: 44px 0 24px 0; border-top: 1px solid #e4e9f2; margin-top: 24px;">
+        <p style="margin: 0; color: #b8c5d4; font-size: 11px; letter-spacing: 0.13em; text-transform: uppercase;
+                   font-family: 'DM Sans', sans-serif; font-weight: 600;">
             ALGO-LIFE &nbsp;·&nbsp; Dr Thibault SUTTER, PhD &nbsp;·&nbsp; © 2026
         </p>
-        <p style="margin: 6px 0 0 0; color: #d0dae5; font-size: 10px; font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: 0.03em;">
+        <p style="margin: 6px 0 0 0; color: #ccd5e0; font-size: 10.5px; font-family: 'DM Sans', sans-serif;">
             Plateforme d'analyse multimodale — Ne remplace pas un avis médical
         </p>
     </div>
