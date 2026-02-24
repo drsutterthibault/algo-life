@@ -963,83 +963,64 @@ code { background: var(--blue-soft) !important; border: 1px solid rgba(10,132,25
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────
-# HEADER — bande pleine largeur collée en haut
+# HEADER
 # ─────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="
-    background: #ffffff;
-    border-bottom: 1px solid #e5e9ef;
-    padding: 0 40px;
-    height: 60px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    box-shadow: 0 1px 0 #e5e9ef, 0 2px 8px rgba(10,60,120,0.05);
-    margin: -1rem -2.5rem 2rem -2.5rem;
-    position: sticky; top: 0; z-index: 999;
-">
-    <!-- LEFT: Logo -->
-    <div style="display:flex; align-items:center; gap:10px; min-width:200px;">
-        <span class="logo-emoji">🧬</span>
+<div style="background:#ffffff; border-bottom:1px solid #e5e9ef;
+            box-shadow:0 2px 8px rgba(10,60,120,0.05);
+            margin:-1rem -2.5rem 2rem -2.5rem; padding:0 40px; height:60px;
+            display:flex; align-items:center; justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:10px; min-width:220px;">
+        <span style="font-size:28px; line-height:1; display:inline-block;
+                     filter:drop-shadow(0 2px 6px rgba(0,180,216,0.4));">🧬</span>
         <div>
             <div style="font-family:'Manrope',sans-serif; font-size:16px; font-weight:800;
-                        color:#0d1b2e; letter-spacing:-0.01em; line-height:1.15;">ALGO-LIFE</div>
+                        color:#0d1b2e; letter-spacing:-0.01em; line-height:1.2;">ALGO-LIFE</div>
             <div style="font-family:'Inter',sans-serif; font-size:9px; font-weight:600;
-                        color:#7a8fa8; letter-spacing:0.18em; text-transform:uppercase; line-height:1;">PLATEFORME MÉDECIN</div>
+                        color:#7a8fa8; letter-spacing:0.18em; text-transform:uppercase;">PLATEFORME MÉDECIN</div>
         </div>
     </div>
-
-    <!-- CENTER: Title + badge -->
     <div style="display:flex; align-items:center; gap:10px;">
         <span style="font-family:'Manrope',sans-serif; font-size:18px; font-weight:700;
                      color:#0d1b2e; letter-spacing:-0.02em;">Nouvelle Analyse</span>
-        <span style="background: linear-gradient(135deg, #e8f3ff, #e0f7fb);
-                     color:#0a84ff; padding:3px 10px; border-radius:20px;
-                     font-size:10px; font-weight:700; letter-spacing:0.06em;
-                     border:1px solid rgba(10,132,255,0.22); font-family:'Inter',sans-serif;
-                     text-transform:uppercase;">Beta v1.0</span>
+        <span style="background:linear-gradient(135deg,#e8f3ff,#e0f7fb); color:#0a84ff;
+                     padding:3px 10px; border-radius:20px; font-size:10px; font-weight:700;
+                     letter-spacing:0.06em; border:1px solid rgba(10,132,255,0.22);
+                     font-family:'Inter',sans-serif; text-transform:uppercase;">Beta v1.0</span>
     </div>
-
-    <!-- RIGHT: placeholder for button + user (rendered below via st.columns) -->
-    <div style="min-width:200px;"></div>
+    <div style="min-width:220px;"></div>
 </div>
 """, unsafe_allow_html=True)
 
-# Right side controls (button + user) — overlaid using columns trick
-col_header1, col_header2, col_header3 = st.columns([1, 6, 2])
-
-with col_header1:
-    st.markdown("<div style='height:0'></div>", unsafe_allow_html=True)
-
-with col_header2:
-    st.markdown("<div style='height:0'></div>", unsafe_allow_html=True)
-
-with col_header3:
-    col_btn1, col_btn2 = st.columns([3, 2])
-    with col_btn1:
+col_left, col_mid, col_right = st.columns([2, 5, 3])
+with col_left:
+    pass
+with col_mid:
+    pass
+with col_right:
+    col_btn, col_user = st.columns([3, 2])
+    with col_btn:
         if st.button("＋  Nouvelle Analyse", type="primary", use_container_width=True):
             for key in list(st.session_state.keys()):
                 if key != 'patient_info':
                     del st.session_state[key]
             init_session_state()
             st.rerun()
-    with col_btn2:
+    with col_user:
         st.markdown("""
-            <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
-                <div style="width:34px; height:34px;
-                            background:linear-gradient(135deg, #e8f3ff, #e0f7fb);
-                            border:1.5px solid rgba(10,132,255,0.2);
-                            border-radius:50%; display:flex; align-items:center; justify-content:center;
-                            color:#0a84ff; font-weight:700; font-size:13px; font-family:'Inter',sans-serif;
-                            box-shadow:0 2px 6px rgba(10,132,255,0.15);">T</div>
-                <div>
-                    <div style="font-family:'Inter',sans-serif; font-size:12px; font-weight:600;
-                                color:#0d1b2e; letter-spacing:-0.01em; white-space:nowrap;">Thibault SUTTER</div>
-                    <div style="font-family:'Inter',sans-serif; font-size:10px; font-weight:400;
-                                color:#7a8fa8;">Dr. PhD Biologie</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+    <div style="width:34px;height:34px;background:linear-gradient(135deg,#e8f3ff,#e0f7fb);
+                border:1.5px solid rgba(10,132,255,0.2);border-radius:50%;
+                display:flex;align-items:center;justify-content:center;
+                color:#0a84ff;font-weight:700;font-size:13px;font-family:'Inter',sans-serif;
+                box-shadow:0 2px 6px rgba(10,132,255,0.15);">T</div>
+    <div>
+        <div style="font-family:'Inter',sans-serif;font-size:12px;font-weight:600;
+                    color:#0d1b2e;white-space:nowrap;">Thibault SUTTER</div>
+        <div style="font-family:'Inter',sans-serif;font-size:10px;color:#7a8fa8;">Dr. PhD Biologie</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 
